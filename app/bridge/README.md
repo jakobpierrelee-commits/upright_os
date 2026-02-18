@@ -37,6 +37,7 @@ python3 server.py --port /dev/cu.usbserial-2210 --baud 115200 --host 127.0.0.1 -
 - `POST /commissioning/run`
 - `GET /commissioning/status`
 - `GET /commissioning/artifacts`
+- `GET /probe/compat`
 
 ## Websocket
 - `ws://127.0.0.1:8788/telemetry`

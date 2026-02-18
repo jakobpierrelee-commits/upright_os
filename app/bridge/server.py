@@ -322,6 +322,86 @@ def _blocked_while_latched(cmd: str) -> bool:
     return not c.startswith(safe_prefixes)
 
 
+def run_compat_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
+    report: Dict[str, Any] = {
+        "ok": False,
+        "profile": "unknown",
+        "firmware_id": None,
+        "required_fields": ["mode", "ang", "raw", "out", "kp", "ki", "kd", "set"],
+        "missing_fields": [],
+        "supported_commands": [],
+        "missing_commands": [],
+        "warnings": [],
+    }
+
+    # 1) Firmware identity probe (best-effort fallback chain)
+    firmware_id = None
+    for ident_cmd in ("GET_ID", "ID", "WHOAMI"):
+        try:
+            resp = gateway.command(ident_cmd, timeout=1.0)
+            lines = [ln for ln in resp.get("lines", []) if ln]
+            if any("ERR UNKNOWN" in ln for ln in lines):
+                continue
+            if lines:
+                firmware_id = lines[-1]
+                break
+        except Exception:
+            continue
+    report["firmware_id"] = firmware_id
+
+    # 2) Required status schema check
+    status = gateway.get_status()
+    report["status"] = status
+    missing_fields = [f for f in report["required_fields"] if f not in status]
+    report["missing_fields"] = missing_fields
+
+    # 3) Command support probe from HELP output (safe, read-only)
+    help_lines: list[str] = []
+    try:
+        h = gateway.command("HELP", timeout=1.5)
+        help_lines = h.get("lines", [])
+    except Exception as exc:
+        report["warnings"].append(f"help_probe_failed:{exc}")
+
+    help_blob = "\n".join(help_lines).upper()
+    command_expect = [
+        "GET",
+        "ARM",
+        "DISARM",
+        "PID",
+        "MOTION",
+        "SETPOINT",
+        "LIMITS",
+        "CAL ZERO",
+        "SAVECFG",
+    ]
+    supported = []
+    missing = []
+    for c in command_expect:
+        if c in help_blob:
+            supported.append(c)
+        else:
+            missing.append(c)
+
+    report["supported_commands"] = supported
+    report["missing_commands"] = missing
+
+    # 4) Profile guess
+    axis = str(status.get("axis", ""))
+    if axis in {"X", "Y"} and "encmode" in status:
+        report["profile"] = "upright_nano_balance_v2"
+    elif axis in {"X", "Y"}:
+        report["profile"] = "upright_nano_balance_core_like"
+
+    report["ok"] = len(missing_fields) == 0 and len(missing) <= 2
+    if missing_fields:
+        report["warnings"].append("status schema mismatch")
+    if firmware_id is None:
+        report["warnings"].append("no explicit firmware identity command detected")
+
+    return report
+
+
 def build_handler(gateway: NanoSerialGateway, control: BridgeControlState, commissioning: CommissioningManager, telemetry_port: int):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
@@ -355,6 +435,8 @@ def build_handler(gateway: NanoSerialGateway, control: BridgeControlState, commi
                     return _json(self, 200, {"ok": True, "commissioning": commissioning.status()})
                 if u.path == "/commissioning/artifacts":
                     return _json(self, 200, {"ok": True, "artifacts": commissioning.artifacts()})
+                if u.path == "/probe/compat":
+                    return _json(self, 200, {"ok": True, "compat": run_compat_probe(gateway)})
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except Exception as exc:
                 return _json(self, 500, {"ok": False, "error": str(exc)})

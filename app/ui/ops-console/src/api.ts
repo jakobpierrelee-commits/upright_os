@@ -20,6 +20,19 @@ export type CommissioningArtifacts = {
   runs: string[];
 };
 
+
+export type CompatReport = {
+  ok: boolean;
+  profile: string;
+  firmware_id: string | null;
+  required_fields: string[];
+  missing_fields: string[];
+  supported_commands: string[];
+  missing_commands: string[];
+  warnings: string[];
+  status?: Status;
+};
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
@@ -46,6 +59,12 @@ export async function getStatus(): Promise<{ status: Status; control?: ControlSt
 export async function getLines(n = 120): Promise<string[]> {
   const d = await req<{ ok: true; lines: string[] }>(`/lines?n=${n}`);
   return d.lines;
+}
+
+
+export async function probeCompat(): Promise<CompatReport> {
+  const d = await req<{ ok: true; compat: CompatReport }>('/probe/compat');
+  return d.compat;
 }
 
 export async function heartbeat(): Promise<ControlState> {

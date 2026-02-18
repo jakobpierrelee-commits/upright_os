@@ -77,3 +77,4 @@ Authoritative rule set is under `docs/oracle/`:
 - `CONFIG_SCHEMA.md`
 - `RELEASE_RUNBOOK.md`
 - `INCIDENT_PLAYBOOK.md`
+- `CORE_UI_PRINCIPLES.md`
