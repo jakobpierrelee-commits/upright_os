@@ -2,3 +2,10 @@
 __pycache__/
 *.pyc
 tests/results/
+node_modules/
+dist/
+build/
+*.log
+.venv/
+
+*.tsbuildinfo

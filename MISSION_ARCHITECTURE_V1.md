@@ -66,3 +66,14 @@ Required success flags:
 2. Repeat pass rate >= 90% across 10 consecutive sessions.
 3. Ground-contact nudge test recovers without runaway.
 4. App can run full commissioning + parameter save without Arduino IDE.
+
+## Oracle Governance Docs
+Authoritative rule set is under `docs/oracle/`:
+- `PRODUCT_PRINCIPLES.md`
+- `SAFETY_RULEBOOK.md`
+- `CONTROL_STATE_MACHINE.md`
+- `SERIAL_PROTOCOL_SPEC.md`
+- `COMMISSIONING_STANDARD.md`
+- `CONFIG_SCHEMA.md`
+- `RELEASE_RUNBOOK.md`
+- `INCIDENT_PLAYBOOK.md`

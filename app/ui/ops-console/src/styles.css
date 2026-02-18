@@ -1,0 +1,158 @@
+:root {
+  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  color: #0f172a;
+  background: linear-gradient(120deg, #eef2ff 0%, #ecfeff 100%);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.badge.connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge.disconnected,
+.badge.unknown {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+
+.tabs button {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  min-height: 360px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.grid1,
+.grid2,
+.grid3 {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.grid1 { grid-template-columns: 1fr; }
+.grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+input {
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+button {
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.logbox {
+  margin-top: 12px;
+  background: #0b1220;
+  color: #cbd5e1;
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.statusbar {
+  margin-top: 12px;
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: #334155;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .grid3,
+  .grid2 { grid-template-columns: 1fr; }
+}
+
+.checkpoint-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.checkpoint-card {
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 6px;
+}
