@@ -9,3 +9,8 @@ build/
 .venv/
 
 *.tsbuildinfo
+
+# Local editor/runtime state
+.vscode/
+app/bridge/.auth_secret
+app/bridge/upright_auth.db
