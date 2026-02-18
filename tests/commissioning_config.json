@@ -1,0 +1,39 @@
+{
+  "hardware": {
+    "axis": "Y",
+    "swapaxis": true,
+    "imupol": 1,
+    "motorpol": 1,
+    "encmode": "LEFT"
+  },
+  "baseline": {
+    "setpoint": 0.0,
+    "pid": [31.0, 0.05, 1.05],
+    "limits": [180.0, 26.0, 70.0],
+    "motion": [0.0, 0.0]
+  },
+  "burst": {
+    "delay_ms": 0,
+    "lines": 30
+  },
+  "excitation": {
+    "enabled": true,
+    "motor_cmd": 50,
+    "hold_ms": 300,
+    "settle_ms": 120
+  },
+  "thresholds": {
+    "encoder_min_edges": 40,
+    "motor_pulse_min_edges": 10,
+    "mean_abs_angle_deg_max": 1.6,
+    "max_abs_angle_deg_max": 4.0,
+    "burst_drift_counts_max": 180.0
+  },
+  "timeouts": {
+    "burst_total_s": 20,
+    "arm_to_bal_s": 2.0
+  },
+  "fallback_capture": {
+    "seconds": 3.0
+  }
+}
