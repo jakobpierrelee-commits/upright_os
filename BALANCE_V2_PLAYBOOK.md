@@ -8,9 +8,9 @@ Related:
 - `SESSION_FAILURE_LEARNINGS.md` (postmortem + corrective actions)
 
 ## Current Firmware + Tools
-- Firmware: `/Users/jvke/Documents/New project/tumbller_v06_nano_balance_v2/tumbller_v06_nano_balance_v2.ino`
-- Runner: `/Users/jvke/Documents/New project/tools/commissioning_runner.py`
-- Runner config: `/Users/jvke/Documents/New project/tests/commissioning_config.json`
+- Firmware: `/Users/jvke/Documents/UpRight.os/tumbller_v06_nano_balance_v2/tumbller_v06_nano_balance_v2.ino`
+- Runner: `/Users/jvke/Documents/UpRight.os/tools/commissioning_runner.py`
+- Runner config: `/Users/jvke/Documents/UpRight.os/tests/commissioning_config.json`
 
 ## Key Reality Today
 - Motion control currently uses single-encoder fallback mode.
@@ -62,11 +62,11 @@ Expected:
 Run:
 
 ```bash
-cd "/Users/jvke/Documents/New project" && \
+cd "/Users/jvke/Documents/UpRight.os" && \
 python3 tools/commissioning_runner.py \
   --port /dev/cu.usbserial-2210 \
-  --config "/Users/jvke/Documents/New project/tests/commissioning_config.json" \
-  --out-dir "/Users/jvke/Documents/New project/tests/results"
+  --config "/Users/jvke/Documents/UpRight.os/tests/commissioning_config.json" \
+  --out-dir "/Users/jvke/Documents/UpRight.os/tests/results"
 ```
 
 Notes:
