@@ -58,10 +58,11 @@ import { useCodexWorkspace } from './hooks/useCodexWorkspace';
 import { useHudTelemetry, type ImuSample } from './hooks/useHudTelemetry';
 import { strings } from './strings';
 import { ConnectPreflightPage } from './pages/stage1/ConnectPreflightPage';
+import { IterationPlaygroundPage } from './pages/stage2/IterationPlaygroundPage';
 
 const HISTORY_MAX = 180;
 
-type MainTab = 'setup' | 'tune' | 'ide';
+type MainTab = 'setup' | 'tune' | 'ide' | 'playground';
 
 const BAL_BOUNDS = {
   kp: 1.0,
@@ -1198,6 +1199,7 @@ export default function App() {
             <button className={`btn-sm ${activeTab === 'setup' ? 'active' : ''}`} onClick={() => setActiveTab('setup')}>1_SETUP</button>
             <button className={`btn-sm ${activeTab === 'ide' ? 'active' : ''}`} onClick={() => setActiveTab('ide')}>2_IDE</button>
             <button className={`btn-sm ${activeTab === 'tune' ? 'active' : ''}`} onClick={() => setActiveTab('tune')}>3_TUNE</button>
+            <button className={`btn-sm ${activeTab === 'playground' ? 'active' : ''}`} onClick={() => setActiveTab('playground')}>4_PLAYGROUND</button>
           </div>
 
           {activeTab === 'setup' && (
@@ -1641,6 +1643,17 @@ export default function App() {
                 </div>
               </section>
             </div>
+          )}
+
+          {activeTab === 'playground' && (
+            <IterationPlaygroundPage
+              bridgeOnline={bridgeOnline}
+              status={status}
+              control={control}
+              imuHistory={imuHistory}
+              refreshBridge={refreshBridge}
+              setMsg={setMsg}
+            />
           )}
         </section>
       </main>

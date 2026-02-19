@@ -143,6 +143,85 @@ export type BurstStatus = {
   host_capture: HostCaptureStatus;
 };
 
+export type TraceReplayResult = {
+  trace: string;
+  result: {
+    ok: boolean;
+    pass: boolean;
+    error?: string;
+    checks?: Array<{
+      id: string;
+      ok: boolean;
+      value: number;
+      threshold: number;
+    }>;
+    summary?: {
+      sample_count: number;
+      rmse_command: number;
+      max_abs_command_error: number;
+      rmse_pid: number;
+      rmse_motion: number;
+    };
+  };
+  replay?: Record<string, unknown>;
+};
+
+export type ParamSweepResult = {
+  ok: boolean;
+  baseline: {
+    kp: number;
+    ki: number;
+    kd: number;
+  };
+  candidate_count: number;
+  pass_count: number;
+  best_candidate_summary?: string;
+  ranked_top: Array<Record<string, unknown>>;
+  rows: Array<Record<string, unknown>>;
+};
+
+export type SurrogateSimResult = {
+  ok: boolean;
+  model?: {
+    log_count: number;
+    sample_count: number;
+    dt_s: number;
+    confidence: number;
+    distance_from_known: number;
+    warning?: string | null;
+    gain_ranges?: {
+      kp: { min: number; max: number };
+      ki: { min: number; max: number };
+      kd: { min: number; max: number };
+    };
+  };
+  simulation?: {
+    params: {
+      kp: number;
+      ki: number;
+      kd: number;
+      setpoint: number;
+      duration_s: number;
+    };
+    metrics: {
+      rmse: number;
+      overshoot: number;
+      settle_s: number | null;
+      max_out_pct: number;
+      faceplant: boolean;
+    };
+    sample_count: number;
+    samples: Array<{
+      t_s: number;
+      ang: number;
+      gyro: number;
+      out: number;
+      set: number;
+    }>;
+  };
+  error?: string;
+};
+
 export type AiHistoryItem = {
   ts: number;
   role: 'user' | 'assistant';
@@ -628,6 +707,63 @@ export async function burstArm(delayMs = 3000, lines = 80, freqHz = 8): Promise<
     body: JSON.stringify({ delay_ms: delayMs, lines, freq_hz: freqHz }),
   });
   return d.burst;
+}
+
+export async function toolingListTraces(): Promise<string[]> {
+  const d = await req<{ ok: true; traces: string[] }>('/tooling/traces');
+  return d.traces ?? [];
+}
+
+export async function toolingTraceReplay(payload: {
+  trace_path: string;
+  i_limit?: number;
+  out_limit?: number;
+  cmd_vel?: number;
+  cmd_rmse_max?: number;
+  cmd_abs_max?: number;
+}): Promise<TraceReplayResult> {
+  const d = await req<{ ok: true; replay: TraceReplayResult }>('/tooling/trace-replay', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, 120000);
+  return d.replay;
+}
+
+export async function toolingParamSweep(payload: {
+  kp_spec: string;
+  ki_spec: string;
+  kd_spec: string;
+  settle_s?: number;
+  observe_s?: number;
+  sample_rate_hz?: number;
+  max_angle_variance?: number;
+  max_output_saturation_pct?: number;
+  require_no_oscillation?: boolean;
+  max_candidates?: number;
+  rollback_on_fail?: boolean;
+  restore_baseline_at_end?: boolean;
+  dry_run?: boolean;
+}): Promise<ParamSweepResult> {
+  const d = await req<{ ok: true; sweep: ParamSweepResult }>('/tooling/param-sweep', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, 240000);
+  return d.sweep;
+}
+
+export async function toolingSurrogateSim(payload: {
+  trace_paths: string[];
+  kp: number;
+  ki: number;
+  kd: number;
+  setpoint?: number;
+  duration_s?: number;
+}): Promise<SurrogateSimResult> {
+  const d = await req<{ ok: boolean; surrogate: SurrogateSimResult }>('/tooling/surrogate/simulate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, 120000);
+  return d.surrogate;
 }
 
 export async function aiStatus(): Promise<{ ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[] }> {

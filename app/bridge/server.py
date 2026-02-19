@@ -51,16 +51,27 @@ try:
     from app.bridge.codex_agent import CodexAgent, create_codex_agent
     from app.bridge.codex_db import get_codex_db
     from app.bridge.codex_rag import get_codex_rag
+    from app.bridge.trace_replay import replay_file
+    from app.bridge.param_sweep import parse_range_spec, SweepConfig, ParameterSweepRunner
+    from app.bridge.surrogate_sim import simulate_from_logs
 except ImportError:
     try:
         from codex_agent import CodexAgent, create_codex_agent
         from codex_db import get_codex_db
         from codex_rag import get_codex_rag
+        from trace_replay import replay_file
+        from param_sweep import parse_range_spec, SweepConfig, ParameterSweepRunner
+        from surrogate_sim import simulate_from_logs
     except ImportError:
         CodexAgent = None  # type: ignore
         create_codex_agent = None  # type: ignore
         get_codex_db = None  # type: ignore
         get_codex_rag = None  # type: ignore
+        replay_file = None  # type: ignore
+        parse_range_spec = None  # type: ignore
+        SweepConfig = None  # type: ignore
+        ParameterSweepRunner = None  # type: ignore
+        simulate_from_logs = None  # type: ignore
 
 
 class BridgeControlState:
@@ -3482,6 +3493,7 @@ def build_handler(
     telemetry_port: int,
     codex_agent: Optional[Any] = None,
 ):
+    repo_root = firmware.repo_root
     probe_cache_lock = threading.Lock()
     probe_cache: Dict[str, Dict[str, Any]] = {
         "compat": {"ts": 0.0, "report": None},
@@ -3530,6 +3542,18 @@ def build_handler(
             "csv_recent": csv_recent,
             "host_capture": host,
         }
+
+    def tooling_trace_candidates() -> list[str]:
+        paths: list[pathlib.Path] = []
+        for pat in (
+            "app/bridge/tests/fixtures/trace_replay_*.csv",
+            "tests/results/run_*.csv",
+            "tests/results/host_run_*.csv",
+            "tests/results/*.csv",
+        ):
+            paths.extend(repo_root.glob(pat))
+        uniq = sorted({str(p.relative_to(repo_root)) for p in paths if p.exists()})
+        return uniq[-80:]
 
     def history_with_reply(history: list[Dict[str, Any]], reply: str) -> list[Dict[str, Any]]:
         out = list(history)
@@ -3757,6 +3781,8 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "overwatch": report})
                 if u.path == "/profiles":
                     return _json(self, 200, {"ok": True, "profiles": profiles.list()})
+                if u.path == "/tooling/traces":
+                    return _json(self, 200, {"ok": True, "traces": tooling_trace_candidates()})
                 if u.path == "/ai/metrics":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -4429,6 +4455,89 @@ def build_handler(
                     except Exception as exc:
                         send_evt("error", {"ok": False, "error": str(exc)})
                     return
+
+                if u.path == "/tooling/trace-replay":
+                    if replay_file is None:
+                        return _json(self, 501, {"ok": False, "error": "trace_replay_unavailable"})
+                    trace_path_raw = str(body.get("trace_path", "")).strip()
+                    if not trace_path_raw:
+                        return _json(self, 400, {"ok": False, "error": "trace_path_required"})
+                    trace_path = pathlib.Path(trace_path_raw)
+                    if not trace_path.is_absolute():
+                        trace_path = (repo_root / trace_path).resolve()
+                    try:
+                        trace_path.relative_to(repo_root.resolve())
+                    except Exception:
+                        return _json(self, 400, {"ok": False, "error": "trace_path_outside_repo"})
+                    if not trace_path.exists():
+                        return _json(self, 404, {"ok": False, "error": "trace_not_found"})
+                    out = replay_file(
+                        trace_path,
+                        i_limit=float(body.get("i_limit", 70.0)),
+                        out_limit=float(body.get("out_limit", 180.0)),
+                        cmd_vel=float(body.get("cmd_vel", 0.0)),
+                        cmd_rmse_max=float(body.get("cmd_rmse_max", 6.0)),
+                        cmd_abs_max=float(body.get("cmd_abs_max", 20.0)),
+                    )
+                    return _json(self, 200, {"ok": True, "replay": out})
+
+                if u.path == "/tooling/param-sweep":
+                    if ParameterSweepRunner is None or parse_range_spec is None or SweepConfig is None:
+                        return _json(self, 501, {"ok": False, "error": "param_sweep_unavailable"})
+                    try:
+                        cfg = SweepConfig(
+                            kp_values=parse_range_spec(str(body.get("kp_spec", "31,32"))),
+                            ki_values=parse_range_spec(str(body.get("ki_spec", "0.05,0.06"))),
+                            kd_values=parse_range_spec(str(body.get("kd_spec", "1.0,1.2"))),
+                            settle_s=float(body.get("settle_s", 1.0)),
+                            observe_s=float(body.get("observe_s", 2.0)),
+                            sample_rate_hz=float(body.get("sample_rate_hz", 8.0)),
+                            max_angle_variance=float(body.get("max_angle_variance", 8.0)),
+                            max_output_saturation_pct=float(body.get("max_output_saturation_pct", 85.0)),
+                            require_no_oscillation=bool(body.get("require_no_oscillation", False)),
+                            max_candidates=int(body.get("max_candidates", 120)),
+                            rollback_on_fail=bool(body.get("rollback_on_fail", True)),
+                            restore_baseline_at_end=bool(body.get("restore_baseline_at_end", True)),
+                            dry_run=bool(body.get("dry_run", False)),
+                        )
+                        runner = ParameterSweepRunner(gateway)
+                        report = runner.run(cfg)
+                        return _json(self, 200, {"ok": True, "sweep": report})
+                    except Exception as exc:
+                        return _json(self, 500, {"ok": False, "error": f"param_sweep_error:{exc}"})
+
+                if u.path == "/tooling/surrogate/simulate":
+                    if simulate_from_logs is None:
+                        return _json(self, 501, {"ok": False, "error": "surrogate_unavailable"})
+                    raw_paths = body.get("trace_paths", [])
+                    if not isinstance(raw_paths, list) or not raw_paths:
+                        return _json(self, 400, {"ok": False, "error": "trace_paths_required"})
+                    cleaned: list[pathlib.Path] = []
+                    for raw in raw_paths[:12]:
+                        p = pathlib.Path(str(raw))
+                        if not p.is_absolute():
+                            p = (repo_root / p).resolve()
+                        try:
+                            p.relative_to(repo_root.resolve())
+                        except Exception:
+                            return _json(self, 400, {"ok": False, "error": "trace_path_outside_repo"})
+                        if p.exists():
+                            cleaned.append(p)
+                    if not cleaned:
+                        return _json(self, 404, {"ok": False, "error": "no_valid_trace_paths"})
+                    try:
+                        report = simulate_from_logs(
+                            cleaned,
+                            kp=float(body.get("kp", 31.0)),
+                            ki=float(body.get("ki", 0.05)),
+                            kd=float(body.get("kd", 1.05)),
+                            setpoint=float(body.get("setpoint", 0.0)),
+                            duration_s=float(body.get("duration_s", 3.0)),
+                        )
+                        code = 200 if bool(report.get("ok")) else 422
+                        return _json(self, code, {"ok": bool(report.get("ok")), "surrogate": report})
+                    except Exception as exc:
+                        return _json(self, 500, {"ok": False, "error": f"surrogate_error:{exc}"})
 
                 if u.path == "/command":
                     cmd = str(body.get("cmd", "")).strip()

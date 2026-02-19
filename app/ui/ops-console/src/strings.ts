@@ -36,6 +36,14 @@ export const strings = {
     title: 'Firmware IDE',
     subtitle: 'full arduino-cli workspace',
   },
+  playground: {
+    title: 'Iteration Playground',
+    subtitle: 'phase 1-4 tooling in-app',
+    traceTitle: 'Trace Replay',
+    runTrace: 'Run Trace Replay',
+    sweepTitle: 'Parameter Sweep',
+    runSweep: 'Run Sweep',
+  },
   workbench: {
     title: 'Firmware Workbench',
     subtitle: 'arduino-cli pipeline',
