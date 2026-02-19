@@ -17,6 +17,8 @@ import {
   setMotion,
   setPid,
   setSetpoint,
+  setLimits,
+  toolingTuningPreflight,
   postCommand,
   firmwareCheck,
   firmwareInstallCli,
@@ -37,6 +39,7 @@ import {
   profilesActivate,
   profilesDelete,
   getOverwatchStatus,
+  toolingTuningRecommend,
   type SerialDiag,
   type BurstStatus,
   type CompatReport,
@@ -45,6 +48,7 @@ import {
   type OverwatchReport,
   type RobotProfile,
   type RobotValidationReport,
+  type TuningRecommendation,
 } from './api';
 import type { ControlState, Health, Status } from './types';
 import { useUiAlerts } from './hooks/useUiAlerts';
@@ -216,6 +220,10 @@ export default function App() {
   const [pid, setPidDraft] = useState({ kp: 31, ki: 0.05, kd: 1.05 });
   const [motion, setMotionDraft] = useState({ kv: 0, kx: 0 });
   const [setpoint, setSetpointDraft] = useState(0);
+  const [limits, setLimitsDraft] = useState({ outMax: 180, tipDeg: 35, iMax: 70 });
+  const [simControls, setSimControls] = useState({ lowpassCutoffHz: 8, conditionalIntegration: false });
+  const [tuningRecommendation, setTuningRecommendation] = useState<TuningRecommendation | null>(null);
+  const [recommendBusy, setRecommendBusy] = useState(false);
   const [compat, setCompat] = useState<CompatReport | null>(null);
   const [connectProbe, setConnectProbe] = useState<ConnectProbeReport | null>(null);
   const [validation, setValidation] = useState<RobotValidationReport | null>(null);
@@ -739,6 +747,11 @@ export default function App() {
     setPidDraft({ kp: n(s.kp, 31), ki: n(s.ki, 0.05), kd: n(s.kd, 1.05) });
     setMotionDraft({ kv: n(s.kv, 0), kx: n(s.kx, 0) });
     setSetpointDraft(n(s.set, 0));
+    setLimitsDraft({
+      outMax: n(s.outMax ?? s.out_max, 180),
+      tipDeg: n(s.tipDeg ?? s.tip_deg, 35),
+      iMax: n(s.iMax ?? s.i_max, 70),
+    });
   }, []);
 
   useBridgePolling({
@@ -819,8 +832,13 @@ export default function App() {
     setPidDraft({ kp: n(status.kp, 31), ki: n(status.ki, 0.05), kd: n(status.kd, 1.05) });
     setMotionDraft({ kv: n(status.kv, 0), kx: n(status.kx, 0) });
     setSetpointDraft(n(status.set, 0));
+    setLimitsDraft({
+      outMax: n(status.outMax ?? status.out_max, 180),
+      tipDeg: n(status.tipDeg ?? status.tip_deg, 35),
+      iMax: n(status.iMax ?? status.i_max, 70),
+    });
     setMsg('Drafts synced from bot status');
-  }, [setMsg, status.kd, status.ki, status.kp, status.kv, status.kx, status.set]);
+  }, [setMsg, status.iMax, status.i_max, status.kd, status.ki, status.kp, status.kv, status.kx, status.outMax, status.out_max, status.set, status.tipDeg, status.tip_deg]);
 
   const runFirmwareCheck = useCallback(async () => {
     try {
@@ -969,47 +987,293 @@ export default function App() {
 
   const applyPid = useCallback(async () => {
     const current = { kp: n(status.kp), ki: n(status.ki), kd: n(status.kd) };
+    const target = { kp: pid.kp, ki: pid.ki, kd: pid.kd };
     if (balancing) {
       if (
-        Math.abs(pid.kp - current.kp) > BAL_BOUNDS.kp ||
-        Math.abs(pid.ki - current.ki) > BAL_BOUNDS.ki ||
-        Math.abs(pid.kd - current.kd) > BAL_BOUNDS.kd
+        Math.abs(target.kp - current.kp) > BAL_BOUNDS.kp ||
+        Math.abs(target.ki - current.ki) > BAL_BOUNDS.ki ||
+        Math.abs(target.kd - current.kd) > BAL_BOUNDS.kd
       ) {
         setMsg('PID change too large while BALANCING; DISARM for larger edits.');
         return;
       }
     }
-    const r = await setPid(pid.kp, pid.ki, pid.kd);
-    setStatus(r.status);
-    if (r.control) setControl(r.control);
-    setMsg('PID applied');
-  }, [balancing, pid.kd, pid.ki, pid.kp, setMsg, status.kd, status.ki, status.kp]);
+    try {
+      const r = await setPid(target.kp, target.ki, target.kd);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('PID applied');
+      return;
+    } catch (e) {
+      const em = (e as Error).message || '';
+      if (!em.includes('preflight_required')) {
+        setMsg(`PID apply error: ${em}`);
+        return;
+      }
+    }
+    try {
+      const out = Math.abs(n(status.out, 0));
+      const pre = await toolingTuningPreflight({
+        family: 'pid',
+        target,
+        current: {
+          kp: current.kp,
+          ki: current.ki,
+          kd: current.kd,
+          kv: motion.kv,
+          kx: motion.kx,
+          setpoint,
+          out_max: limits.outMax,
+          tip_deg: limits.tipDeg,
+          i_max: limits.iMax,
+          lowpass_cutoff_hz: simControls.lowpassCutoffHz,
+          conditional_integration: simControls.conditionalIntegration,
+        },
+        telemetry: {
+          angle_variance: Math.abs(n(status.ang, 0)),
+          output_saturation_pct: (out / Math.max(1, limits.outMax)) * 100,
+          oscillation_detected: false,
+          oscillation_freq_hz: 0,
+          mode: status.mode ?? '',
+        },
+      });
+      setTuningRecommendation(pre.recommendation);
+      if (!pre.preflight.gate_ok || !pre.preflight.preflight_id) {
+        setMsg(`PID preflight blocked: ${(pre.preflight.reasons || ['unknown']).join(', ')}`);
+        return;
+      }
+      const r = await setPid(target.kp, target.ki, target.kd, pre.preflight.preflight_id);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('PID applied (preflight approved)');
+    } catch (e) {
+      setMsg(`PID preflight error: ${(e as Error).message}`);
+    }
+  }, [balancing, limits.iMax, limits.outMax, limits.tipDeg, motion.kv, motion.kx, pid.kd, pid.ki, pid.kp, setMsg, setpoint, simControls.conditionalIntegration, simControls.lowpassCutoffHz, status.ang, status.kd, status.ki, status.kp, status.mode, status.out]);
 
   const applyMotion = useCallback(async () => {
     const current = { kv: n(status.kv), kx: n(status.kx) };
+    const target = { kv: motion.kv, kx: motion.kx };
     if (balancing) {
-      if (Math.abs(motion.kv - current.kv) > BAL_BOUNDS.kv || Math.abs(motion.kx - current.kx) > BAL_BOUNDS.kx) {
+      if (Math.abs(target.kv - current.kv) > BAL_BOUNDS.kv || Math.abs(target.kx - current.kx) > BAL_BOUNDS.kx) {
         setMsg('MOTION change too large while BALANCING; DISARM for larger edits.');
         return;
       }
     }
-    const r = await setMotion(motion.kv, motion.kx);
-    setStatus(r.status);
-    if (r.control) setControl(r.control);
-    setMsg('MOTION applied');
-  }, [balancing, motion.kv, motion.kx, setMsg, status.kv, status.kx]);
+    try {
+      const r = await setMotion(target.kv, target.kx);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('MOTION applied');
+      return;
+    } catch (e) {
+      const em = (e as Error).message || '';
+      if (!em.includes('preflight_required')) {
+        setMsg(`MOTION apply error: ${em}`);
+        return;
+      }
+    }
+    try {
+      const out = Math.abs(n(status.out, 0));
+      const pre = await toolingTuningPreflight({
+        family: 'motion',
+        target,
+        current: {
+          kp: pid.kp,
+          ki: pid.ki,
+          kd: pid.kd,
+          kv: current.kv,
+          kx: current.kx,
+          setpoint,
+          out_max: limits.outMax,
+          tip_deg: limits.tipDeg,
+          i_max: limits.iMax,
+          lowpass_cutoff_hz: simControls.lowpassCutoffHz,
+          conditional_integration: simControls.conditionalIntegration,
+        },
+        telemetry: {
+          angle_variance: Math.abs(n(status.ang, 0)),
+          output_saturation_pct: (out / Math.max(1, limits.outMax)) * 100,
+          oscillation_detected: false,
+          oscillation_freq_hz: 0,
+          mode: status.mode ?? '',
+        },
+      });
+      setTuningRecommendation(pre.recommendation);
+      if (!pre.preflight.gate_ok || !pre.preflight.preflight_id) {
+        setMsg(`MOTION preflight blocked: ${(pre.preflight.reasons || ['unknown']).join(', ')}`);
+        return;
+      }
+      const r = await setMotion(target.kv, target.kx, pre.preflight.preflight_id);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('MOTION applied (preflight approved)');
+    } catch (e) {
+      setMsg(`MOTION preflight error: ${(e as Error).message}`);
+    }
+  }, [balancing, limits.iMax, limits.outMax, limits.tipDeg, motion.kv, motion.kx, pid.kd, pid.ki, pid.kp, setMsg, setpoint, simControls.conditionalIntegration, simControls.lowpassCutoffHz, status.ang, status.kv, status.kx, status.mode, status.out]);
 
   const applySetpoint = useCallback(async () => {
     const current = n(status.set);
+    const target = { deg: setpoint };
     if (balancing && Math.abs(setpoint - current) > BAL_BOUNDS.setpoint) {
       setMsg('SETPOINT change too large while BALANCING; DISARM for larger edits.');
       return;
     }
-    const r = await setSetpoint(setpoint);
-    setStatus(r.status);
-    if (r.control) setControl(r.control);
-    setMsg('SETPOINT applied');
-  }, [balancing, setMsg, setpoint, status.set]);
+    try {
+      const r = await setSetpoint(target.deg);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('SETPOINT applied');
+      return;
+    } catch (e) {
+      const em = (e as Error).message || '';
+      if (!em.includes('preflight_required')) {
+        setMsg(`SETPOINT apply error: ${em}`);
+        return;
+      }
+    }
+    try {
+      const out = Math.abs(n(status.out, 0));
+      const pre = await toolingTuningPreflight({
+        family: 'setpoint',
+        target,
+        current: {
+          kp: pid.kp,
+          ki: pid.ki,
+          kd: pid.kd,
+          kv: motion.kv,
+          kx: motion.kx,
+          setpoint: current,
+          out_max: limits.outMax,
+          tip_deg: limits.tipDeg,
+          i_max: limits.iMax,
+          lowpass_cutoff_hz: simControls.lowpassCutoffHz,
+          conditional_integration: simControls.conditionalIntegration,
+        },
+        telemetry: {
+          angle_variance: Math.abs(n(status.ang, 0)),
+          output_saturation_pct: (out / Math.max(1, limits.outMax)) * 100,
+          oscillation_detected: false,
+          oscillation_freq_hz: 0,
+          mode: status.mode ?? '',
+        },
+      });
+      setTuningRecommendation(pre.recommendation);
+      if (!pre.preflight.gate_ok || !pre.preflight.preflight_id) {
+        setMsg(`SETPOINT preflight blocked: ${(pre.preflight.reasons || ['unknown']).join(', ')}`);
+        return;
+      }
+      const r = await setSetpoint(target.deg, pre.preflight.preflight_id);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('SETPOINT applied (preflight approved)');
+    } catch (e) {
+      setMsg(`SETPOINT preflight error: ${(e as Error).message}`);
+    }
+  }, [balancing, limits.iMax, limits.outMax, limits.tipDeg, motion.kv, motion.kx, pid.kd, pid.ki, pid.kp, setMsg, setpoint, simControls.conditionalIntegration, simControls.lowpassCutoffHz, status.ang, status.mode, status.out, status.set]);
+
+  const applyLimits = useCallback(async () => {
+    const target = { out_max: limits.outMax, tip_deg: limits.tipDeg, i_max: limits.iMax };
+    const currentOut = n(status.outMax ?? status.out_max, 180);
+    const currentTip = n(status.tipDeg ?? status.tip_deg, 35);
+    const currentI = n(status.iMax ?? status.i_max, 70);
+    if (balancing) {
+      if (Math.abs(target.out_max - currentOut) > 20 || Math.abs(target.i_max - currentI) > 20) {
+        setMsg('LIMITS change too large while BALANCING; DISARM for larger edits.');
+        return;
+      }
+    }
+    try {
+      const r = await setLimits(target.out_max, target.tip_deg, target.i_max);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('LIMITS applied');
+      return;
+    } catch (e) {
+      const em = (e as Error).message || '';
+      if (!em.includes('preflight_required')) {
+        setMsg(`LIMITS apply error: ${em}`);
+        return;
+      }
+    }
+    try {
+      const out = Math.abs(n(status.out, 0));
+      const pre = await toolingTuningPreflight({
+        family: 'limits',
+        target,
+        current: {
+          kp: pid.kp,
+          ki: pid.ki,
+          kd: pid.kd,
+          kv: motion.kv,
+          kx: motion.kx,
+          setpoint,
+          out_max: currentOut,
+          tip_deg: currentTip,
+          i_max: currentI,
+          lowpass_cutoff_hz: simControls.lowpassCutoffHz,
+          conditional_integration: simControls.conditionalIntegration,
+        },
+        telemetry: {
+          angle_variance: Math.abs(n(status.ang, 0)),
+          output_saturation_pct: (out / Math.max(1, limits.outMax)) * 100,
+          oscillation_detected: false,
+          oscillation_freq_hz: 0,
+          mode: status.mode ?? '',
+        },
+      });
+      setTuningRecommendation(pre.recommendation);
+      if (!pre.preflight.gate_ok || !pre.preflight.preflight_id) {
+        setMsg(`LIMITS preflight blocked: ${(pre.preflight.reasons || ['unknown']).join(', ')}`);
+        return;
+      }
+      const r = await setLimits(target.out_max, target.tip_deg, target.i_max, pre.preflight.preflight_id);
+      setStatus(r.status);
+      if (r.control) setControl(r.control);
+      setMsg('LIMITS applied (preflight approved)');
+    } catch (e) {
+      setMsg(`LIMITS preflight error: ${(e as Error).message}`);
+    }
+  }, [balancing, limits.iMax, limits.outMax, limits.tipDeg, motion.kv, motion.kx, pid.kd, pid.ki, pid.kp, setMsg, setpoint, simControls.conditionalIntegration, simControls.lowpassCutoffHz, status.ang, status.iMax, status.i_max, status.mode, status.out, status.outMax, status.out_max, status.tipDeg, status.tip_deg]);
+
+  const runTuningRecommendation = useCallback(async () => {
+    setRecommendBusy(true);
+    try {
+      const ang = n(status.ang, 0);
+      const out = Math.abs(n(status.out, 0));
+      const saturationPct = (out / Math.max(1, limits.outMax)) * 100;
+      const telemetry = {
+        angle_variance: Math.abs(ang),
+        output_saturation_pct: saturationPct,
+        oscillation_detected: false,
+        oscillation_freq_hz: 0,
+        mode: status.mode ?? '',
+      };
+      const outRec = await toolingTuningRecommend({
+        current: {
+          kp: pid.kp,
+          ki: pid.ki,
+          kd: pid.kd,
+          kv: motion.kv,
+          kx: motion.kx,
+          setpoint,
+          out_max: limits.outMax,
+          tip_deg: limits.tipDeg,
+          i_max: limits.iMax,
+          lowpass_cutoff_hz: simControls.lowpassCutoffHz,
+          conditional_integration: simControls.conditionalIntegration,
+        },
+        telemetry,
+      });
+      setTuningRecommendation(outRec.recommendation);
+      setMsg(`Tuning recommendation ready (${outRec.recommendation.score_pct}%)`);
+    } catch (e) {
+      setMsg(`tuning recommendation error: ${(e as Error).message}`);
+    } finally {
+      setRecommendBusy(false);
+    }
+  }, [limits.iMax, limits.outMax, limits.tipDeg, motion.kv, motion.kx, pid.kd, pid.ki, pid.kp, setMsg, setpoint, simControls.conditionalIntegration, simControls.lowpassCutoffHz, status.ang, status.mode, status.out]);
 
   const revertLatestConfig = useCallback(async () => {
     if (revertBusy) return;
@@ -1446,6 +1710,37 @@ export default function App() {
                         </div>
                         <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applySetpoint()}>{strings.tune.applySetpoint}</button>
                       </div>
+
+                      <div className="action-rig tune-param-rig">
+                        <div className="action-rig-head">
+                          <span className="action-rig-title">Limits</span>
+                        </div>
+                        <div className="grid3 tune-vars-grid">
+                          <label className="tune-var-label">Out Max<input className="tune-var-input" type="number" step="1" value={limits.outMax} onChange={(e) => setLimitsDraft((l) => ({ ...l, outMax: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">Tip Deg<input className="tune-var-input" type="number" step="0.5" value={limits.tipDeg} onChange={(e) => setLimitsDraft((l) => ({ ...l, tipDeg: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">I Max<input className="tune-var-input" type="number" step="0.5" value={limits.iMax} onChange={(e) => setLimitsDraft((l) => ({ ...l, iMax: Number(e.target.value) }))} /></label>
+                        </div>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyLimits()}>Apply Limits</button>
+                      </div>
+
+                      <div className="action-rig tune-param-rig">
+                        <div className="action-rig-head">
+                          <span className="action-rig-title">Filter + Anti-Windup</span>
+                        </div>
+                        <div className="grid2 tune-vars-grid">
+                          <label className="tune-var-label">LPF Cutoff Hz<input className="tune-var-input" type="number" step="0.1" value={simControls.lowpassCutoffHz} onChange={(e) => setSimControls((v) => ({ ...v, lowpassCutoffHz: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">Conditional I
+                            <select className="tune-var-input" value={simControls.conditionalIntegration ? 'on' : 'off'} onChange={(e) => setSimControls((v) => ({ ...v, conditionalIntegration: e.target.value === 'on' }))}>
+                              <option value="off">Off</option>
+                              <option value="on">On</option>
+                            </select>
+                          </label>
+                        </div>
+                        <button className="btn-secondary btn-lg btn-intent-prompt tune-param-apply" onClick={() => void runTuningRecommendation()} disabled={recommendBusy}>
+                          {recommendBusy ? 'Scoring...' : 'Recommend Next Step'}
+                        </button>
+                        <p className="workflow-label">These controls are available to recommendation/simulation policy; runtime apply requires firmware support.</p>
+                      </div>
                     </div>
 
                     {compat && (
@@ -1453,6 +1748,15 @@ export default function App() {
                         <p><strong>Firmware ID:</strong> {compat.firmware_id ?? 'n/a'}</p>
                         <p><strong>Missing fields:</strong> {compat.missing_fields.length ? compat.missing_fields.join(', ') : 'none'}</p>
                         <p><strong>Warnings:</strong> {compat.warnings.length ? compat.warnings.join(' | ') : 'none'}</p>
+                      </div>
+                    )}
+
+                    {tuningRecommendation && (
+                      <div className="compat-box">
+                        <p><strong>Tuning Score:</strong> {tuningRecommendation.score_pct}% ({tuningRecommendation.readiness.toUpperCase()})</p>
+                        <p><strong>Top Recommendation:</strong> {tuningRecommendation.recommendations[0]?.action ?? 'n/a'}</p>
+                        <p><strong>Why:</strong> {tuningRecommendation.recommendations[0]?.rationale ?? 'n/a'}</p>
+                        <p><strong>Procedure:</strong> {tuningRecommendation.procedure[0]}</p>
                       </div>
                     )}
                   </section>

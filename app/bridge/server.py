@@ -54,6 +54,7 @@ try:
     from app.bridge.trace_replay import replay_file
     from app.bridge.param_sweep import parse_range_spec, SweepConfig, ParameterSweepRunner
     from app.bridge.surrogate_sim import simulate_from_logs
+    from app.bridge.tuning_policy import evaluate_tuning_plan
 except ImportError:
     try:
         from codex_agent import CodexAgent, create_codex_agent
@@ -62,6 +63,7 @@ except ImportError:
         from trace_replay import replay_file
         from param_sweep import parse_range_spec, SweepConfig, ParameterSweepRunner
         from surrogate_sim import simulate_from_logs
+        from tuning_policy import evaluate_tuning_plan
     except ImportError:
         CodexAgent = None  # type: ignore
         create_codex_agent = None  # type: ignore
@@ -72,6 +74,7 @@ except ImportError:
         SweepConfig = None  # type: ignore
         ParameterSweepRunner = None  # type: ignore
         simulate_from_logs = None  # type: ignore
+        evaluate_tuning_plan = None  # type: ignore
 
 
 class BridgeControlState:
@@ -1450,6 +1453,70 @@ class AIManager:
         return {"answer": answer, "raw_id": raw_id, "thread_id": tid}
 
 
+class MissionMemoryStore:
+    """Durable per-session mission facts for assistant continuity."""
+
+    def __init__(self, repo_root: pathlib.Path) -> None:
+        self.path = repo_root / "app" / "bridge" / "ai_mission_memory.json"
+        self._lock = threading.Lock()
+        self._data: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            clean: Dict[str, Dict[str, Any]] = {}
+            for skey, node in raw.items():
+                if not isinstance(skey, str) or not isinstance(node, dict):
+                    continue
+                facts = node.get("facts", {})
+                if not isinstance(facts, dict):
+                    facts = {}
+                clean[skey] = {
+                    "facts": {str(k): str(v) for k, v in facts.items() if isinstance(k, str)},
+                    "updated_at": float(node.get("updated_at", time.time()) or time.time()),
+                    "source": str(node.get("source", "unknown")),
+                }
+            self._data = clean
+        except Exception:
+            self._data = {}
+
+    def _save_locked(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        blob = json.dumps(self._data, ensure_ascii=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(blob, encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def get(self, session_key: str) -> Dict[str, str]:
+        with self._lock:
+            node = self._data.get(session_key, {})
+            facts = node.get("facts", {}) if isinstance(node, dict) else {}
+            if not isinstance(facts, dict):
+                return {}
+            return {str(k): str(v) for k, v in facts.items() if isinstance(k, str)}
+
+    def upsert(self, session_key: str, updates: Dict[str, str], *, source: str = "user_asserted") -> Dict[str, str]:
+        clean = {str(k): str(v) for k, v in updates.items() if isinstance(k, str) and str(v).strip()}
+        if not clean:
+            return self.get(session_key)
+        with self._lock:
+            node = self._data.setdefault(session_key, {"facts": {}, "updated_at": 0.0, "source": source})
+            facts = node.setdefault("facts", {})
+            if not isinstance(facts, dict):
+                facts = {}
+                node["facts"] = facts
+            facts.update(clean)
+            node["updated_at"] = time.time()
+            node["source"] = source
+            self._save_locked()
+            return {str(k): str(v) for k, v in facts.items() if isinstance(k, str)}
+
+
 def _safe_float(v: Any) -> Optional[float]:
     try:
         return float(v)
@@ -2391,6 +2458,14 @@ def _resolve_system_prompt(profile: Dict[str, Any], *, allow_apply: bool, repo_r
         "2) Default to one sentence (<=30 words) unless user explicitly asks for depth/checklist. "
         "3) Answer directly first; ask a clarifying question only when a missing parameter blocks execution of the requested action. "
         "4) Persist and reuse mission facts explicitly provided by user in prior turns (branch, target, guardrail, priority, board/IMU) until user changes them. "
+        "Treat current_test_board_imu as test hardware, not automatically preferred production hardware; when discussing hardware architecture, provide alternatives with tradeoffs for voltage, motor size, performance, and planned features. "
+        "Hardware recommendation policy: always adapt to the specific build and parts currently in use; do not assume fixed hardware across users. "
+        "Default ranking objective: reliability > capability > control performance > safety > cost > dev speed. "
+        "Prefer in-stock parts, but recommend a non-stock option when it is materially better and explain why. "
+        "Limit options: if one option is clearly/calculably superior, present the winner first and keep alternatives minimal. "
+        "Before proposing new parts, ask for key part/context clarifications if missing (motor voltage/current, driver, battery, constraints). "
+        "Ask once early whether upgrade recommendations are desired, then keep hardware limitations visible during tuning without repeatedly asking for permission. "
+        "Remember: assistant scope is broad (controls, math, EE, firmware/C++, diagnostics, physics), not only parts recommendation. "
         "5) Do not claim environment limitations unless a tool or endpoint in this turn failed with that exact limitation. "
         "Project facts: v1 telemetry readiness requires mode,ang,raw,out,kp,ki,kd,set plus one gyro alias (gyro|gyr|gx). "
         "v2 anti-drift readiness fields are gyro_bias, vel_meas, outer_loop_enabled. "
@@ -2432,9 +2507,100 @@ def _extract_mission_facts(history: List[Dict[str, Any]]) -> Dict[str, str]:
             _, tail = txt.split(":", 1)
             val = tail.strip().rstrip(".")
             if val:
-                facts["board_imu"] = val
+                if ("for testing" in low) or ("test board" in low) or ("current board" in low):
+                    facts["current_test_board_imu"] = val
+                elif ("preferred" in low) or ("production" in low):
+                    facts["preferred_board_imu"] = val
+                else:
+                    facts["board_imu"] = val
+
+        # Runtime correction cues outside explicit "store ..." format.
+        if ("preferred board is not" in low) or ("not preferred" in low and "board" in low):
+            facts["board_selection_policy"] = "current board may be test-only; recommend alternatives by requirements."
+        if ("for testing" in low) and ("board" in low):
+            facts["hardware_recommendation_mode"] = "proactive"
+
+        if "rank hardware on" in low:
+            facts["hardware_priority_order"] = "reliability>capability>control_performance>safety>cost>dev_speed"
+        if "prefer parts in stock" in low:
+            facts["prefer_in_stock"] = "true"
+            facts["allow_better_non_stock"] = "true"
+        if "no major constraints" in low:
+            facts["constraints_mode"] = "exploratory"
+        if "must at least ask for clarifications on parts" in low:
+            facts["require_parts_clarification_before_new_reco"] = "true"
+        if "ask at the beginning" in low and "better parts" in low:
+            facts["hardware_upgrade_optin_once"] = "true"
+        if "not merely a parts reccomender" in low or "not merely a parts recommender" in low:
+            facts["assistant_role_scope"] = "full_stack_controls_mechatronics"
+
+        # Future features that should influence board/architecture choices.
+        feature_terms = [
+            ("latency", "latency"),
+            ("processing speed", "processing_speed"),
+            ("memory", "memory"),
+            ("storage", "storage"),
+            ("wireless connectivity", "wireless_connectivity"),
+            ("on board logging", "onboard_logging"),
+            ("ota updates", "ota_updates"),
+            ("edge ai", "edge_ai"),
+            ("steering", "steering"),
+        ]
+        found_features: list[str] = []
+        for term, token in feature_terms:
+            if term in low:
+                found_features.append(token)
+        if found_features:
+            facts["future_feature_priorities"] = ",".join(found_features)
 
     return facts
+
+
+def _first_sentence(text: str) -> str:
+    s = " ".join(text.strip().split())
+    if not s:
+        return ""
+    m = re.search(r"[.!?]", s)
+    if not m:
+        return s
+    return s[: m.end()].strip()
+
+
+def _truncate_words(text: str, limit: int) -> str:
+    words = re.findall(r"\S+", text)
+    if len(words) <= limit:
+        return text
+    return " ".join(words[:limit]).strip()
+
+
+def _normalize_reply_for_prompt(user_msg: str, reply: str) -> str:
+    """
+    Deterministic formatting normalizer for strict user prompt modes.
+    Applies only when user explicitly requests a strict output form.
+    """
+    q = user_msg.lower()
+    out = reply.strip()
+    if not out:
+        return out
+
+    if "reply only: stored" in q:
+        return "STORED."
+
+    if "yes or no" in q or "answer only with yes or no" in q:
+        up = out.upper()
+        if "YES" in up:
+            return "YES"
+        if "NO" in up:
+            return "NO"
+        return "NO"
+
+    if "one sentence" in q or "answer exactly" in q:
+        one = _first_sentence(out)
+        if not one:
+            return out
+        return _truncate_words(one, 30)
+
+    return out
 
 
 class RobotProfilesManager:
@@ -3000,6 +3166,231 @@ def _blocked_while_latched(cmd: str) -> bool:
     return not c.startswith(safe_prefixes)
 
 
+TUNING_BAL_BOUNDS = {
+    "kp": 1.0,
+    "ki": 0.05,
+    "kd": 0.2,
+    "kv": 0.05,
+    "kx": 0.002,
+    "setpoint": 0.5,
+    "out_max": 20.0,
+    "i_max": 20.0,
+}
+
+TUNING_PREFLIGHT_DELTA = {
+    "pid": {"kp": 0.8, "ki": 0.03, "kd": 0.12},
+    "motion": {"kv": 0.03, "kx": 0.001},
+    "setpoint": {"deg": 0.35},
+    "limits": {"out_max": 8.0, "tip_deg": 2.0, "i_max": 8.0},
+}
+
+
+def _status_float(status: Dict[str, Any], *keys: str, default: float = 0.0) -> float:
+    for key in keys:
+        if key in status:
+            try:
+                return float(status[key])
+            except Exception:
+                continue
+    return default
+
+
+def _require_tuning_range(name: str, value: float, lo: float, hi: float) -> None:
+    if not (lo <= value <= hi):
+        raise RuntimeError(f"invalid_tuning_value:{name}:{value}")
+
+
+def _guard_pid_apply(status_before: Dict[str, Any], kp: float, ki: float, kd: float) -> None:
+    _require_tuning_range("kp", kp, 0.0, 400.0)
+    _require_tuning_range("ki", ki, 0.0, 5.0)
+    _require_tuning_range("kd", kd, 0.0, 50.0)
+    if str(status_before.get("mode", "")) == "BALANCING":
+        curr_kp = _status_float(status_before, "kp", default=31.0)
+        curr_ki = _status_float(status_before, "ki", default=0.05)
+        curr_kd = _status_float(status_before, "kd", default=1.05)
+        if (
+            abs(kp - curr_kp) > TUNING_BAL_BOUNDS["kp"]
+            or abs(ki - curr_ki) > TUNING_BAL_BOUNDS["ki"]
+            or abs(kd - curr_kd) > TUNING_BAL_BOUNDS["kd"]
+        ):
+            raise RuntimeError("tuning_delta_too_large_while_balancing")
+
+
+def _guard_motion_apply(status_before: Dict[str, Any], kv: float, kx: float) -> None:
+    _require_tuning_range("kv", kv, -5.0, 5.0)
+    _require_tuning_range("kx", kx, -1.0, 1.0)
+    if str(status_before.get("mode", "")) == "BALANCING":
+        curr_kv = _status_float(status_before, "kv", default=0.0)
+        curr_kx = _status_float(status_before, "kx", default=0.0)
+        if abs(kv - curr_kv) > TUNING_BAL_BOUNDS["kv"] or abs(kx - curr_kx) > TUNING_BAL_BOUNDS["kx"]:
+            raise RuntimeError("tuning_delta_too_large_while_balancing")
+
+
+def _guard_setpoint_apply(status_before: Dict[str, Any], deg: float) -> None:
+    _require_tuning_range("setpoint", deg, -30.0, 30.0)
+    if str(status_before.get("mode", "")) == "BALANCING":
+        curr_set = _status_float(status_before, "set", default=0.0)
+        if abs(deg - curr_set) > TUNING_BAL_BOUNDS["setpoint"]:
+            raise RuntimeError("tuning_delta_too_large_while_balancing")
+
+
+def _guard_limits_apply(status_before: Dict[str, Any], out_max: float, tip_deg: float, i_max: float) -> None:
+    _require_tuning_range("out_max", out_max, 1.0, 255.0)
+    _require_tuning_range("tip_deg", tip_deg, 1.0, 85.0)
+    _require_tuning_range("i_max", i_max, 0.0, 400.0)
+    if str(status_before.get("mode", "")) == "BALANCING":
+        curr_out = _status_float(status_before, "outMax", "out_max", default=180.0)
+        curr_i = _status_float(status_before, "iMax", "i_max", default=70.0)
+        if abs(out_max - curr_out) > TUNING_BAL_BOUNDS["out_max"] or abs(i_max - curr_i) > TUNING_BAL_BOUNDS["i_max"]:
+            raise RuntimeError("tuning_delta_too_large_while_balancing")
+
+
+def _detect_tuning_capabilities(status: Dict[str, Any], supported_commands: list[str], help_lines: list[str]) -> Dict[str, Any]:
+    cmds = set(supported_commands or [])
+    blob = "\n".join(help_lines or []).upper()
+    has_lpf_cmd = any(tok in blob for tok in ("LPF", "LOWPASS", "FILTER", "CUTOFF"))
+    has_condint_cmd = any(tok in blob for tok in ("CONDINT", "ANTIWINDUP", "ANTI-WINDUP", "INTEGRATOR MODE"))
+
+    capabilities = {
+        "pid": {"runtime_apply_supported": "PID" in cmds, "source": "help"},
+        "motion": {"runtime_apply_supported": "MOTION" in cmds, "source": "help"},
+        "setpoint": {"runtime_apply_supported": "SETPOINT" in cmds, "source": "help"},
+        "limits": {"runtime_apply_supported": "LIMITS" in cmds, "source": "help"},
+        "lowpass_cutoff_hz": {"runtime_apply_supported": has_lpf_cmd, "source": "help", "command_candidates": ["LPF", "LOWPASS", "FILTER"]},
+        "conditional_integration": {"runtime_apply_supported": has_condint_cmd, "source": "help", "command_candidates": ["CONDINT", "ANTIWINDUP"]},
+    }
+    capabilities["status_keys"] = sorted([k for k in status.keys() if k in {"kp", "ki", "kd", "kv", "kx", "set", "outMax", "iMax", "tipDeg"}])
+    return capabilities
+
+
+def _validate_tuning_recommendation_contract(rec: Dict[str, Any]) -> list[str]:
+    errs: list[str] = []
+    if not isinstance(rec, dict):
+        return ["recommendation_not_object"]
+    required = {"ok", "score_pct", "readiness", "recommendations", "procedure", "variables_available"}
+    missing = sorted(required - set(rec.keys()))
+    if missing:
+        errs.append(f"missing:{','.join(missing)}")
+    if not isinstance(rec.get("recommendations", []), list):
+        errs.append("recommendations_not_list")
+    if not isinstance(rec.get("procedure", []), list):
+        errs.append("procedure_not_list")
+    if not isinstance(rec.get("variables_available", {}), dict):
+        errs.append("variables_available_not_object")
+    try:
+        score = int(rec.get("score_pct", 0))
+        if score < 0 or score > 100:
+            errs.append("score_out_of_range")
+    except Exception:
+        errs.append("score_not_int")
+    if rec.get("readiness") not in {"good", "watch", "risky"}:
+        errs.append("readiness_invalid")
+    return errs
+
+
+def _build_tuning_apply_signature(family: str, target: Dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {"family": family, "target": target},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class TuningPreflightStore:
+    def __init__(self, ttl_s: float = 900.0, max_entries: int = 256) -> None:
+        self._ttl_s = ttl_s
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+        self._items: Dict[str, Dict[str, Any]] = {}
+
+    def _prune_locked(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, v in self._items.items() if (now - float(v.get("ts", now))) > self._ttl_s]
+        for k in expired:
+            self._items.pop(k, None)
+        if len(self._items) <= self._max_entries:
+            return
+        ordered = sorted(self._items.items(), key=lambda kv: float(kv[1].get("ts", 0.0)))
+        for k, _ in ordered[: max(0, len(self._items) - self._max_entries)]:
+            self._items.pop(k, None)
+
+    def issue(self, *, family: str, signature: str, score_pct: int, notes: list[str]) -> Dict[str, Any]:
+        with self._lock:
+            self._prune_locked()
+            preflight_id = secrets.token_urlsafe(18)
+            self._items[preflight_id] = {
+                "ts": time.monotonic(),
+                "family": family,
+                "signature": signature,
+                "score_pct": int(score_pct),
+                "notes": list(notes[:8]),
+            }
+        return {"preflight_id": preflight_id, "expires_in_s": int(self._ttl_s)}
+
+    def validate(self, preflight_id: str, expected_signature: str) -> Dict[str, Any]:
+        with self._lock:
+            self._prune_locked()
+            node = self._items.get(preflight_id)
+            if not node:
+                raise RuntimeError("preflight_invalid")
+            if str(node.get("signature", "")) != expected_signature:
+                raise RuntimeError("preflight_mismatch")
+            return dict(node)
+
+
+def _requires_preflight(
+    *,
+    family: str,
+    status_before: Dict[str, Any],
+    current: Dict[str, float],
+    target: Dict[str, float],
+) -> bool:
+    mode = str(status_before.get("mode", ""))
+    if mode in {"ARMED", "BALANCING"}:
+        return True
+
+    if family == "pid":
+        d = TUNING_PREFLIGHT_DELTA["pid"]
+        return (
+            abs(target["kp"] - current["kp"]) > d["kp"]
+            or abs(target["ki"] - current["ki"]) > d["ki"]
+            or abs(target["kd"] - current["kd"]) > d["kd"]
+        )
+    if family == "motion":
+        d = TUNING_PREFLIGHT_DELTA["motion"]
+        return abs(target["kv"] - current["kv"]) > d["kv"] or abs(target["kx"] - current["kx"]) > d["kx"]
+    if family == "setpoint":
+        return abs(target["deg"] - current["deg"]) > TUNING_PREFLIGHT_DELTA["setpoint"]["deg"]
+    if family == "limits":
+        d = TUNING_PREFLIGHT_DELTA["limits"]
+        return (
+            abs(target["out_max"] - current["out_max"]) > d["out_max"]
+            or abs(target["tip_deg"] - current["tip_deg"]) > d["tip_deg"]
+            or abs(target["i_max"] - current["i_max"]) > d["i_max"]
+        )
+    return False
+
+
+def _enforce_preflight_if_needed(
+    *,
+    preflight_store: TuningPreflightStore,
+    body: Dict[str, Any],
+    family: str,
+    status_before: Dict[str, Any],
+    current: Dict[str, float],
+    target: Dict[str, float],
+) -> Optional[str]:
+    if not _requires_preflight(family=family, status_before=status_before, current=current, target=target):
+        return None
+    preflight_id = str(body.get("preflight_id", "")).strip()
+    if not preflight_id:
+        raise RuntimeError("preflight_required")
+    signature = _build_tuning_apply_signature(family, target)
+    preflight_store.validate(preflight_id, signature)
+    return preflight_id
+
+
 # ============================================================================
 # Telemetry Contract v2 Readiness
 # ============================================================================
@@ -3201,6 +3592,7 @@ def run_compat_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
 
     report["supported_commands"] = supported
     report["missing_commands"] = missing
+    report["tuning_capabilities"] = _detect_tuning_capabilities(status, supported, help_lines)
 
     # 4) Profile guess
     axis = str(status.get("axis", ""))
@@ -3343,6 +3735,7 @@ def run_connect_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
     report["firmware_profile"] = str(compat.get("profile", "unknown"))
     report["commands"] = list(compat.get("supported_commands", []))
     report["missing_commands"] = list(compat.get("missing_commands", []))
+    report["tuning_capabilities"] = dict(compat.get("tuning_capabilities", {}))
 
     required_fields = ("mode", "ang", "raw", "out", "kp", "ki", "kd", "set")
     has_gyro = any(k in status for k in ("gyro", "gyr", "gx"))
@@ -3587,12 +3980,14 @@ def build_handler(
     ai_profiles: AIProfileManager,
     knowledge: AssistantKnowledgeManager,
     auth: AuthManager,
+    mission_memory: MissionMemoryStore,
     profiles: RobotProfilesManager,
     config_history: ConfigHistoryManager,
     telemetry_port: int,
     codex_agent: Optional[Any] = None,
 ):
     repo_root = firmware.repo_root
+    tuning_preflight = TuningPreflightStore(ttl_s=900.0, max_entries=256)
     probe_cache_lock = threading.Lock()
     probe_cache: Dict[str, Dict[str, Any]] = {
         "compat": {"ts": 0.0, "report": None},
@@ -3835,11 +4230,28 @@ def build_handler(
                             "warnings": ["connect_probe_throttled_queue_busy"],
                             "next_questions": [],
                             "compat": None,
+                            "tuning_capabilities": _detect_tuning_capabilities({}, [], []),
                         }
                         return _json(self, 200, {"ok": True, "probe": fallback})
                     out = run_connect_probe(gateway)
                     store_probe("connect", out)
                     return _json(self, 200, {"ok": True, "probe": out})
+                if u.path == "/tooling/tuning/capabilities":
+                    cached_connect = cached_probe("connect")
+                    if isinstance(cached_connect, dict) and isinstance(cached_connect.get("tuning_capabilities"), dict):
+                        return _json(self, 200, {"ok": True, "capabilities": cached_connect.get("tuning_capabilities"), "source": "connect_probe_cache"})
+                    cached_compat = cached_probe("compat")
+                    if isinstance(cached_compat, dict) and isinstance(cached_compat.get("tuning_capabilities"), dict):
+                        return _json(self, 200, {"ok": True, "capabilities": cached_compat.get("tuning_capabilities"), "source": "compat_probe_cache"})
+
+                    status = dict(gateway.health().get("last_status", {}))
+                    if not status:
+                        try:
+                            status = gateway.get_status()
+                        except Exception:
+                            status = {}
+                    caps = _detect_tuning_capabilities(status, [], [])
+                    return _json(self, 200, {"ok": True, "capabilities": caps, "source": "status_only"})
                 if u.path == "/overwatch/status":
                     q = parse_qs(u.query)
                     force_refresh = str((q.get("refresh", ["0"]) or ["0"])[0]).strip().lower() in {"1", "true", "yes"}
@@ -4281,7 +4693,10 @@ def build_handler(
                                 raise
                         full_history = ai.history(skey, thread_id) if thread_id else []
                         prior_history = full_history[-20:]
-                        mission_facts = _extract_mission_facts(full_history)
+                        extracted_facts = _extract_mission_facts(full_history)
+                        if extracted_facts:
+                            mission_memory.upsert(skey, extracted_facts, source="thread_history")
+                        mission_facts = mission_memory.get(skey)
                         if mission_facts:
                             ctx["mission_facts"] = mission_facts
                         result = codex_agent.chat_with_tools(
@@ -4297,14 +4712,15 @@ def build_handler(
                             port=port,
                             conversation_history=prior_history,
                         )
+                        normalized_reply = _normalize_reply_for_prompt(msg, str(result["answer"]))
                         tid = ai._append(skey, "user", msg, thread_id=thread_id)
-                        ai._append(skey, "assistant", result["answer"], thread_id=tid)
+                        ai._append(skey, "assistant", normalized_reply, thread_id=tid)
                         return _json(
                             self,
                             200,
                             {
                                 "ok": True,
-                                "reply": result["answer"],
+                                "reply": normalized_reply,
                                 "tool_calls": result.get("tool_calls", []),
                                 "iterations": result.get("iterations", 1),
                                 "ai": ai.status(configured=True, model=str(creds["model"] or "gpt-4"), session_key=skey),
@@ -4644,6 +5060,293 @@ def build_handler(
                     except Exception as exc:
                         return _json(self, 500, {"ok": False, "error": f"surrogate_error:{exc}"})
 
+                if u.path == "/tooling/tuning/recommend":
+                    if evaluate_tuning_plan is None:
+                        return _json(self, 501, {"ok": False, "error": "tuning_policy_unavailable"})
+
+                    current_raw = body.get("current", {})
+                    telemetry_raw = body.get("telemetry", {})
+                    if not isinstance(current_raw, dict):
+                        return _json(self, 400, {"ok": False, "error": "current_object_required"})
+                    if not isinstance(telemetry_raw, dict):
+                        telemetry_raw = {}
+
+                    current: Dict[str, Any] = {
+                        "kp": float(current_raw.get("kp", 31.0)),
+                        "ki": float(current_raw.get("ki", 0.05)),
+                        "kd": float(current_raw.get("kd", 1.05)),
+                        "kv": float(current_raw.get("kv", 0.0)),
+                        "kx": float(current_raw.get("kx", 0.0)),
+                        "setpoint": float(current_raw.get("setpoint", 0.0)),
+                        "out_max": float(current_raw.get("out_max", 180.0)),
+                        "tip_deg": float(current_raw.get("tip_deg", 35.0)),
+                        "i_max": float(current_raw.get("i_max", 70.0)),
+                        "lowpass_cutoff_hz": float(current_raw.get("lowpass_cutoff_hz", 8.0)),
+                        "conditional_integration": bool(current_raw.get("conditional_integration", False)),
+                    }
+
+                    telemetry = {
+                        "angle_variance": float(telemetry_raw.get("angle_variance", 0.0)),
+                        "output_saturation_pct": float(telemetry_raw.get("output_saturation_pct", 0.0)),
+                        "oscillation_detected": bool(telemetry_raw.get("oscillation_detected", False)),
+                        "oscillation_freq_hz": float(telemetry_raw.get("oscillation_freq_hz", 0.0)),
+                        "mode": str(telemetry_raw.get("mode", "")),
+                    }
+
+                    replay_reports: list[Dict[str, Any]] = []
+                    surrogate_report: Optional[Dict[str, Any]] = None
+
+                    raw_paths = body.get("trace_paths", [])
+                    cleaned: list[pathlib.Path] = []
+                    if isinstance(raw_paths, list):
+                        for raw in raw_paths[:8]:
+                            p = pathlib.Path(str(raw))
+                            if not p.is_absolute():
+                                p = (repo_root / p).resolve()
+                            try:
+                                p.relative_to(repo_root.resolve())
+                            except Exception:
+                                return _json(self, 400, {"ok": False, "error": "trace_path_outside_repo"})
+                            if p.exists():
+                                cleaned.append(p)
+
+                    if cleaned and replay_file is not None:
+                        for p in cleaned:
+                            try:
+                                replay_reports.append(
+                                    replay_file(
+                                        p,
+                                        i_limit=float(current["i_max"]),
+                                        out_limit=float(current["out_max"]),
+                                        cmd_vel=0.0,
+                                    )
+                                )
+                            except Exception as exc:
+                                replay_reports.append({"trace": str(p), "result": {"ok": False, "pass": False, "error": str(exc)}})
+
+                    if cleaned and simulate_from_logs is not None:
+                        try:
+                            surrogate_report = simulate_from_logs(
+                                cleaned,
+                                kp=float(current["kp"]),
+                                ki=float(current["ki"]),
+                                kd=float(current["kd"]),
+                                setpoint=float(current["setpoint"]),
+                                duration_s=float(body.get("duration_s", 3.0)),
+                                i_limit=float(current["i_max"]),
+                                out_limit=float(current["out_max"]),
+                            )
+                        except Exception as exc:
+                            surrogate_report = {"ok": False, "error": f"surrogate_error:{exc}"}
+
+                    recommendation = evaluate_tuning_plan(
+                        current=current,
+                        telemetry=telemetry,
+                        surrogate=surrogate_report,
+                        replay_results=replay_reports,
+                    )
+                    contract_errors = _validate_tuning_recommendation_contract(recommendation)
+                    if contract_errors:
+                        return _json(
+                            self,
+                            500,
+                            {
+                                "ok": False,
+                                "error": "tuning_recommendation_contract_invalid",
+                                "contract_errors": contract_errors,
+                            },
+                        )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "recommendation": recommendation,
+                            "surrogate": surrogate_report,
+                            "replay": replay_reports,
+                        },
+                    )
+
+                if u.path == "/tooling/tuning/preflight":
+                    if evaluate_tuning_plan is None:
+                        return _json(self, 501, {"ok": False, "error": "tuning_policy_unavailable"})
+                    family = str(body.get("family", "")).strip().lower()
+                    if family not in {"pid", "motion", "setpoint", "limits"}:
+                        return _json(self, 400, {"ok": False, "error": "invalid_family"})
+
+                    status_now = gateway.get_status()
+                    current_raw = body.get("current", {})
+                    telemetry_raw = body.get("telemetry", {})
+                    if not isinstance(current_raw, dict):
+                        current_raw = {}
+                    if not isinstance(telemetry_raw, dict):
+                        telemetry_raw = {}
+
+                    current = {
+                        "kp": float(current_raw.get("kp", _status_float(status_now, "kp", default=31.0))),
+                        "ki": float(current_raw.get("ki", _status_float(status_now, "ki", default=0.05))),
+                        "kd": float(current_raw.get("kd", _status_float(status_now, "kd", default=1.05))),
+                        "kv": float(current_raw.get("kv", _status_float(status_now, "kv", default=0.0))),
+                        "kx": float(current_raw.get("kx", _status_float(status_now, "kx", default=0.0))),
+                        "setpoint": float(current_raw.get("setpoint", _status_float(status_now, "set", default=0.0))),
+                        "out_max": float(current_raw.get("out_max", _status_float(status_now, "outMax", "out_max", default=180.0))),
+                        "tip_deg": float(current_raw.get("tip_deg", _status_float(status_now, "tipDeg", "tip_deg", default=35.0))),
+                        "i_max": float(current_raw.get("i_max", _status_float(status_now, "iMax", "i_max", default=70.0))),
+                        "lowpass_cutoff_hz": float(current_raw.get("lowpass_cutoff_hz", 8.0)),
+                        "conditional_integration": bool(current_raw.get("conditional_integration", False)),
+                    }
+
+                    target_raw = body.get("target", {})
+                    if not isinstance(target_raw, dict):
+                        return _json(self, 400, {"ok": False, "error": "target_object_required"})
+                    target: Dict[str, float] = {}
+                    if family == "pid":
+                        target = {
+                            "kp": float(target_raw["kp"]),
+                            "ki": float(target_raw["ki"]),
+                            "kd": float(target_raw["kd"]),
+                        }
+                        current_for_family = {"kp": float(current["kp"]), "ki": float(current["ki"]), "kd": float(current["kd"])}
+                    elif family == "motion":
+                        target = {"kv": float(target_raw["kv"]), "kx": float(target_raw["kx"])}
+                        current_for_family = {"kv": float(current["kv"]), "kx": float(current["kx"])}
+                    elif family == "setpoint":
+                        target = {"deg": float(target_raw["deg"])}
+                        current_for_family = {"deg": float(current["setpoint"])}
+                    else:
+                        target = {
+                            "out_max": float(target_raw["out_max"]),
+                            "tip_deg": float(target_raw["tip_deg"]),
+                            "i_max": float(target_raw["i_max"]),
+                        }
+                        current_for_family = {
+                            "out_max": float(current["out_max"]),
+                            "tip_deg": float(current["tip_deg"]),
+                            "i_max": float(current["i_max"]),
+                        }
+
+                    telemetry = {
+                        "angle_variance": float(telemetry_raw.get("angle_variance", 0.0)),
+                        "output_saturation_pct": float(telemetry_raw.get("output_saturation_pct", 0.0)),
+                        "oscillation_detected": bool(telemetry_raw.get("oscillation_detected", False)),
+                        "oscillation_freq_hz": float(telemetry_raw.get("oscillation_freq_hz", 0.0)),
+                        "mode": str(telemetry_raw.get("mode", status_now.get("mode", ""))),
+                    }
+
+                    replay_reports: list[Dict[str, Any]] = []
+                    surrogate_report: Optional[Dict[str, Any]] = None
+                    raw_paths = body.get("trace_paths", [])
+                    cleaned: list[pathlib.Path] = []
+                    if isinstance(raw_paths, list):
+                        for raw in raw_paths[:8]:
+                            p = pathlib.Path(str(raw))
+                            if not p.is_absolute():
+                                p = (repo_root / p).resolve()
+                            try:
+                                p.relative_to(repo_root.resolve())
+                            except Exception:
+                                return _json(self, 400, {"ok": False, "error": "trace_path_outside_repo"})
+                            if p.exists():
+                                cleaned.append(p)
+
+                    if cleaned and replay_file is not None:
+                        for p in cleaned:
+                            try:
+                                replay_reports.append(
+                                    replay_file(
+                                        p,
+                                        i_limit=float(current["i_max"]),
+                                        out_limit=float(current["out_max"]),
+                                        cmd_vel=0.0,
+                                    )
+                                )
+                            except Exception as exc:
+                                replay_reports.append({"trace": str(p), "result": {"ok": False, "pass": False, "error": str(exc)}})
+
+                    sim_current = dict(current)
+                    if family == "pid":
+                        sim_current["kp"] = target["kp"]
+                        sim_current["ki"] = target["ki"]
+                        sim_current["kd"] = target["kd"]
+                    elif family == "setpoint":
+                        sim_current["setpoint"] = target["deg"]
+                    elif family == "limits":
+                        sim_current["out_max"] = target["out_max"]
+                        sim_current["i_max"] = target["i_max"]
+
+                    if cleaned and simulate_from_logs is not None:
+                        try:
+                            surrogate_report = simulate_from_logs(
+                                cleaned,
+                                kp=float(sim_current["kp"]),
+                                ki=float(sim_current["ki"]),
+                                kd=float(sim_current["kd"]),
+                                setpoint=float(sim_current["setpoint"]),
+                                duration_s=float(body.get("duration_s", 3.0)),
+                                i_limit=float(sim_current["i_max"]),
+                                out_limit=float(sim_current["out_max"]),
+                            )
+                        except Exception as exc:
+                            surrogate_report = {"ok": False, "error": f"surrogate_error:{exc}"}
+
+                    recommendation = evaluate_tuning_plan(
+                        current=sim_current,
+                        telemetry=telemetry,
+                        surrogate=surrogate_report,
+                        replay_results=replay_reports,
+                    )
+                    contract_errors = _validate_tuning_recommendation_contract(recommendation)
+                    if contract_errors:
+                        return _json(self, 500, {"ok": False, "error": "tuning_recommendation_contract_invalid", "contract_errors": contract_errors})
+
+                    reasons: list[str] = []
+                    if not cleaned:
+                        reasons.append("evidence_missing_trace_paths")
+                    replay_fail_count = sum(
+                        1 for rep in replay_reports if not bool(((rep.get("result") or {}) if isinstance(rep, dict) else {}).get("pass", False))
+                    )
+                    if replay_fail_count > 0:
+                        reasons.append(f"replay_failures:{replay_fail_count}")
+                    if isinstance(surrogate_report, dict) and surrogate_report.get("ok"):
+                        sim_metrics = ((surrogate_report.get("simulation") or {}) if isinstance(surrogate_report.get("simulation"), dict) else {}).get("metrics", {})
+                        model = surrogate_report.get("model", {}) if isinstance(surrogate_report.get("model"), dict) else {}
+                        if bool((sim_metrics or {}).get("faceplant", False)):
+                            reasons.append("surrogate_faceplant_risk")
+                        if float((model or {}).get("confidence", 0.0) or 0.0) < 0.35:
+                            reasons.append("surrogate_confidence_low")
+                    if int(recommendation.get("score_pct", 0)) < 60:
+                        reasons.append("recommendation_score_low")
+
+                    gate_ok = len(reasons) == 0
+                    preflight_node: Optional[Dict[str, Any]] = None
+                    signature = _build_tuning_apply_signature(family, target)
+                    if gate_ok:
+                        preflight_node = tuning_preflight.issue(
+                            family=family,
+                            signature=signature,
+                            score_pct=int(recommendation.get("score_pct", 0)),
+                            notes=["preflight_gate_ok"],
+                        )
+
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "preflight": {
+                                "gate_ok": gate_ok,
+                                "family": family,
+                                "reasons": reasons,
+                                "recommendation_score_pct": int(recommendation.get("score_pct", 0)),
+                                "signature": signature,
+                                **(preflight_node or {}),
+                            },
+                            "recommendation": recommendation,
+                            "surrogate": surrogate_report,
+                            "replay": replay_reports,
+                        },
+                    )
+
                 if u.path == "/command":
                     cmd = str(body.get("cmd", "")).strip()
                     if not cmd:
@@ -4733,30 +5436,89 @@ def build_handler(
                     kp = float(body["kp"])
                     ki = float(body["ki"])
                     kd = float(body["kd"])
-                    snap = config_history.save_snapshot(source="/pid", status_before=gateway.get_status())
+                    status_before = gateway.get_status()
+                    current = {
+                        "kp": _status_float(status_before, "kp", default=31.0),
+                        "ki": _status_float(status_before, "ki", default=0.05),
+                        "kd": _status_float(status_before, "kd", default=1.05),
+                    }
+                    target = {"kp": kp, "ki": ki, "kd": kd}
+                    _guard_pid_apply(status_before, kp, ki, kd)
+                    preflight_used = _enforce_preflight_if_needed(
+                        preflight_store=tuning_preflight,
+                        body=body,
+                        family="pid",
+                        status_before=status_before,
+                        current=current,
+                        target=target,
+                    )
+                    snap = config_history.save_snapshot(source="/pid", status_before=status_before)
                     res = gateway.command(f"PID {kp} {ki} {kd}", expect_contains="OK PID", timeout=2.0)
-                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot()})
+                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot(), "preflight_id": preflight_used})
 
                 if u.path == "/motion":
                     kv = float(body["kv"])
                     kx = float(body["kx"])
-                    snap = config_history.save_snapshot(source="/motion", status_before=gateway.get_status())
+                    status_before = gateway.get_status()
+                    current = {
+                        "kv": _status_float(status_before, "kv", default=0.0),
+                        "kx": _status_float(status_before, "kx", default=0.0),
+                    }
+                    target = {"kv": kv, "kx": kx}
+                    _guard_motion_apply(status_before, kv, kx)
+                    preflight_used = _enforce_preflight_if_needed(
+                        preflight_store=tuning_preflight,
+                        body=body,
+                        family="motion",
+                        status_before=status_before,
+                        current=current,
+                        target=target,
+                    )
+                    snap = config_history.save_snapshot(source="/motion", status_before=status_before)
                     res = gateway.command(f"MOTION {kv} {kx}", expect_contains="OK MOTION", timeout=2.0)
-                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot()})
+                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot(), "preflight_id": preflight_used})
 
                 if u.path == "/setpoint":
                     deg = float(body["deg"])
-                    snap = config_history.save_snapshot(source="/setpoint", status_before=gateway.get_status())
+                    status_before = gateway.get_status()
+                    current = {"deg": _status_float(status_before, "set", default=0.0)}
+                    target = {"deg": deg}
+                    _guard_setpoint_apply(status_before, deg)
+                    preflight_used = _enforce_preflight_if_needed(
+                        preflight_store=tuning_preflight,
+                        body=body,
+                        family="setpoint",
+                        status_before=status_before,
+                        current=current,
+                        target=target,
+                    )
+                    snap = config_history.save_snapshot(source="/setpoint", status_before=status_before)
                     res = gateway.command(f"SETPOINT {deg}", expect_contains="OK SETPOINT", timeout=2.0)
-                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot()})
+                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot(), "preflight_id": preflight_used})
 
                 if u.path == "/limits":
                     out_max = float(body["out_max"])
                     tip_deg = float(body["tip_deg"])
                     i_max = float(body["i_max"])
-                    snap = config_history.save_snapshot(source="/limits", status_before=gateway.get_status())
+                    status_before = gateway.get_status()
+                    current = {
+                        "out_max": _status_float(status_before, "outMax", "out_max", default=180.0),
+                        "tip_deg": _status_float(status_before, "tipDeg", "tip_deg", default=35.0),
+                        "i_max": _status_float(status_before, "iMax", "i_max", default=70.0),
+                    }
+                    target = {"out_max": out_max, "tip_deg": tip_deg, "i_max": i_max}
+                    _guard_limits_apply(status_before, out_max, tip_deg, i_max)
+                    preflight_used = _enforce_preflight_if_needed(
+                        preflight_store=tuning_preflight,
+                        body=body,
+                        family="limits",
+                        status_before=status_before,
+                        current=current,
+                        target=target,
+                    )
+                    snap = config_history.save_snapshot(source="/limits", status_before=status_before)
                     res = gateway.command(f"LIMITS {out_max} {tip_deg} {i_max}", expect_contains="OK LIMITS", timeout=2.0)
-                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot()})
+                    return _json(self, 200, {"ok": True, "result": res, "snapshot": snap, "status": gateway.get_status(), "control": control.snapshot(), "preflight_id": preflight_used})
 
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except KeyError as exc:
@@ -4779,6 +5541,12 @@ def build_handler(
                     return _json(self, 404, {"ok": False, "error": msg})
                 if msg in {"unauthenticated", "openai_api_key_missing"}:
                     return _json(self, 401, {"ok": False, "error": msg})
+                if msg == "tuning_delta_too_large_while_balancing":
+                    return _json(self, 409, {"ok": False, "error": msg, "control": control.snapshot()})
+                if msg.startswith("invalid_tuning_value:"):
+                    return _json(self, 400, {"ok": False, "error": msg})
+                if msg in {"preflight_required", "preflight_invalid", "preflight_mismatch"}:
+                    return _json(self, 428, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg in {"estop_latched", "session_stale"}:
                     return _json(self, 423, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg == "arm_not_prepared":
@@ -4909,6 +5677,7 @@ def main() -> int:
         except Exception as exc:
             print(f"codex agent init failed (tool support disabled): {exc}")
     auth = AuthManager(repo_root)
+    mission_memory = MissionMemoryStore(repo_root)
     profiles = RobotProfilesManager(repo_root)
     config_history = ConfigHistoryManager(repo_root)
     telemetry = TelemetryHub(gw, control, host_capture, args.host, args.telemetry_port)
@@ -4928,7 +5697,7 @@ def main() -> int:
 
     server = ThreadingHTTPServer(
         (args.host, args.http_port),
-        build_handler(gw, control, commissioning, host_capture, firmware, ai, ai_profiles, knowledge, auth, profiles, config_history, args.telemetry_port, codex_agent),
+        build_handler(gw, control, commissioning, host_capture, firmware, ai, ai_profiles, knowledge, auth, mission_memory, profiles, config_history, args.telemetry_port, codex_agent),
     )
     print(f"bridge listening on http://{args.host}:{args.http_port}")
     try:

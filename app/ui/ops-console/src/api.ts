@@ -222,6 +222,42 @@ export type SurrogateSimResult = {
   error?: string;
 };
 
+export type TuningCapabilities = {
+  pid: { runtime_apply_supported: boolean; source: string };
+  motion: { runtime_apply_supported: boolean; source: string };
+  setpoint: { runtime_apply_supported: boolean; source: string };
+  limits: { runtime_apply_supported: boolean; source: string };
+  lowpass_cutoff_hz: { runtime_apply_supported: boolean; source: string; command_candidates?: string[] };
+  conditional_integration: { runtime_apply_supported: boolean; source: string; command_candidates?: string[] };
+  status_keys?: string[];
+};
+
+export type TuningRecommendation = {
+  ok: boolean;
+  score_pct: number;
+  readiness: 'good' | 'watch' | 'risky';
+  recommendations: Array<{
+    priority: 'high' | 'medium' | 'low';
+    action: string;
+    rationale: string;
+    confidence: number;
+    changes: Record<string, unknown>;
+    runtime_apply_supported: boolean;
+  }>;
+  procedure: string[];
+  variables_available: Record<string, { runtime_apply_supported: boolean; fields: string[] }>;
+};
+
+export type TuningPreflight = {
+  gate_ok: boolean;
+  family: 'pid' | 'motion' | 'setpoint' | 'limits';
+  reasons: string[];
+  recommendation_score_pct: number;
+  signature: string;
+  preflight_id?: string;
+  expires_in_s?: number;
+};
+
 export type AiHistoryItem = {
   ts: number;
   role: 'user' | 'assistant';
@@ -766,6 +802,79 @@ export async function toolingSurrogateSim(payload: {
   return d.surrogate;
 }
 
+export async function toolingTuningRecommend(payload: {
+  current: {
+    kp: number;
+    ki: number;
+    kd: number;
+    kv: number;
+    kx: number;
+    setpoint: number;
+    out_max: number;
+    tip_deg: number;
+    i_max: number;
+    lowpass_cutoff_hz: number;
+    conditional_integration: boolean;
+  };
+  telemetry?: {
+    angle_variance?: number;
+    output_saturation_pct?: number;
+    oscillation_detected?: boolean;
+    oscillation_freq_hz?: number;
+    mode?: string;
+  };
+  trace_paths?: string[];
+  duration_s?: number;
+}): Promise<{ recommendation: TuningRecommendation; surrogate?: SurrogateSimResult | null; replay?: Array<Record<string, unknown>> }> {
+  const d = await req<{ ok: true; recommendation: TuningRecommendation; surrogate?: SurrogateSimResult | null; replay?: Array<Record<string, unknown>> }>(
+    '/tooling/tuning/recommend',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    120000,
+  );
+  return { recommendation: d.recommendation, surrogate: d.surrogate, replay: d.replay };
+}
+
+export async function toolingTuningCapabilities(): Promise<{ capabilities: TuningCapabilities; source: string }> {
+  const d = await req<{ ok: true; capabilities: TuningCapabilities; source: string }>('/tooling/tuning/capabilities');
+  return { capabilities: d.capabilities, source: d.source };
+}
+
+export async function toolingTuningPreflight(payload: {
+  family: 'pid' | 'motion' | 'setpoint' | 'limits';
+  target: Record<string, number>;
+  current?: {
+    kp?: number;
+    ki?: number;
+    kd?: number;
+    kv?: number;
+    kx?: number;
+    setpoint?: number;
+    out_max?: number;
+    tip_deg?: number;
+    i_max?: number;
+    lowpass_cutoff_hz?: number;
+    conditional_integration?: boolean;
+  };
+  telemetry?: {
+    angle_variance?: number;
+    output_saturation_pct?: number;
+    oscillation_detected?: boolean;
+    oscillation_freq_hz?: number;
+    mode?: string;
+  };
+  trace_paths?: string[];
+  duration_s?: number;
+}): Promise<{ preflight: TuningPreflight; recommendation: TuningRecommendation }> {
+  const d = await req<{ ok: true; preflight: TuningPreflight; recommendation: TuningRecommendation }>('/tooling/tuning/preflight', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, 120000);
+  return { preflight: d.preflight, recommendation: d.recommendation };
+}
+
 export async function aiStatus(): Promise<{ ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[] }> {
   const d = await req<{ ok: true; ai: AiStatus; history: AiHistoryItem[]; threads?: AiThreadSummary[] }>('/ai/status');
   return { ai: d.ai, history: d.history, threads: d.threads ?? [] };
@@ -1158,28 +1267,36 @@ export async function configRevert(snapshotId?: string): Promise<{ revert: Confi
   return { revert: d.revert, control: d.control };
 }
 
-export async function setPid(kp: number, ki: number, kd: number): Promise<{ status: Status; control?: ControlState }> {
+export async function setPid(kp: number, ki: number, kd: number, preflightId?: string): Promise<{ status: Status; control?: ControlState; preflight_id?: string | null }> {
   const d = await req<{ ok: true; status: Status; control?: ControlState }>('/pid', {
     method: 'POST',
-    body: JSON.stringify({ kp, ki, kd }),
+    body: JSON.stringify({ kp, ki, kd, preflight_id: preflightId }),
   });
-  return { status: d.status, control: d.control };
+  return { status: d.status, control: d.control, preflight_id: (d as { preflight_id?: string }).preflight_id ?? null };
 }
 
-export async function setMotion(kv: number, kx: number): Promise<{ status: Status; control?: ControlState }> {
+export async function setMotion(kv: number, kx: number, preflightId?: string): Promise<{ status: Status; control?: ControlState; preflight_id?: string | null }> {
   const d = await req<{ ok: true; status: Status; control?: ControlState }>('/motion', {
     method: 'POST',
-    body: JSON.stringify({ kv, kx }),
+    body: JSON.stringify({ kv, kx, preflight_id: preflightId }),
   });
-  return { status: d.status, control: d.control };
+  return { status: d.status, control: d.control, preflight_id: (d as { preflight_id?: string }).preflight_id ?? null };
 }
 
-export async function setSetpoint(deg: number): Promise<{ status: Status; control?: ControlState }> {
+export async function setSetpoint(deg: number, preflightId?: string): Promise<{ status: Status; control?: ControlState; preflight_id?: string | null }> {
   const d = await req<{ ok: true; status: Status; control?: ControlState }>('/setpoint', {
     method: 'POST',
-    body: JSON.stringify({ deg }),
+    body: JSON.stringify({ deg, preflight_id: preflightId }),
   });
-  return { status: d.status, control: d.control };
+  return { status: d.status, control: d.control, preflight_id: (d as { preflight_id?: string }).preflight_id ?? null };
+}
+
+export async function setLimits(outMax: number, tipDeg: number, iMax: number, preflightId?: string): Promise<{ status: Status; control?: ControlState; preflight_id?: string | null }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/limits', {
+    method: 'POST',
+    body: JSON.stringify({ out_max: outMax, tip_deg: tipDeg, i_max: iMax, preflight_id: preflightId }),
+  });
+  return { status: d.status, control: d.control, preflight_id: (d as { preflight_id?: string }).preflight_id ?? null };
 }
 
 export type RagStats = {
