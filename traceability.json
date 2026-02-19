@@ -2,8 +2,8 @@
   "prd_path": "docs/PRD_EMBEDDED_VECTORING.md",
   "prd_version": "1.1",
   "branch": "recover/uiux-restore-2026-02-19",
-  "commit": "793cc8f",
-  "generated_at": "2026-02-19T14:51:14Z",
+  "commit": "f603460",
+  "generated_at": "2026-02-19T17:23:53Z",
   "capabilities": [
     {
       "capability": "RAG core (chunk/embed/search)",
