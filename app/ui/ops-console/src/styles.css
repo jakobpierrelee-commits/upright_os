@@ -2611,6 +2611,21 @@ pre,
   color: var(--text-2);
 }
 
+.tool-call-reasoning-section {
+  background: rgba(30, 58, 95, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  border-left: 2px solid rgba(96, 165, 250, 0.5);
+}
+
+.tool-call-reasoning {
+  margin: 0;
+  font-size: 0.75rem;
+  color: rgba(191, 219, 254, 0.9);
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 .tool-call-error-section {
   background: rgba(40, 18, 18, 0.4);
   border-radius: var(--radius-sm);

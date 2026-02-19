@@ -63,6 +63,18 @@ const mockLongJsonToolCall: ToolCallResult = {
   },
 };
 
+const mockToolCallWithReasoning: ToolCallResult = {
+  tool: 'query_telemetry',
+  args: { limit: 5 },
+  result: {
+    ok: true,
+    tool: 'query_telemetry',
+    data: { rows: [], count: 0 },
+    execution_time_ms: 18,
+  },
+  reasoning: 'I need to check the recent telemetry data to understand the current robot state before making tuning recommendations.',
+};
+
 describe('ToolCallCard', () => {
   it('renders success tool call with correct badge and status', () => {
     render(<ToolCallCard toolCall={mockSuccessToolCall} />);
@@ -171,6 +183,26 @@ describe('ToolCallCard', () => {
     render(<ToolCallCard toolCall={mockSuccessToolCall} defaultExpanded />);
     
     expect(screen.getByText('Arguments')).toBeInTheDocument();
+  });
+
+  it('shows reasoning when present and expanded', () => {
+    render(<ToolCallCard toolCall={mockToolCallWithReasoning} defaultExpanded />);
+    
+    expect(screen.getByText('Why this tool?')).toBeInTheDocument();
+    expect(screen.getByText(/I need to check the recent telemetry/)).toBeInTheDocument();
+  });
+
+  it('does not show reasoning section when reasoning is not present', () => {
+    render(<ToolCallCard toolCall={mockSuccessToolCall} defaultExpanded />);
+    
+    expect(screen.queryByText('Why this tool?')).not.toBeInTheDocument();
+  });
+
+  it('does not show reasoning when collapsed even if present', () => {
+    render(<ToolCallCard toolCall={mockToolCallWithReasoning} />);
+    
+    // Collapsed by default
+    expect(screen.queryByText('Why this tool?')).not.toBeInTheDocument();
   });
 });
 

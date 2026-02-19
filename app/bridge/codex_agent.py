@@ -256,6 +256,10 @@ class CodexAgent:
                 }
 
             # Execute tool calls
+            # Capture assistant's reasoning (content field alongside tool_calls)
+            assistant_msg = response.get("choices", [{}])[0].get("message", {})
+            tool_reasoning = (assistant_msg.get("content") or "").strip()
+            
             tool_results = []
             for tc in tool_calls:
                 tool_name = tc.get("function", {}).get("name", "")
@@ -305,11 +309,16 @@ class CodexAgent:
                     error=result.error,
                 )
 
-                executed_tools.append({
+                # Include reasoning on first tool of the batch
+                tool_entry = {
                     "tool": tool_name,
                     "args": tool_args,
                     "result": result.to_dict(),
-                })
+                }
+                # Attach reasoning to first tool call in this iteration
+                if tool_reasoning and len([t for t in executed_tools if "reasoning" in t]) == 0:
+                    tool_entry["reasoning"] = tool_reasoning
+                executed_tools.append(tool_entry)
 
                 tool_results.append({
                     "tool_call_id": tool_call_id,

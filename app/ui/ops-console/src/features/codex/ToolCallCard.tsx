@@ -10,6 +10,7 @@ export type ToolCallResult = {
     error?: string;
     execution_time_ms: number;
   };
+  reasoning?: string;
 };
 
 type ToolCategory = 'read' | 'write' | 'flash';
@@ -55,7 +56,7 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const toggle = useCallback(() => setExpanded((v) => !v), []);
 
-  const { tool, args, result } = toolCall;
+  const { tool, args, result, reasoning } = toolCall;
   const category = getToolCategory(tool);
   const ok = result?.ok ?? false;
   const error = result?.error;
@@ -64,6 +65,7 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: Props) {
 
   const hasArgs = args && Object.keys(args).length > 0;
   const hasData = data && Object.keys(data).length > 0;
+  const hasReasoning = Boolean(reasoning?.trim());
 
   return (
     <article
@@ -88,6 +90,13 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: Props) {
 
       {expanded && (
         <div className="tool-call-details">
+          {hasReasoning && (
+            <div className="tool-call-section tool-call-reasoning-section">
+              <span className="tool-call-section-label">Why this tool?</span>
+              <p className="tool-call-reasoning">{reasoning}</p>
+            </div>
+          )}
+
           {hasArgs && (
             <div className="tool-call-section">
               <span className="tool-call-section-label">Arguments</span>
