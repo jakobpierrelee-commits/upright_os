@@ -1943,6 +1943,9 @@ pre,
 .setup-rig {
   position: relative;
   overflow: hidden;
+  height: 250px;
+  display: flex;
+  flex-direction: column;
 }
 
 .setup-rig::before {
@@ -1984,11 +1987,15 @@ pre,
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 32%) minmax(220px, 30%);
   gap: 10px;
-  min-height: 172px;
+  min-height: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .setup-rig-main {
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .setup-rig-side {
@@ -1999,6 +2006,9 @@ pre,
   display: grid;
   align-content: start;
   gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .setup-rig-side p {
@@ -2007,6 +2017,8 @@ pre,
   color: var(--text-1);
   font-size: 0.78rem;
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .setup-rig-ref {
@@ -2017,6 +2029,9 @@ pre,
   display: grid;
   align-content: start;
   gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .setup-rig-ref p {
@@ -2025,12 +2040,16 @@ pre,
   color: var(--text-1);
   font-size: 0.76rem;
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .setup-rig-ref code {
   color: var(--accent-cyan);
   font-family: var(--font-mono);
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .setup-rig-test-note {
@@ -4297,19 +4316,21 @@ pre,
 
 .readiness-check-item {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   padding: 6px 8px;
   margin: 4px 0;
   background: var(--surface-0);
   border-radius: 6px;
-  align-items: center;
+  align-items: start;
   font-size: 0.85rem;
 }
 
 .check-name {
   color: var(--text-0);
   font-weight: 500;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .check-status {
@@ -4335,7 +4356,10 @@ pre,
 }
 
 .check-detail {
+  grid-column: 1 / -1;
   color: var(--text-2);
   font-size: 0.8rem;
-  text-align: right;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }

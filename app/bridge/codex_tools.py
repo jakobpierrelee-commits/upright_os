@@ -2005,17 +2005,14 @@ class CodexToolExecutor:
                 data={"message": "Gateway not configured"},
             )
 
-        # Check serial busy
-        try:
-            if self.gateway.is_busy():
-                return ToolResult(
-                    ok=False,
-                    tool="safe_rollback",
-                    error=T2Errors.E_SERIAL_BUSY,
-                    data={"message": "Serial port busy, try again"},
-                )
-        except AttributeError:
-            pass  # is_busy not implemented
+        # Check serial busy (use hasattr for gateways that may not implement is_busy)
+        if hasattr(self.gateway, "is_busy") and self.gateway.is_busy():
+            return ToolResult(
+                ok=False,
+                tool="safe_rollback",
+                error=T2Errors.E_SERIAL_BUSY,
+                data={"message": "Serial port busy, try again", "retry_after_ms": 500},
+            )
 
         # Find matching checkpoint
         try:
@@ -2195,6 +2192,15 @@ class CodexToolExecutor:
                 tool="run_experiment",
                 error=T1Errors.E_SERIAL_DISCONNECTED,
                 data={"message": "Gateway not configured"},
+            )
+
+        # Check serial busy before starting experiment
+        if hasattr(self.gateway, "is_busy") and self.gateway.is_busy():
+            return ToolResult(
+                ok=False,
+                tool="run_experiment",
+                error=T2Errors.E_SERIAL_BUSY,
+                data={"message": "Serial port busy, cannot start experiment", "retry_after_ms": 500},
             )
 
         # Generate experiment ID

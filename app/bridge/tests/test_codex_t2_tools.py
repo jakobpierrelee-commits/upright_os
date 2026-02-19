@@ -266,6 +266,7 @@ class TestSafeRollback:
 
         assert not result.ok
         assert result.error == T2Errors.E_SERIAL_BUSY
+        assert result.data.get("retry_after_ms") == 500
 
     def test_rollback_no_db_fails(self):
         """safe_rollback without database should fail."""
@@ -312,9 +313,24 @@ class TestRunExperiment:
         assert not result.ok
         assert result.error == T2Errors.E_BLOCKED_COMMAND
 
+    def test_experiment_serial_busy_fails(self):
+        """run_experiment should fail when serial is busy."""
+        mock_gateway = MagicMock()
+        mock_gateway.is_busy.return_value = True
+
+        executor = self._make_executor(gateway=mock_gateway)
+        result = executor.execute("run_experiment", {
+            "change": {"cmd": "PID 20 0.1 0.5"}
+        })
+
+        assert not result.ok
+        assert result.error == T2Errors.E_SERIAL_BUSY
+        assert result.data.get("retry_after_ms") == 500
+
     def test_experiment_safe_command_allowed(self):
         """run_experiment should allow PID commands."""
         mock_gateway = MagicMock()
+        mock_gateway.is_busy.return_value = False
         mock_gateway.get_status.return_value = {
             "kp": 18.0, "ki": 0.1, "kd": 0.6,
             "ang": 1.0, "raw": 1.1, "out": 50, "mode": "BALANCING", "gyro": 0.1,
@@ -355,6 +371,7 @@ class TestRunExperiment:
             }
 
         mock_gateway = MagicMock()
+        mock_gateway.is_busy.return_value = False
         mock_gateway.get_status = mock_get_status
         mock_gateway.health.return_value = {"connected": True}
         mock_gateway.command.return_value = {"ok": True}
@@ -395,6 +412,7 @@ class TestRunExperiment:
             }
 
         mock_gateway = MagicMock()
+        mock_gateway.is_busy.return_value = False
         mock_gateway.get_status = mock_get_status
         mock_gateway.health.return_value = {"connected": True}
         mock_gateway.command.return_value = {"ok": True}
@@ -418,6 +436,7 @@ class TestRunExperiment:
     def test_experiment_returns_comparison(self):
         """run_experiment should return baseline vs result comparison."""
         mock_gateway = MagicMock()
+        mock_gateway.is_busy.return_value = False
         mock_gateway.get_status.return_value = {
             "kp": 18.0, "ki": 0.1, "kd": 0.6,
             "ang": 1.0, "raw": 1.1, "out": 50, "mode": "BALANCING", "gyro": 0.1,
