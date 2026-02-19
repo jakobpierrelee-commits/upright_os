@@ -553,6 +553,8 @@ class CodexDB:
 
             cur.execute("SELECT COUNT(*) FROM embeddings_meta")
             embedded_docs_count = cur.fetchone()[0]
+            cur.execute("SELECT MAX(embedded_at) FROM embeddings_meta")
+            latest_embedding_ts = cur.fetchone()[0]
 
             # Tool audit count
             try:
@@ -569,6 +571,7 @@ class CodexDB:
             "checkpoint_count": checkpoint_count,
             "doc_chunk_count": chunk_count,
             "embedded_docs_count": embedded_docs_count,
+            "latest_embedding_ts": float(latest_embedding_ts) if latest_embedding_ts is not None else None,
             "tool_audit_count": tool_audit_count,
         }
 

@@ -1188,9 +1188,40 @@ export type RagStats = {
   embedding_model: string;
   chunk_size: number;
   has_openai_key: boolean;
+  latest_embedding_ts?: number | null;
 };
 
 export async function aiRagStats(): Promise<RagStats> {
   const d = await req<{ ok: true; stats: RagStats; ts: number }>('/ai/rag/stats');
   return d.stats;
+}
+
+export type RagIndexResponse = {
+  docs: {
+    files_processed: number;
+    files_skipped: number;
+    chunks_created: number;
+    errors: Array<{ file: string; error: string }>;
+  };
+  sketches: {
+    files_processed: number;
+    files_skipped: number;
+    chunks_created: number;
+    errors: Array<{ file: string; error: string }>;
+  };
+  elapsed_ms: number;
+  ts: number;
+};
+
+export async function aiRagIndex(payload?: { paths?: string[]; force_reindex?: boolean }): Promise<RagIndexResponse> {
+  const d = await req<{ ok: true } & RagIndexResponse>('/ai/rag/index', {
+    method: 'POST',
+    body: JSON.stringify(payload ?? { force_reindex: true }),
+  }, 120000);
+  return {
+    docs: d.docs,
+    sketches: d.sketches,
+    elapsed_ms: d.elapsed_ms,
+    ts: d.ts,
+  };
 }

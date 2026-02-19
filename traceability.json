@@ -2,8 +2,8 @@
   "prd_path": "docs/PRD_EMBEDDED_VECTORING.md",
   "prd_version": "1.1",
   "branch": "recover/uiux-restore-2026-02-19",
-  "commit": "6ae87ad",
-  "generated_at": "2026-02-19T10:28:27Z",
+  "commit": "793cc8f",
+  "generated_at": "2026-02-19T14:51:14Z",
   "capabilities": [
     {
       "capability": "RAG core (chunk/embed/search)",
@@ -151,8 +151,8 @@
     },
     {
       "capability": "RAG observability in UI",
-      "status": "Partial",
-      "notes": "Backend endpoints exist; dedicated UI status/index affordances still limited",
+      "status": "Implemented",
+      "notes": "In-panel RAG status with freshness, manual refresh, and explicit reindex controls",
       "files": [
         {
           "path": "app/bridge/server.py",
@@ -165,10 +165,16 @@
           "exists": true,
           "test_file": null,
           "test_exists": false
+        },
+        {
+          "path": "app/ui/ops-console/src/features/codex/RagStatusBadge.tsx",
+          "exists": true,
+          "test_file": "app/ui/ops-console/src/features/codex/RagStatusBadge.test.tsx",
+          "test_exists": true
         }
       ],
       "all_files_exist": true,
-      "has_tests": false
+      "has_tests": true
     },
     {
       "capability": "Retrieval quality guardrails",
@@ -192,15 +198,31 @@
       "has_tests": true
     }
   ],
-  "tests_run": false,
-  "tests_passed": null,
-  "test_results": null,
+  "tests_run": true,
+  "tests_passed": true,
+  "test_results": {
+    "python_codex_tools": {
+      "passed": 37,
+      "failed": 0,
+      "ok": true
+    },
+    "python_rag": {
+      "passed": 27,
+      "failed": 0,
+      "ok": true
+    },
+    "ui_tests": {
+      "passed": 3,
+      "failed": 0,
+      "ok": true
+    }
+  },
   "summary": {
     "total_capabilities": 10,
-    "implemented": 9,
-    "partial": 1,
+    "implemented": 10,
+    "partial": 0,
     "files_verified": 10,
-    "with_tests": 8,
+    "with_tests": 9,
     "coverage_pct": 100.0
   }
 }

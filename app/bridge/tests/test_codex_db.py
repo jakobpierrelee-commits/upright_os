@@ -241,12 +241,15 @@ def test_stats():
         db.save_checkpoint(Checkpoint(ts=time.time(), robot_id="r1", rating="good"))
         db._last_telemetry_ts.clear()  # Reset downsample tracker
         db.log_telemetry(TelemetrySnapshot(ts=time.time(), robot_id="r1"))
+        db.save_embedding_meta(EmbeddingMeta(source_path="/docs/a.md", file_hash="abc", chunk_count=2, model="m"))
 
         stats = db.get_stats()
         assert stats["checkpoint_count"] == 1, "Checkpoint count wrong"
         assert stats["telemetry_count"] == 1, "Telemetry count wrong"
         assert stats["db_size_bytes"] > 0, "DB size should be > 0"
         assert "db_size_mb" in stats, "Should have MB stat"
+        assert "latest_embedding_ts" in stats, "Should include latest embedding freshness"
+        assert stats["latest_embedding_ts"] is not None, "Latest embedding timestamp should be populated"
 
         print(f"✓ Stats passed: {stats}")
     finally:

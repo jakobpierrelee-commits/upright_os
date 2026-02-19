@@ -507,6 +507,7 @@ class CodexRAG:
             "embedding_model": EMBEDDING_MODEL,
             "chunk_size": CHUNK_SIZE_CHARS,
             "has_openai_key": bool(self._openai_key),
+            "latest_embedding_ts": db_stats.get("latest_embedding_ts"),
         }
 
 

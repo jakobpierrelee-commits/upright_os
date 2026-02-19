@@ -38,7 +38,7 @@ Success condition is not "RAG exists"; success is an end-to-end, reliable operat
 | Serial busy protection (critical paths) | Implemented | Added busy guards + retry hint in rollback/experiment paths | `app/bridge/codex_tools.py`, `app/bridge/tests/test_codex_t2_tools.py` |
 | Tool execution UI transparency | Implemented | Tool call cards shown in chat UI | `app/ui/ops-console/src/features/codex/ToolCallCard.tsx` |
 | Thread/history persistence | Implemented | Atomic writes + backup recovery + rotation landed for resilient thread continuity | `app/bridge/ai_threads.json`, `app/bridge/server.py`, `app/bridge/tests/test_ai_thread_store_hardening.py` |
-| RAG observability in UI | Partial | Backend endpoints exist; dedicated UI status/index affordances still limited | `app/bridge/server.py`, `app/ui/ops-console/src/api.ts` |
+| RAG observability in UI | Implemented | In-panel RAG status with freshness, manual refresh, and explicit reindex controls | `app/bridge/server.py`, `app/ui/ops-console/src/api.ts`, `app/ui/ops-console/src/features/codex/RagStatusBadge.tsx` |
 | Retrieval quality guardrails | Implemented | Similarity thresholding + quality harness with precision/recall/MRR metrics | `app/bridge/codex_rag.py`, `scripts/rag_quality_harness.py` |
 
 ### 2.2 Recent Developments Since v1.0
