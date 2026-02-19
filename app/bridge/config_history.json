@@ -1,0 +1,2548 @@
+{
+  "snapshots": [
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "jiN28iCFFv0",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-2.370",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "1",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.027",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.525",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "1.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771446649.002469,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "kA8WnTQ1JgU",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-2.364",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "1",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.202",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.514",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "1.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771446716.91363,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "x27jGRd5hCM",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "6.931",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "1",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-5.087",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "8.521",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "1.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447153.4299672,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "TlS1sKF4FcQ",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.835",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.055",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.003",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447279.7492101,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "tXtpAHZVpiE",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.857",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.024",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.011",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447299.957537,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "jz3W2L17FWk",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-1.842",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.055",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "0.016",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447323.2707891,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "iYSAPPQe4AU",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.832",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.052",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "0.025",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447355.9065669,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "exFFmL1uBFY",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.876",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.043",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.041",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447472.932926,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "c5HPVRCAMOw",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.874",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.085",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.009",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447766.811908,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "Iju2GgMatr0",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "-1.884",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.006",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.033",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447843.627411,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "C3d_q3sVl3g",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-0.627",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "1",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.238",
+        "ipol": "1",
+        "kd": "1.050",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "1.249",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "115",
+        "wpos": "1.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447923.192807,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.05,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "mN1GSQZFxDk",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-10.133",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "2",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.040",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-8.289",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "2.0",
+        "wspd": "0.00",
+        "zero": "1.842"
+      },
+      "ts": 1771447981.964587,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "yz7IL6Z7Xd4",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-0.228",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.551",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-28.515",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "116",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "-28.296"
+      },
+      "ts": 1771449506.339859,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "6VV08yEAa3g",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "28.240",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "0",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.012",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.029",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "195",
+        "wpos": "0.0",
+        "wspd": "0.00",
+        "zero": "-28.296"
+      },
+      "ts": 1771451086.948981,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "biino_Mt8Pc",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "28.375",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "1145",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.131",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "0.074",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "195",
+        "wpos": "1145.0",
+        "wspd": "0.00",
+        "zero": "-28.296"
+      },
+      "ts": 1771456416.429852,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "auto-pre-apply",
+      "snapshot_id": "5WOWFHjpMn4",
+      "source": "ai/chat/stream",
+      "status_before": {
+        "ang": "28.161",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "2538",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.100",
+        "ipol": "1",
+        "kd": "1.150",
+        "ki": "0.050",
+        "kp": "31.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.135",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "195",
+        "wpos": "2538.0",
+        "wspd": "0.00",
+        "zero": "-28.296"
+      },
+      "ts": 1771456732.818697,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.15,
+          "ki": 0.05,
+          "kp": 31.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "oPlJXK0PuW0",
+      "source": "/pid",
+      "status_before": {
+        "ang": "1.982",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "4313",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.633",
+        "ipol": "1",
+        "kd": "1.200",
+        "ki": "0.050",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-26.171",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "195",
+        "wpos": "4313.0",
+        "wspd": "0.00",
+        "zero": "-28.296"
+      },
+      "ts": 1771456827.1133492,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.2,
+          "ki": 0.05,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "uXZdDlpm_EI",
+      "source": "/pid",
+      "status_before": {
+        "ang": "26.354",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "7264",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.017",
+        "ipol": "1",
+        "kd": "1.250",
+        "ki": "0.050",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.279",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "113",
+        "wpos": "7264.0",
+        "wspd": "0.00",
+        "zero": "-26.637"
+      },
+      "ts": 1771475400.0247018,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.25,
+          "ki": 0.05,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "h4oSJHE005I",
+      "source": "/pid",
+      "status_before": {
+        "ang": "27.995",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "11681",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.154",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.060",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.039",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "11681.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476307.038769,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.06,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "ES8PeIGus6s",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-1.973",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "12465",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "1.009",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.060",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-30.046",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "12465.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476322.2237241,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.06,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "kpW7P6SBzi0",
+      "source": "/pid",
+      "status_before": {
+        "ang": "4.416",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "12870",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.368",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.070",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-23.542",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "12870.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476332.9896488,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.07,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "GKDN6y6wpnk",
+      "source": "/pid",
+      "status_before": {
+        "ang": "0.309",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "13447",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.349",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.080",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-27.696",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "13447.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476343.989085,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.08,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "xibLzHefYHo",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-4.208",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "13986",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-1.953",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.110",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-32.348",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "13986.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476356.3104582,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.11,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "Oqj49_3xQR8",
+      "source": "/pid",
+      "status_before": {
+        "ang": "3.650",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "14303",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.136",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.160",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-24.208",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "14303.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476368.987627,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.16,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "X2rit1BF4HM",
+      "source": "/pid",
+      "status_before": {
+        "ang": "10.588",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "15361",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.109",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.200",
+        "kp": "31.500",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-17.437",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "15361.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476383.324266,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.2,
+          "kp": 31.5
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "FwTSXPfedQg",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-1.870",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "16011",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.029",
+        "ipol": "1",
+        "kd": "1.450",
+        "ki": "0.120",
+        "kp": "32.200",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-29.827",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "16011.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476395.8414028,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.45,
+          "ki": 0.12,
+          "kp": 32.2
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "5c35bg1UyNQ",
+      "source": "/pid",
+      "status_before": {
+        "ang": "12.473",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "16373",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.628",
+        "ipol": "1",
+        "kd": "1.500",
+        "ki": "0.120",
+        "kp": "32.200",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-15.370",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "16373.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476408.511938,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.5,
+          "ki": 0.12,
+          "kp": 32.2
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "rHCJb4zekD8",
+      "source": "/pid",
+      "status_before": {
+        "ang": "3.126",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "17374",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.414",
+        "ipol": "1",
+        "kd": "1.550",
+        "ki": "0.120",
+        "kp": "32.200",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-24.939",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "190",
+        "wpos": "17374.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771476428.164491,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.55,
+          "ki": 0.12,
+          "kp": 32.2
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "XrdQpRv9YtA",
+      "source": "/pid",
+      "status_before": {
+        "ang": "27.926",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "21231",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.243",
+        "ipol": "1",
+        "kd": "1.550",
+        "ki": "0.120",
+        "kp": "32.200",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-0.091",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "21231.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478203.3621068,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.55,
+          "ki": 0.12,
+          "kp": 32.2
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "0wa0en4NZBY",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "0.334",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "24078",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "-4.319",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "20.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "-6.68",
+        "pid": "-6.68",
+        "raw": "-27.322",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "24078.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478235.0501199,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 20.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "PhrlVww7ywo",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-0.785",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "28320",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "4.979",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "20.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "16.29",
+        "pid": "16.29",
+        "raw": "-28.558",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "28320.0",
+        "wspd": "199.36",
+        "zero": "-28.016"
+      },
+      "ts": 1771478261.8842812,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 20.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "0FN7VayUiTw",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-0.733",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "35434",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "-2.670",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.050",
+        "kp": "20.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "15.21",
+        "pid": "15.21",
+        "raw": "-28.466",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "35434.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478298.152389,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.05,
+          "kp": 20.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "m1OKs-BbZ34",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-8.472",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "37428",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "27.422",
+        "ipol": "1",
+        "kd": "0.160",
+        "ki": "0.050",
+        "kp": "20.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-36.841",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "37428.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478310.754654,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.16,
+          "ki": 0.05,
+          "kp": 20.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "Tv9Ad6WtI00",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-3.812",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "42203",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-11.998",
+        "ipol": "1",
+        "kd": "1.000",
+        "ki": "0.050",
+        "kp": "20.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-31.089",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "42203.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478351.131902,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.0,
+          "ki": 0.05,
+          "kp": 20.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "UlFMC4ow-Tc",
+      "source": "/pid",
+      "status_before": {
+        "ang": "1.750",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "43502",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-3.556",
+        "ipol": "1",
+        "kd": "4.000",
+        "ki": "1.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-26.278",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "43502.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478607.303919,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 4.0,
+          "ki": 1.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "LUgH9dfoWT4",
+      "source": "/pid",
+      "status_before": {
+        "ang": "1.162",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "43502",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.365",
+        "ipol": "1",
+        "kd": "4.000",
+        "ki": "2.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-26.829",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "43502.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478611.9215648,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 4.0,
+          "ki": 2.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "611Jt7qBX8A",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-1.284",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "46446",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "2.460",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-29.024",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "46446.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478634.557077,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "74V2nSNsvuE",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-2.692",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "47344",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "1.254",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "1.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-30.661",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "47344.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478653.269736,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 1.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "uFc57fBGHnk",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-2.171",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "47344",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-2.472",
+        "ipol": "1",
+        "kd": "1.000",
+        "ki": "1.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-30.178",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "47344.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478655.074854,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.0,
+          "ki": 1.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "-k1T6b7H_aY",
+      "source": "/pid",
+      "status_before": {
+        "ang": "6.236",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "48936",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "2.582",
+        "ipol": "1",
+        "kd": "1.000",
+        "ki": "1.000",
+        "kp": "26.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-21.495",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "48936.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478681.69275,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 1.0,
+          "ki": 1.0,
+          "kp": 26.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "Bxq_j8Ee_zI",
+      "source": "/pid",
+      "status_before": {
+        "ang": "4.322",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "51162",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-5.907",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "12.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-23.766",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "51162.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478697.381103,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 12.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "tDpYekoJs9c",
+      "source": "/pid",
+      "status_before": {
+        "ang": "-0.748",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "52758",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "-1.693",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "13.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "10.12",
+        "pid": "10.12",
+        "raw": "-28.774",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "52758.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478710.506474,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 13.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "MmopPMYS8xw",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "-0.879",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "70243",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "-8.655",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "12.72",
+        "pid": "12.72",
+        "raw": "-28.702",
+        "set": "0.030",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "70243.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478839.2849338,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.03
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "rYhi5VigrA8",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "1.752",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "79136",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "6.383",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "-24.53",
+        "pid": "-24.53",
+        "raw": "-26.353",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "79136.0",
+        "wspd": "199.36",
+        "zero": "-28.016"
+      },
+      "ts": 1771478927.755594,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "Hdz-7vo0nC4",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "0.230",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "82341",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "-1.159",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "-3.22",
+        "pid": "-3.22",
+        "raw": "-27.835",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "82341.0",
+        "wspd": "0.00",
+        "zero": "-28.016"
+      },
+      "ts": 1771478973.611878,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "kf7r2Pjd35A",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "3.127",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "2673",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "0",
+        "gyro": "15.235",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "BALANCING",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "-43.78",
+        "pid": "-43.78",
+        "raw": "1.684",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "187",
+        "wpos": "2673.0",
+        "wspd": "199.52",
+        "zero": "-0.047"
+      },
+      "ts": 1771479184.821038,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "rwfg_d3mGCs",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "-75.292",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "5806",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "0.105",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-75.356",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "5806.0",
+        "wspd": "0.00",
+        "zero": "-0.047"
+      },
+      "ts": 1771479213.3888588,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
+    },
+    {
+      "note": "",
+      "snapshot_id": "jbxiQRZAQvw",
+      "source": "/setpoint",
+      "status_before": {
+        "ang": "-75.284",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "5806",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.124",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "-75.330",
+        "set": "20.000",
+        "swap": "1",
+        "volRaw": "189",
+        "wpos": "5806.0",
+        "wspd": "0.00",
+        "zero": "-0.047"
+      },
+      "ts": 1771479216.438953,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 20.0
+        }
+      }
+    }
+  ]
+}

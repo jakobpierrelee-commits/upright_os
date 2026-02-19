@@ -15,5 +15,6 @@ export type Health = {
   port: string;
   baud: number;
   last_status: Status;
+  last_status_age_ms?: number | null;
   recent_line_count: number;
 };

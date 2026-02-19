@@ -1,4 +1,4 @@
-/*
+ARDUINO N/*
   Tumbller V2 - Repeatable Balance Controller
 
   Goals:
@@ -117,9 +117,11 @@ int manualR = 0;
 uint32_t lastLoopUs = 0;
 uint32_t lastTelMs = 0;
 const uint32_t LOOP_US = 5000;      // 200 Hz
-const uint32_t TEL_MS = 50;         // 20 Hz
+const uint32_t TEL_MS = 25;         // 20 Hz
+const uint32_t STATUS_MS = 100;     // 10 Hz heartbeat for host HUDs
 const uint32_t ARM_HOLD_MS = 800;   // upright hold before BALANCING
 uint32_t armStartMs = 0;
+uint32_t lastStatusMs = 0;
 
 // Burst logger
 bool burstPending = false;
@@ -128,6 +130,9 @@ uint16_t burstTarget = 30;
 uint16_t burstSent = 0;
 uint32_t burstDelayMs = 5000;
 uint32_t burstBalStartMs = 0;
+uint32_t burstStableStartMs = 0;
+const float BURST_BAL_ERR_DEG = 4.0f;
+const uint32_t BURST_STABLE_HOLD_MS = 800;
 
 // ------------------------------
 // Utils
@@ -298,7 +303,8 @@ void enterMode(Mode next) {
     if (burstPending) {
       burstActive = true;
       burstSent = 0;
-      burstBalStartMs = millis();
+      burstBalStartMs = 0;
+      burstStableStartMs = 0;
       Serial.print(F("BURSTCSV ARMED delay_ms="));
       Serial.print(burstDelayMs);
       Serial.print(F(" lines="));
@@ -309,6 +315,8 @@ void enterMode(Mode next) {
   if (next != BALANCING && burstActive) {
     burstActive = false;
     burstPending = false;
+    burstBalStartMs = 0;
+    burstStableStartMs = 0;
     Serial.println(F("BURSTCSV CANCELED"));
   }
 
@@ -404,7 +412,8 @@ void printStatus() {
   Serial.print(F("STATUS mode=")); Serial.print(modeName(mode));
   Serial.print(F(" estop=")); Serial.print(estop ? 1 : 0);
   Serial.print(F(" ang=")); Serial.print(angleCtrlDeg, 3);
-  Serial.print(F(" raw=")); Serial.print(kfAngle, 3);
+  Serial.print(F(" raw=")); Serial.print(accelAngleDeg, 3);
+  Serial.print(F(" gyro=")); Serial.print(gyroRateDps, 3);
   Serial.print(F(" set=")); Serial.print(cfg.setpointDeg, 3);
   Serial.print(F(" out=")); Serial.print(angleOut + motionOut, 2);
   Serial.print(F(" pid=")); Serial.print(angleOut, 2);
@@ -595,7 +604,8 @@ void handleCommand(const String& cmd) {
     burstSent = 0;
     burstPending = true;
     burstActive = (mode == BALANCING);
-    burstBalStartMs = burstActive ? millis() : 0;
+    burstBalStartMs = 0;
+    burstStableStartMs = 0;
     Serial.println(F("OK BURSTCSV"));
   } else if (cmd == "CSVHDR") {
     printCsvHeader();
@@ -657,6 +667,8 @@ void setup() {
   printCsvHeader();
   lastLoopUs = micros();
   lastTelMs = millis();
+  lastStatusMs = millis();
+  printStatus();
 }
 
 void loop() {
@@ -762,16 +774,30 @@ void loop() {
 
     bool emitBurst = false;
     if (burstActive) {
-      if ((millis() - burstBalStartMs) >= burstDelayMs && burstSent < burstTarget) {
-        emitBurst = true;
-        burstSent++;
-        if (burstSent >= burstTarget) {
-          burstActive = false;
-          burstPending = false;
-          Serial.println(F("BURSTCSV DONE"));
+      if (burstBalStartMs == 0) {
+        float balErr = fabs(cfg.setpointDeg - angleCtrlDeg);
+        if (balErr <= BURST_BAL_ERR_DEG) {
+          if (burstStableStartMs == 0) burstStableStartMs = millis();
+          if ((millis() - burstStableStartMs) >= BURST_STABLE_HOLD_MS) {
+            burstBalStartMs = millis();
+            Serial.print(F("BURSTCSV STABLE delay_ms="));
+            Serial.println(burstDelayMs);
+          }
+        } else {
+          burstStableStartMs = 0;
+        }
+      } else if ((millis() - burstBalStartMs) >= burstDelayMs && burstSent < burstTarget) {
+          emitBurst = true;
+          burstSent++;
+          if (burstSent >= burstTarget) {
+            burstActive = false;
+            burstPending = false;
+            burstBalStartMs = 0;
+            burstStableStartMs = 0;
+            Serial.println(F("BURSTCSV DONE"));
+          }
         }
       }
-    }
 
     if (cfg.csvLog || emitBurst) {
       Serial.print(F("CSV,"));
@@ -799,6 +825,11 @@ void loop() {
       Serial.print(cfg.qAngle, 5); Serial.print(',');
       Serial.print(cfg.qBias, 5); Serial.print(',');
       Serial.println(cfg.rMeasure, 5);
+    }
+
+    if ((millis() - lastStatusMs) >= STATUS_MS) {
+      lastStatusMs = millis();
+      printStatus();
     }
   }
 }

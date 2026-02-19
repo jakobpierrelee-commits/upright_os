@@ -1,0 +1,33 @@
+{
+  "active_version": "v1.1",
+  "versions": [
+    {
+      "version": "v1.1",
+      "label": "Balancer Tuning Pack (Trusted Sources)",
+      "created_at": "2026-02-18",
+      "playbook_file": "playbook_v1.1.md",
+      "theory_file": "theory_pid_kalman_v1.1.md",
+      "rules_file": "rules_and_constraints_v1.1.md",
+      "changelog": [
+        "Rebased playbook on trusted references (MIT, UMich CTMS, MathWorks, UNC Kalman tutorial)",
+        "Added explicit source-linked tuning guidance for inverted pendulum behaviors",
+        "Refined anti-windup and saturation handling rules for real actuators",
+        "Kept telemetry field mapping and bounded-delta policy aligned with UpRight firmware schema"
+      ]
+    },
+    {
+      "version": "v1.0",
+      "label": "Balancer Tuning Pack",
+      "created_at": "2026-02-18",
+      "playbook_file": "playbook_v1.0.md",
+      "theory_file": "theory_pid_kalman_v1.0.md",
+      "rules_file": "rules_and_constraints_v1.0.md",
+      "changelog": [
+        "Initial production tuning playbook",
+        "Added PID and Kalman reference equations",
+        "Added deterministic symptom->action rules with bounded deltas",
+        "Mapped all rules to UpRight telemetry/status fields"
+      ]
+    }
+  ]
+}

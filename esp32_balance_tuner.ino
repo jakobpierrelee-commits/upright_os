@@ -69,6 +69,14 @@ volatile bool emergencyStop = false;
 MPU6050 mpu(Wire);
 unsigned long lastImuMs = 0;
 
+// 2-state Kalman filter (angle + gyro bias)
+double kfAngleDeg = 0.0;
+double kfBiasDegPerSec = 0.0;
+double kfP00 = 1.0, kfP01 = 0.0, kfP10 = 0.0, kfP11 = 1.0;
+double Q_angle = 0.001;
+double Q_bias = 0.003;
+double R_measure = 0.03;
+
 // ------------------------------
 // Loop timing
 // ------------------------------
@@ -309,6 +317,7 @@ void broadcastTelemetry();
 void handleWsMessage(void* arg, uint8_t* data, size_t len);
 void runControlLoop();
 void setMotorOutput(double output);
+double kalmanUpdate(double measuredAngleDeg, double gyroRateDegPerSec, double dtSec);
 
 // ------------------------------
 // Setup
@@ -444,6 +453,14 @@ void setupIMU() {
   Serial.println("Keep robot still for gyro calibration...");
   delay(1000);
   mpu.calcOffsets();
+  mpu.update();
+  kfAngleDeg = mpu.getAngleY();  // adjust axis if your IMU orientation differs
+  kfBiasDegPerSec = 0.0;
+  kfP00 = 1.0;
+  kfP01 = 0.0;
+  kfP10 = 0.0;
+  kfP11 = 1.0;
+  currentAngle = kfAngleDeg;
   Serial.println("IMU calibrated.");
   lastImuMs = millis();
 }
@@ -590,11 +607,15 @@ void handleWsMessage(void* arg, uint8_t* data, size_t len) {
 void runControlLoop() {
   uint32_t nowUs = micros();
   if ((uint32_t)(nowUs - lastControlUs) < CONTROL_PERIOD_US) return;
+  double dtSec = (nowUs - lastControlUs) / 1000000.0;
+  if (dtSec <= 0.0) dtSec = CONTROL_PERIOD_US / 1000000.0;
   lastControlUs = nowUs;
 
   // IMU update
   mpu.update();
-  currentAngle = mpu.getAngleY();  // adjust axis for your mounting orientation
+  double accelAngleDeg = mpu.getAngleY();      // adjust axis for your mounting orientation
+  double gyroRateDegPerSec = mpu.getGyroY();   // same axis as accelAngleDeg
+  currentAngle = kalmanUpdate(accelAngleDeg, gyroRateDegPerSec, dtSec);
 
   // PID compute
   balancePID.Compute();
@@ -612,6 +633,33 @@ void runControlLoop() {
   }
 
   setMotorOutput(pidOutput);
+}
+
+double kalmanUpdate(double measuredAngleDeg, double gyroRateDegPerSec, double dtSec) {
+  double rate = gyroRateDegPerSec - kfBiasDegPerSec;
+  kfAngleDeg += dtSec * rate;
+
+  kfP00 += dtSec * (dtSec * kfP11 - kfP01 - kfP10 + Q_angle);
+  kfP01 -= dtSec * kfP11;
+  kfP10 -= dtSec * kfP11;
+  kfP11 += Q_bias * dtSec;
+
+  double innovation = measuredAngleDeg - kfAngleDeg;
+  double s = kfP00 + R_measure;
+  double k0 = kfP00 / s;
+  double k1 = kfP10 / s;
+
+  kfAngleDeg += k0 * innovation;
+  kfBiasDegPerSec += k1 * innovation;
+
+  double p00Tmp = kfP00;
+  double p01Tmp = kfP01;
+  kfP00 -= k0 * p00Tmp;
+  kfP01 -= k0 * p01Tmp;
+  kfP10 -= k1 * p00Tmp;
+  kfP11 -= k1 * p01Tmp;
+
+  return kfAngleDeg;
 }
 
 // ------------------------------
@@ -633,4 +681,3 @@ void setMotorOutput(double output) {
   int pwm = (int)constrain(abs(output), 0, 255);
   (void)pwm;
 }
-

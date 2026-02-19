@@ -1,84 +1,67 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent } from 'react';
 import {
-  authDeleteOpenAiKey,
-  authLogin,
-  authLogout,
-  authMe,
-  authOpenAiStatus,
-  authRegister,
-  authSetOpenAiKey,
   armConfirm,
   armPrepare,
   calZero,
   disarm,
   estopLatch,
   estopReset,
-  heartbeat,
   getHealth,
   getLines,
   getStatus,
-  commissioningArtifacts,
-  commissioningRun,
-  commissioningStatus,
-  firmwareCheck,
-  firmwareBoards,
-  firmwareCompile,
-  firmwareInstallCli,
-  firmwareReadSketch,
-  aiChat,
-  aiStatus,
-  firmwareStatus,
-  firmwareUpload,
-  firmwareUploadGuarded,
-  firmwareWriteSketch,
+  heartbeat,
+  probeCompat,
+  probeConnect,
+  configRevert,
   saveCfg,
   setMotion,
   setPid,
   setSetpoint,
   postCommand,
-  probeCompat,
-  probeConnect,
-  setSessionToken,
-} from './api';
-import type {
-  AiHistoryItem,
-  AiStatus,
-  AuthUser,
-  CompatReport,
-  ConnectProbeReport,
-  FirmwareBoards,
-  FirmwareCheck,
-  FirmwareStatus,
+  firmwareCheck,
+  firmwareInstallCli,
+  firmwareCompile,
+  firmwareUpload,
+  firmwareUploadGuarded,
+  firmwareBoards,
+  firmwareGenerateUnified,
+  firmwareGenerateDocsPack,
+  firmwareReadSketch,
+  firmwareWriteSketch,
+  serialDiag,
+  burstArm,
+  burstStatus,
+  profilesList,
+  profilesSave,
+  profilesValidate,
+  profilesActivate,
+  profilesDelete,
+  getOverwatchStatus,
+  type SerialDiag,
+  type BurstStatus,
+  type CompatReport,
+  type ConnectProbeReport,
+  type FirmwareDocsPack,
+  type OverwatchReport,
+  type RobotProfile,
+  type RobotValidationReport,
 } from './api';
 import type { ControlState, Health, Status } from './types';
+import { useUiAlerts } from './hooks/useUiAlerts';
+import { GlobalAlertRail } from './components/alerts/GlobalAlertRail';
+import { useBridgePolling } from './hooks/useBridgePolling';
+import { WorkbenchPanel } from './features/workbench/WorkbenchPanel';
+import { initialWorkbenchState, workbenchReducer } from './features/workbench/workbenchReducer';
+import { HudVisuals } from './pages/shared/HudVisuals';
+import { CodexPanel } from './features/codex/CodexPanel';
+import { useCodexWorkspace } from './hooks/useCodexWorkspace';
+import { useHudTelemetry, type ImuSample } from './hooks/useHudTelemetry';
+import { strings } from './strings';
+import { ConnectPreflightPage } from './pages/stage1/ConnectPreflightPage';
 
-type Tab = 'connect' | 'control' | 'tuning' | 'commissioning' | 'logs';
-type WorkbenchTab = 'sketch' | 'board' | 'serial' | 'codex';
+const HISTORY_MAX = 180;
 
-type Checkpoint = {
-  id: string;
-  ts: number;
-  rating: 'poor' | 'ok' | 'good' | 'great';
-  mode: string;
-  angle: number;
-  wpos: number;
-  pid: { kp: number; ki: number; kd: number };
-  motion: { kv: number; kx: number };
-  setpoint: number;
-};
-
-type RobotProfile = {
-  label: string;
-  chassis: string;
-  updated_at: number;
-  probe: ConnectProbeReport;
-};
-
-const CHECKPOINT_KEY = 'upright_ops_checkpoints_v1';
-const ROBOT_PROFILE_KEY = 'upright_ops_robot_profile_v1';
-const AUTH_SESSION_KEY = 'upright_ops_session_token_v1';
-const CHECKPOINT_MAX = 6;
+type MainTab = 'setup' | 'tune' | 'ide';
 
 const BAL_BOUNDS = {
   kp: 1.0,
@@ -89,456 +72,705 @@ const BAL_BOUNDS = {
   setpoint: 0.5,
 };
 
-const HISTORY_MAX = 180;
-const UI_BUILD = 'HUD-V5-LAYOUT';
-const TAB_FLOW: Array<{ id: Tab; step: string; label: string }> = [
-  { id: 'connect', step: '01', label: 'Connect' },
-  { id: 'control', step: '02', label: 'Control' },
-  { id: 'tuning', step: '03', label: 'Tuning' },
-  { id: 'commissioning', step: '04', label: 'Commission' },
-  { id: 'logs', step: '05', label: 'Logs' },
+const LOCAL_COMMAND_REFERENCE = [
+  '--- Command Reference (local fallback) ---',
+  'GET',
+  'HELP',
+  'ARM',
+  'DISARM',
+  'CAL ZERO',
+  'SAVECFG',
+  'PID <kp> <ki> <kd>',
+  'MOTION <kv> <kx>',
+  'SETPOINT <deg>',
+  'LIMITS <out_max> <tip_deg> <i_max>',
+  'LOGCSV',
+  'LOGT',
 ];
 
-type ImuSample = {
-  t: number;
-  kf: number;
-  raw: number;
-  gyro: number;
-  out: number;
-};
+const OVERWATCH_ACCEPT_STORAGE_KEY = 'upright.overwatch.accepted.v1';
 
-type UiAlert = {
-  id: string;
-  tone: 'error' | 'warn' | 'ok' | 'info';
-  text: string;
-  ts: number;
-};
+const KALMAN_STANDARD_SNIPPET = `// Standard IMU fusion contract (required by UpRight compatibility probe)
+// Inputs:
+//   measDeg  -> accel-derived tilt angle (degrees)
+//   gyroDps  -> gyro rate on balance axis (deg/s)
+// Output:
+//   kfAngle  -> filtered tilt estimate (publish as STATUS ang=...)
+// Also publish:
+//   STATUS raw=<accelAngleDeg> gyro=<gyroRateDps>
+float kalmanUpdate(float measDeg, float gyroDps, float dt) {
+  float rate = gyroDps - kfBias;
+  kfAngle += dt * rate;
+
+  P00 += dt * (dt * P11 - P01 - P10 + cfg.qAngle);
+  P01 -= dt * P11;
+  P10 -= dt * P11;
+  P11 += cfg.qBias * dt;
+
+  float innovation = measDeg - kfAngle;
+  float s = P00 + cfg.rMeasure;
+  float k0 = P00 / s;
+  float k1 = P10 / s;
+
+  kfAngle += k0 * innovation;
+  kfBias += k1 * innovation;
+
+  float p00 = P00;
+  float p01 = P01;
+  P00 -= k0 * p00;
+  P01 -= k0 * p01;
+  P10 -= k1 * p00;
+  P11 -= k1 * p01;
+  return kfAngle;
+}`;
 
 function n(v: string | undefined, fallback = 0): number {
   const parsed = Number.parseFloat(v ?? '');
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
+function defaultUnifiedProfileDraft(fqbn: string, port: string): string {
+  return JSON.stringify({
+    label: 'UpRight Unified',
+    board: {
+      fqbn: fqbn || 'arduino:avr:nano',
+      port: port || '/dev/cu.usbserial-2210',
+      mcu_family: 'avr',
+    },
+    hardware: {
+      imu_type: 'mpu6050',
+      motor_driver: 'tb6612',
+    },
+    pins: {
+      motor_l_pwm: 5,
+      motor_l_dir: 4,
+      motor_r_pwm: 6,
+      motor_r_dir: 7,
+      imu_sda: 18,
+      imu_scl: 19,
+      gate_enable: 8,
+      led: 13,
+      enc_l_a: -1,
+      enc_l_b: -1,
+      enc_r_a: -1,
+      enc_r_b: -1,
+    },
+  }, null, 2);
 }
 
-function seriesPoints(samples: ImuSample[], pick: (s: ImuSample) => number, minY: number, maxY: number): string {
-  if (samples.length <= 1) return '';
-  const w = 820;
-  const h = 160;
-  const span = Math.max(0.0001, maxY - minY);
-  return samples
-    .map((sample, i) => {
-      const x = (i / (samples.length - 1)) * w;
-      const yNorm = (pick(sample) - minY) / span;
-      const y = h - yNorm * h;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(' ');
+function miniPolar(cx: number, cy: number, r: number, degFromTopCw: number) {
+  const t = ((degFromTopCw - 90) * Math.PI) / 180;
+  return { x: cx + (r * Math.cos(t)), y: cy + (r * Math.sin(t)) };
 }
 
-function loadCheckpoints(): Checkpoint[] {
-  try {
-    const raw = localStorage.getItem(CHECKPOINT_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Checkpoint[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.slice(0, CHECKPOINT_MAX);
-  } catch {
-    return [];
-  }
+function miniSideArcPath(radius: number, value: number, pct: number): string {
+  const cx = 20;
+  const cy = 20;
+  const mag = Math.max(0, Math.min(1, pct));
+  if (mag <= 0.0001) return '';
+  const sweep = 170 * mag;
+  const start = miniPolar(cx, cy, radius, 0);
+  const end = miniPolar(cx, cy, radius, value >= 0 ? sweep : -sweep);
+  const sweepFlag = value >= 0 ? 1 : 0;
+  return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 ${sweepFlag} ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
 }
 
-function loadRobotProfile(): RobotProfile | null {
-  try {
-    const raw = localStorage.getItem(ROBOT_PROFILE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as RobotProfile;
-    if (!parsed || typeof parsed !== 'object' || !parsed.probe) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+function miniSemiTrackPath(radius: number): string {
+  const cx = 20;
+  const cy = 20;
+  const start = miniPolar(cx, cy, radius, -90);
+  const end = miniPolar(cx, cy, radius, 90);
+  return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
 }
 
-function parseRobotProfile(text: string): RobotProfile | null {
-  try {
-    const parsed = JSON.parse(text) as RobotProfile;
-    if (!parsed || typeof parsed !== 'object' || !parsed.probe) return null;
-    if (typeof parsed.label !== 'string' || typeof parsed.chassis !== 'string') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+function miniSemiFillPath(radius: number, value: number, pct: number): string {
+  const cx = 20;
+  const cy = 20;
+  const mag = Math.max(0, Math.min(1, pct));
+  if (mag <= 0.0001) return '';
+  const sweep = 90 * mag;
+  const start = miniPolar(cx, cy, radius, 0);
+  const end = miniPolar(cx, cy, radius, value >= 0 ? sweep : -sweep);
+  const sweepFlag = value >= 0 ? 1 : 0;
+  return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 ${sweepFlag} ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('connect');
+  const codexRailRef = useRef<HTMLElement | null>(null);
+  const statusbarRef = useRef<HTMLElement | null>(null);
+  const profileImportRef = useRef<HTMLInputElement | null>(null);
+  const lastAssistantApplyRef = useRef<string>('');
+  const lastOverwatchOverallRef = useRef<string>('unknown');
+  const missingTelemetryPromptedRef = useRef(false);
+  const [activeTab, setActiveTab] = useState<MainTab>('setup');
   const [health, setHealth] = useState<Health | null>(null);
+  const [bridgeOnline, setBridgeOnline] = useState(false);
   const [status, setStatus] = useState<Status>({});
   const [control, setControl] = useState<ControlState>({ arm_prepared: false, estop_latched: false });
   const [lines, setLines] = useState<string[]>([]);
-  const [msg, setMsgState] = useState<string>('');
-  const [uiAlerts, setUiAlerts] = useState<UiAlert[]>([]);
-
+  const [statusMsg, setStatusMsg] = useState('');
+  const [unifiedSketchName, setUnifiedSketchName] = useState('upright_unified_v1');
+  const [unifiedProfileJson, setUnifiedProfileJson] = useState(defaultUnifiedProfileDraft('arduino:avr:nano', '/dev/cu.usbserial-2210'));
 
   const [pid, setPidDraft] = useState({ kp: 31, ki: 0.05, kd: 1.05 });
   const [motion, setMotionDraft] = useState({ kv: 0, kx: 0 });
   const [setpoint, setSetpointDraft] = useState(0);
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(() => loadCheckpoints());
+  const [compat, setCompat] = useState<CompatReport | null>(null);
   const [connectProbe, setConnectProbe] = useState<ConnectProbeReport | null>(null);
-  const [robotProfile, setRobotProfile] = useState<RobotProfile | null>(() => loadRobotProfile());
-  const [profileLabel, setProfileLabel] = useState('My Robot');
+  const [validation, setValidation] = useState<RobotValidationReport | null>(null);
+  const [overwatch, setOverwatch] = useState<OverwatchReport | null>(null);
+  const [profileLabel, setProfileLabel] = useState('New Robot');
   const [chassisClass, setChassisClass] = useState('2wd_inverted_pendulum');
+  const [robotProfilesState, setRobotProfilesState] = useState<{ active_profile_id: string | null; profiles: RobotProfile[] }>({
+    active_profile_id: null,
+    profiles: [],
+  });
+  const [imuHistory, setImuHistory] = useState<ImuSample[]>([]);
+  const [serialHealth, setSerialHealth] = useState<SerialDiag | null>(null);
+  const [burstInfo, setBurstInfo] = useState<BurstStatus | null>(null);
+  const [burstDelayMs, setBurstDelayMs] = useState(3000);
+  const [burstLines, setBurstLines] = useState(80);
+  const [burstFreqHz, setBurstFreqHz] = useState(8);
+  const [armAdvisory, setArmAdvisory] = useState<string | null>(null);
+  const [revertBusy, setRevertBusy] = useState(false);
 
-  const [comm, setComm] = useState<{ state: string; running: boolean; returncode: number | null; log_tail: string[] }>({
-    state: 'idle',
-    running: false,
-    returncode: null,
-    log_tail: [],
-  });
-  const [commArtifacts, setCommArtifacts] = useState<{ latest_metrics: string | null; latest_run: string | null }>({
-    latest_metrics: null,
-    latest_run: null,
-  });
-  const [fw, setFw] = useState<FirmwareStatus>({
-    state: 'idle',
-    phase: 'none',
-    running: false,
-    started_at: null,
-    finished_at: null,
-    returncode: null,
-    last_cmd: [],
-    log_tail: [],
-    defaults: { sketch: '', fqbn: 'arduino:avr:nano', port: '' },
-  });
-  const [fwCheck, setFwCheck] = useState<FirmwareCheck | null>(null);
-  const [fwCfg, setFwCfg] = useState<{ sketch: string; fqbn: string; port: string }>({
-    sketch: '',
-    fqbn: 'arduino:avr:nano',
-    port: '',
-  });
-  const [workbenchOpen, setWorkbenchOpen] = useState(true);
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('board');
-  const [boardScan, setBoardScan] = useState<FirmwareBoards | null>(null);
-  const [sketchPath, setSketchPath] = useState('');
-  const [sketchContent, setSketchContent] = useState('');
-  const [serialWrite, setSerialWrite] = useState('');
-  const [ai, setAi] = useState<AiStatus>({ configured: false, model: 'unknown', history_len: 0 });
-  const [aiHistory, setAiHistory] = useState<AiHistoryItem[]>([]);
-  const [aiInput, setAiInput] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authAlert, setAuthAlert] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [openAiKeyInput, setOpenAiKeyInput] = useState('');
-  const [openAiModelInput, setOpenAiModelInput] = useState('gpt-5-mini');
   const [preflightOpen, setPreflightOpen] = useState(false);
+  const [overwatchOpen, setOverwatchOpen] = useState(false);
+  const [overwatchDiagNote, setOverwatchDiagNote] = useState('');
+  const [acceptedOverwatchChecks, setAcceptedOverwatchChecks] = useState<Record<string, number>>({});
+  const compactUi = true;
   const [preflightChecks, setPreflightChecks] = useState({
     ide_closed: false,
     bot_safe: false,
     correct_port: false,
     power_expected: false,
   });
-  const [imuHistory, setImuHistory] = useState<ImuSample[]>([]);
-  const [compat, setCompat] = useState<CompatReport | null>(null);
 
-  const draftsInitializedRef = useRef(false);
-  const compatRequestedRef = useRef(false);
-  const lastMsgRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const [workbenchState, workbenchDispatch] = useReducer(workbenchReducer, initialWorkbenchState);
+  const { fw, fwCheck, fwCfg, workbenchTab, boardScan, sketchPath, sketchContent, serialWrite } = workbenchState;
+  const sketchRevision = useMemo(() => {
+    const s = sketchContent ?? '';
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return `${sketchPath ?? ''}:${s.length}:${h >>> 0}`;
+  }, [sketchContent, sketchPath]);
 
-  const setMsg = (text: string) => {
-    const now = Date.now();
-    if (text === lastMsgRef.current.text && now - lastMsgRef.current.at < 1500) return;
-    lastMsgRef.current = { text, at: now };
-    setMsgState(text);
-  };
+  const setFw = useCallback((next: typeof fw) => workbenchDispatch({ type: 'set_fw', payload: next }), []);
+  const setFwCheck = useCallback((next: typeof fwCheck) => workbenchDispatch({ type: 'set_fw_check', payload: next }), []);
+  const setWorkbenchTab = useCallback((next: typeof workbenchTab) => workbenchDispatch({ type: 'set_workbench_tab', payload: next }), []);
+  const setBoardScan = useCallback((next: typeof boardScan) => workbenchDispatch({ type: 'set_board_scan', payload: next }), []);
+  const setSketchPath = useCallback((next: string) => workbenchDispatch({ type: 'set_sketch_path', payload: next }), []);
+  const setSketchContent = useCallback((next: string) => workbenchDispatch({ type: 'set_sketch_content', payload: next }), []);
+  const setSerialWrite = useCallback((next: string) => workbenchDispatch({ type: 'set_serial_write', payload: next }), []);
+  const setFwCfg = useCallback((next: typeof fwCfg | ((prev: typeof fwCfg) => typeof fwCfg)) => {
+    const resolved = typeof next === 'function' ? next(fwCfg) : next;
+    workbenchDispatch({ type: 'set_fw_cfg', payload: resolved });
+  }, [fwCfg]);
+
+  const {
+    active: alertsActive,
+    history: alertsHistory,
+    allActive: alertsAllActive,
+    filter: alertsFilter,
+    setFilter: setAlertsFilter,
+    pushAlert,
+    unlockSource: unlockAlertSource,
+    dismiss: dismissAlert,
+    clearNonError: clearNonErrorAlerts,
+    clearAll: clearAllAlerts,
+    clearHistory: clearAlertHistory,
+  } = useUiAlerts();
+
+  const setMsg = useCallback((text: string, source = 'general') => {
+    setStatusMsg(text);
+    pushAlert(text, undefined, source);
+  }, [pushAlert]);
+
+  const codex = useCodexWorkspace(setMsg);
+
+  useEffect(() => {
+    void codex.actions.bootstrap();
+  }, [codex.actions.bootstrap]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(OVERWATCH_ACCEPT_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object') return;
+      const next: Record<string, number> = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([k, v]) => {
+        if (typeof k === 'string' && typeof v === 'number' && Number.isFinite(v)) {
+          next[k] = v;
+        }
+      });
+      setAcceptedOverwatchChecks(next);
+    } catch {
+      // Ignore invalid persisted values.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OVERWATCH_ACCEPT_STORAGE_KEY, JSON.stringify(acceptedOverwatchChecks));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [acceptedOverwatchChecks]);
 
   const mode = status.mode ?? 'UNKNOWN';
   const balancing = mode === 'BALANCING';
-  const compatOk = compat?.ok === true;
   const compatKnown = compat !== null;
-
-  useEffect(() => {
-    if (!msg) return;
-    const lower = msg.toLowerCase();
-    const tone: UiAlert['tone'] =
-      /(error|failed|cannot|invalid|missing|blocked|denied|unknown|latched)/.test(lower) ? 'error' :
-      /(warn|risk|watch)/.test(lower) ? 'warn' :
-      /(ok|pass|saved|loaded|applied|prepared|confirmed|complete|detected|found|synced|removed|deleted|imported|copied|refreshed|started|logged)/.test(lower) ? 'ok' :
-      'info';
-
-    const next: UiAlert = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      tone,
-      text: msg,
-      ts: Date.now(),
-    };
-    setUiAlerts((prev) => [next, ...prev].slice(0, 8));
-  }, [msg]);
-
-  const dismissAlert = (id: string) => {
-    setUiAlerts((prev) => prev.filter((a) => a.id !== id));
-  };
-
-  const persistCheckpoints = (next: Checkpoint[]) => {
-    const clipped = next.slice(0, CHECKPOINT_MAX);
-    setCheckpoints(clipped);
-    localStorage.setItem(CHECKPOINT_KEY, JSON.stringify(clipped));
-  };
-
-  const syncFromBot = () => {
-    setPidDraft({ kp: n(status.kp, 31), ki: n(status.ki, 0.05), kd: n(status.kd, 1.05) });
-    setMotionDraft({ kv: n(status.kv, 0), kx: n(status.kx, 0) });
-    setSetpointDraft(n(status.set, 0));
-    setMsg('Drafts synced from bot status');
-  };
-
-  const makeCheckpoint = (rating: Checkpoint['rating']) => {
-    const cp: Checkpoint = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      ts: Date.now(),
-      rating,
-      mode,
-      angle: n(status.ang, 0),
-      wpos: n(status.wpos, 0),
-      pid: { ...pid },
-      motion: { ...motion },
-      setpoint,
-    };
-    persistCheckpoints([cp, ...checkpoints]);
-    setMsg(`Checkpoint saved (${rating})`);
-  };
-
-  const restoreDraftFromCheckpoint = (cp: Checkpoint) => {
-    setPidDraft({ ...cp.pid });
-    setMotionDraft({ ...cp.motion });
-    setSetpointDraft(cp.setpoint);
-    setMsg('Checkpoint loaded to drafts');
-  };
-
-  const applyCheckpointToBot = async (cp: Checkpoint, save = false) => {
-    if (control.estop_latched) {
-      setMsg('Cannot apply checkpoint while E-Stop is latched');
-      return;
+  const compatOk = compat?.ok === true;
+  const modeUpper = mode.toUpperCase();
+  const modeTone =
+    modeUpper === 'BALANCING' || modeUpper === 'ARMED'
+      ? 'good'
+      : modeUpper === 'SAFE_IDLE' || modeUpper === 'IDLE' || modeUpper === 'READY' || modeUpper === 'PREARM'
+        ? 'warn'
+        : modeUpper === 'FAULT' || modeUpper === 'ESTOP' || modeUpper === 'ERROR'
+          ? 'bad'
+          : 'unknown';
+  const angleParsed = Number.parseFloat(status.ang ?? '');
+  const angleAbs = Number.isFinite(angleParsed) ? Math.abs(angleParsed) : null;
+  const angleTone = angleAbs == null ? 'unknown' : angleAbs <= 6.0 ? 'good' : angleAbs <= 12.0 ? 'warn' : 'bad';
+  const estopTone = control.estop_latched ? 'bad' : 'good';
+  const compatTone = !compatKnown ? 'unknown' : compatOk ? 'good' : 'bad';
+  const burstHost = burstInfo?.host_capture ?? null;
+  const burstRows = burstHost?.rows ?? 0;
+  const burstTarget = burstHost?.target_lines ?? 0;
+  const burstProgressPct = burstTarget > 0 ? Math.max(0, Math.min(100, (burstRows / burstTarget) * 100)) : 0;
+  const burstStateLower = String(burstInfo?.state ?? 'idle').toLowerCase();
+  const burstTone =
+    burstStateLower.includes('captur') || burstStateLower.includes('done')
+      ? 'good'
+      : burstStateLower.includes('arm') || burstStateLower.includes('queue')
+        ? 'warn'
+        : burstStateLower.includes('fail') || burstStateLower.includes('error')
+          ? 'bad'
+          : 'unknown';
+  const overwatchEffective = useMemo(() => {
+    const checks = overwatch?.checks ?? [];
+    let pass = 0;
+    let warn = 0;
+    let fail = 0;
+    let accepted = 0;
+    for (const c of checks) {
+      if (c.status === 'pass') {
+        pass += 1;
+        continue;
+      }
+      if (acceptedOverwatchChecks[c.id]) {
+        accepted += 1;
+        continue;
+      }
+      if (c.status === 'warn') warn += 1;
+      else if (c.status === 'fail') fail += 1;
     }
-    const r1 = await setPid(cp.pid.kp, cp.pid.ki, cp.pid.kd);
-    if (r1.control) setControl(r1.control);
-    const r2 = await setMotion(cp.motion.kv, cp.motion.kx);
-    if (r2.control) setControl(r2.control);
-    const r3 = await setSetpoint(cp.setpoint);
-    setStatus(r3.status);
-    if (r3.control) setControl(r3.control);
-    if (save) await saveCfg();
-    restoreDraftFromCheckpoint(cp);
-    setMsg(save ? 'Checkpoint applied and saved to bot' : 'Checkpoint applied to bot');
-  };
+    const total = checks.length;
+    const overall = fail > 0 ? 'fail' : warn > 0 ? 'warn' : 'pass';
+    const score_pct = total > 0 ? Math.round(((pass + accepted + 0.5 * warn) / total) * 100) : 100;
+    return { pass, warn, fail, accepted, total, overall, score_pct };
+  }, [acceptedOverwatchChecks, overwatch?.checks]);
+  const overwatchTone = overwatchEffective.overall === 'fail' ? 'bad' : overwatchEffective.overall === 'warn' ? 'warn' : 'good';
+  const overwatchLabel = overwatchEffective.overall === 'fail' ? 'ISSUE' : overwatchEffective.overall === 'warn' ? 'WATCH' : 'OK';
+  const activeRobotProfile = useMemo(
+    () => robotProfilesState.profiles.find((p) => p.profile_id === robotProfilesState.active_profile_id) ?? null,
+    [robotProfilesState.active_profile_id, robotProfilesState.profiles],
+  );
 
-  const deleteCheckpoint = (id: string) => {
-    persistCheckpoints(checkpoints.filter((c) => c.id !== id));
-    setMsg('Checkpoint deleted');
-  };
-
-  const runCompatProbe = async () => {
+  const runCompatProbe = useCallback(async (): Promise<CompatReport | null> => {
+    unlockAlertSource('bridge.poll');
     try {
       const r = await probeCompat();
       setCompat(r);
       setMsg(r.ok ? 'Compatibility probe passed' : 'Compatibility probe failed');
+      return r;
     } catch (e) {
       setMsg(`compat probe error: ${(e as Error).message}`);
+      return null;
     }
-  };
+  }, [setMsg, unlockAlertSource]);
 
-  const runConnectWizard = async () => {
+  const loadAssistantPrompt = useCallback((prompt: string) => {
+    codex.actions.setAiInput(prompt);
+    setMsg('Prompt loaded into Codex input. Press Send when ready.', 'setup.prompt');
+  }, [codex.actions, setMsg]);
+
+  const refreshProfiles = useCallback(async () => {
     try {
-      const r = await probeConnect();
-      setConnectProbe(r);
-      if (r.compat) setCompat(r.compat);
-      setMsg(
-        r.ok
-          ? `Connect probe passed (${r.confidence_pct}% confidence)`
-          : `Connect probe incomplete (${r.confidence_pct}% confidence)`
-      );
+      const out = await profilesList();
+      setRobotProfilesState(out);
+    } catch (e) {
+      setMsg(`profiles list error: ${(e as Error).message}`);
+    }
+  }, [setMsg]);
+
+  const runConnectWizard = useCallback(async (): Promise<ConnectProbeReport | null> => {
+    unlockAlertSource('bridge.poll');
+    try {
+      const probe = await probeConnect();
+      setConnectProbe(probe);
+      if (probe.compat) setCompat(probe.compat);
+      setMsg(probe.ok ? 'Connect auto-detect passed' : 'Connect auto-detect incomplete');
+      return probe;
     } catch (e) {
       setMsg(`connect probe error: ${(e as Error).message}`);
+      return null;
     }
-  };
+  }, [setMsg, unlockAlertSource]);
 
-  const saveRobotProfile = () => {
-    if (!connectProbe) {
-      setMsg('Run connect probe first');
-      return;
+  const runProfileValidation = useCallback(async () => {
+    unlockAlertSource('bridge.poll');
+    try {
+      setMsg('Running validation checks...');
+      const out = await profilesValidate(12, 0.25);
+      setValidation(out);
+      setConnectProbe(out.connect);
+      if (out.compat) setCompat(out.compat);
+      setSerialHealth(out.serial);
+      setMsg(out.ok ? `Validation passed (${out.score_pct}%)` : `Validation failed (${out.score_pct}%)`);
+    } catch (e) {
+      setMsg(`validation error: ${(e as Error).message}`);
     }
-    const next: RobotProfile = {
-      label: profileLabel.trim() || 'My Robot',
-      chassis: chassisClass,
-      updated_at: Date.now(),
-      probe: connectProbe,
-    };
-    localStorage.setItem(ROBOT_PROFILE_KEY, JSON.stringify(next));
-    setRobotProfile(next);
-    setProfileLabel(next.label);
-    setChassisClass(next.chassis);
-    setMsg('Robot profile saved locally');
-  };
+  }, [setMsg, unlockAlertSource]);
 
-  const loadSavedRobotProfile = () => {
-    const loaded = loadRobotProfile();
-    if (!loaded) {
-      setMsg('No saved local profile found');
-      return;
-    }
-    setRobotProfile(loaded);
-    setConnectProbe(loaded.probe);
-    setProfileLabel(loaded.label);
-    setChassisClass(loaded.chassis);
-    if (loaded.probe.compat) setCompat(loaded.probe.compat);
-    setMsg(`Loaded local profile: ${loaded.label}`);
-  };
-
-  const deleteSavedRobotProfile = () => {
-    localStorage.removeItem(ROBOT_PROFILE_KEY);
-    setRobotProfile(null);
-    setMsg('Deleted local profile');
-  };
-
-  const exportRobotProfile = async () => {
-    const active = robotProfile ?? (connectProbe
-      ? {
-          label: profileLabel.trim() || 'My Robot',
-          chassis: chassisClass,
-          updated_at: Date.now(),
-          probe: connectProbe,
+  const refreshOverwatch = useCallback(async (opts?: { force?: boolean; announce?: boolean }): Promise<OverwatchReport | null> => {
+    const force = Boolean(opts?.force);
+    const announce = Boolean(opts?.announce);
+    try {
+      const out = await getOverwatchStatus(force);
+      setOverwatch(out);
+      const next = (() => {
+        let hasFail = false;
+        let hasWarn = false;
+        for (const c of out.checks ?? []) {
+          if (c.status === 'pass') continue;
+          if (acceptedOverwatchChecks[c.id]) continue;
+          if (c.status === 'fail') hasFail = true;
+          else if (c.status === 'warn') hasWarn = true;
         }
-      : null);
-
-    if (!active) {
-      setMsg('Nothing to export yet');
-      return;
-    }
-
-    const payload = JSON.stringify(active, null, 2);
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(payload);
-        setMsg('Profile JSON copied to clipboard');
+        if (hasFail) return 'fail';
+        if (hasWarn) return 'warn';
+        return 'pass';
+      })();
+      if (announce) {
+        setMsg(`Overwatch ${String(next).toUpperCase()} (${out.score_pct}%)`);
       } else {
-        setMsg('Clipboard unavailable; use Import/Export prompt instead');
+        const prev = lastOverwatchOverallRef.current;
+        if (prev !== next && (next === 'warn' || next === 'fail')) {
+          setMsg(`Overwatch changed to ${next.toUpperCase()} (${out.score_pct}%)`, 'overwatch');
+        }
       }
-    } catch {
-      setMsg('Clipboard write failed; use Import/Export prompt instead');
+      lastOverwatchOverallRef.current = String(next);
+      return out;
+    } catch (e) {
+      if (announce) {
+        setMsg(`overwatch error: ${(e as Error).message}`);
+      }
+      return null;
     }
-  };
+  }, [acceptedOverwatchChecks, setMsg]);
 
-  const importRobotProfile = () => {
-    const raw = window.prompt('Paste Robot Profile JSON');
-    if (!raw) return;
-    const parsed = parseRobotProfile(raw);
-    if (!parsed) {
-      setMsg('Invalid profile JSON');
+  const runOverwatchCheck = useCallback(async (): Promise<OverwatchReport | null> => {
+    unlockAlertSource('bridge.poll');
+    const out = await refreshOverwatch({ force: true, announce: true });
+    const stamp = new Date().toLocaleTimeString();
+    setOverwatchDiagNote(
+      out
+        ? `Diagnostics ran at ${stamp}: ${String(lastOverwatchOverallRef.current).toUpperCase()} (${out.score_pct}%)`
+        : `Diagnostics ran at ${stamp}: ERROR`,
+    );
+    return out;
+  }, [refreshOverwatch, unlockAlertSource]);
+
+  const acceptOverwatchCheck = useCallback((checkId: string) => {
+    setAcceptedOverwatchChecks((prev) => ({ ...prev, [checkId]: Date.now() }));
+  }, []);
+
+  const restoreOverwatchCheck = useCallback((checkId: string) => {
+    setAcceptedOverwatchChecks((prev) => {
+      const next = { ...prev };
+      delete next[checkId];
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!bridgeOnline) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await refreshOverwatch({ force: false, announce: false });
+    };
+    void tick();
+    const id = window.setInterval(() => {
+      void tick();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [bridgeOnline, refreshOverwatch]);
+
+  const saveRobotProfile = useCallback(async () => {
+    if (!profileLabel.trim()) {
+      setMsg('Profile label is required');
       return;
     }
-    localStorage.setItem(ROBOT_PROFILE_KEY, JSON.stringify(parsed));
-    setRobotProfile(parsed);
-    setConnectProbe(parsed.probe);
-    setProfileLabel(parsed.label);
-    setChassisClass(parsed.chassis);
-    if (parsed.probe.compat) setCompat(parsed.probe.compat);
-    setMsg(`Imported profile: ${parsed.label}`);
-  };
-
-  const runFirmwareCheck = async () => {
     try {
-      const r = await firmwareCheck();
-      setFwCheck(r);
-      setMsg(r.ok ? 'Arduino CLI detected' : `Arduino CLI check failed: ${r.error ?? 'unknown error'}`);
-    } catch (e) {
-      setMsg(`firmware check error: ${(e as Error).message}`);
-    }
-  };
-
-  const runFirmwareInstall = async () => {
-    try {
-      const st = await firmwareInstallCli();
-      setFw(st);
-      setMsg('Arduino CLI install started');
-    } catch (e) {
-      setMsg(`install error: ${(e as Error).message}`);
-    }
-  };
-
-  const runFirmwareCompile = async () => {
-    try {
-      const st = await firmwareCompile(fwCfg.sketch || undefined, fwCfg.fqbn || undefined);
-      setFw(st);
-      setMsg('Firmware compile started');
-    } catch (e) {
-      setMsg(`compile error: ${(e as Error).message}`);
-    }
-  };
-
-  const runFirmwareUpload = async () => {
-    try {
-      const st = await firmwareUpload(
-        fwCfg.sketch || undefined,
-        fwCfg.fqbn || undefined,
-        fwCfg.port || undefined,
-      );
-      setFw(st);
-      setMsg('Firmware upload started');
-    } catch (e) {
-      setMsg(`upload error: ${(e as Error).message}`);
-    }
-  };
-
-  const runFirmwareUploadGuarded = async () => {
-    setPreflightOpen(true);
-  };
-
-  const executeGuardedFlash = async () => {
-    try {
-      const st = await firmwareUploadGuarded(
-        fwCfg.sketch || undefined,
-        fwCfg.fqbn || undefined,
-        fwCfg.port || undefined,
-      );
-      setFw(st);
-      setPreflightOpen(false);
-      setPreflightChecks({
-        ide_closed: false,
-        bot_safe: false,
-        correct_port: false,
-        power_expected: false,
+      const out = await profilesSave({
+        profile_id: activeRobotProfile?.profile_id,
+        label: profileLabel.trim(),
+        chassis: chassisClass,
+        board: {
+          fqbn: fwCfg.fqbn,
+          port: fwCfg.port,
+          detected: boardScan?.ports ?? [],
+        },
+        firmware: {
+          sketch: sketchPath,
+          profile: connectProbe?.firmware_profile ?? compat?.profile ?? 'unknown',
+        },
+        probe: connectProbe ?? ({} as ConnectProbeReport),
+        validation: validation ?? {},
       });
-      setMsg('Guarded flash started');
+      setRobotProfilesState(out);
+      setMsg('Robot profile saved');
     } catch (e) {
-      setMsg(`guarded flash error: ${(e as Error).message}`);
+      setMsg(`profile save error: ${(e as Error).message}`);
     }
-  };
+  }, [activeRobotProfile?.profile_id, boardScan?.ports, chassisClass, compat?.profile, connectProbe, fwCfg.fqbn, fwCfg.port, profileLabel, setMsg, sketchPath, validation]);
 
-  const refreshBoards = async () => {
+  const loadSavedRobotProfile = useCallback(() => {
+    if (!activeRobotProfile) {
+      setMsg('No active profile to load');
+      return;
+    }
+    setProfileLabel(activeRobotProfile.label);
+    setChassisClass(activeRobotProfile.chassis);
+    if (activeRobotProfile.probe) setConnectProbe(activeRobotProfile.probe);
+    setMsg(`Loaded profile: ${activeRobotProfile.label}`);
+  }, [activeRobotProfile, setMsg]);
+
+  const loadProfileById = useCallback((profileId: string) => {
+    const target = robotProfilesState.profiles.find((p) => p.profile_id === profileId);
+    if (!target) {
+      setMsg('Selected profile not found');
+      return;
+    }
+    setProfileLabel(target.label);
+    setChassisClass(target.chassis);
+    if (target.probe) setConnectProbe(target.probe);
+    setMsg(`Loaded profile: ${target.label}`);
+  }, [robotProfilesState.profiles, setMsg]);
+
+  const exportRobotProfile = useCallback(async () => {
+    const target = activeRobotProfile;
+    if (!target) {
+      setMsg('No active profile to export');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(target, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${target.label.replace(/\s+/g, '_').toLowerCase()}_profile.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg('Profile export started');
+  }, [activeRobotProfile, setMsg]);
+
+  const exportProfileById = useCallback(async (profileId: string) => {
+    const target = robotProfilesState.profiles.find((p) => p.profile_id === profileId);
+    if (!target) {
+      setMsg('Selected profile not found for export');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(target, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${target.label.replace(/\s+/g, '_').toLowerCase()}_profile.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg(`Profile export started: ${target.label}`);
+  }, [robotProfilesState.profiles, setMsg]);
+
+  const importRobotProfile = useCallback(() => {
+    profileImportRef.current?.click();
+  }, []);
+
+  const onProfileImportFile = useCallback(async (ev: ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Partial<RobotProfile>;
+      const out = await profilesSave({
+        ...parsed,
+        label: String(parsed.label ?? profileLabel).trim(),
+        chassis: String(parsed.chassis ?? chassisClass).trim() || 'custom',
+      });
+      setRobotProfilesState(out);
+      setMsg('Profile imported');
+    } catch (e) {
+      setMsg(`profile import error: ${(e as Error).message}`);
+    }
+  }, [chassisClass, profileLabel, setMsg]);
+
+  const deleteSavedRobotProfile = useCallback(async () => {
+    const target = activeRobotProfile;
+    if (!target) {
+      setMsg('No active profile to delete');
+      return;
+    }
+    try {
+      const out = await profilesDelete(target.profile_id);
+      setRobotProfilesState(out);
+      setMsg(`Deleted profile: ${target.label}`);
+    } catch (e) {
+      setMsg(`profile delete error: ${(e as Error).message}`);
+    }
+  }, [activeRobotProfile, setMsg]);
+
+  const deleteProfileById = useCallback(async (profileId: string) => {
+    const target = robotProfilesState.profiles.find((p) => p.profile_id === profileId);
+    if (!target) {
+      setMsg('Selected profile not found for delete');
+      return;
+    }
+    try {
+      const out = await profilesDelete(profileId);
+      setRobotProfilesState(out);
+      setMsg(`Deleted profile: ${target.label}`);
+    } catch (e) {
+      setMsg(`profile delete error: ${(e as Error).message}`);
+    }
+  }, [robotProfilesState.profiles, setMsg]);
+
+  const activateProfileIfValid = useCallback(async () => {
+    if (!activeRobotProfile) {
+      setMsg('Save profile before activation');
+      return;
+    }
+    if (!validation?.ok) {
+      setMsg('Run validation and pass all checks before activation');
+      return;
+    }
+    try {
+      const out = await profilesActivate(activeRobotProfile.profile_id, validation);
+      setRobotProfilesState(out);
+      setMsg(`Activated profile: ${activeRobotProfile.label}`);
+    } catch (e) {
+      setMsg(`profile activate error: ${(e as Error).message}`);
+    }
+  }, [activeRobotProfile, setMsg, validation]);
+
+  const activateProfileByIdIfValid = useCallback(async (profileId: string) => {
+    const target = robotProfilesState.profiles.find((p) => p.profile_id === profileId);
+    if (!target) {
+      setMsg('Selected profile not found for activation');
+      return;
+    }
+    if (!validation?.ok) {
+      setMsg('Run validation and pass all checks before activation');
+      return;
+    }
+    try {
+      const out = await profilesActivate(profileId, validation);
+      setRobotProfilesState(out);
+      setMsg(`Activated profile: ${target.label}`);
+    } catch (e) {
+      setMsg(`profile activate error: ${(e as Error).message}`);
+    }
+  }, [robotProfilesState.profiles, setMsg, validation]);
+
+  const generateFirmwareDocsPack = useCallback(async (): Promise<FirmwareDocsPack | null> => {
+    const pinmap = (activeRobotProfile?.pinmap ?? {}) as Record<string, unknown>;
+    const profile: Record<string, unknown> = {
+      label: profileLabel.trim() || activeRobotProfile?.label || 'UpRight Robot',
+      board: {
+        fqbn: String((activeRobotProfile?.board as Record<string, unknown> | undefined)?.fqbn ?? fwCfg.fqbn ?? 'arduino:avr:nano'),
+        port: String((activeRobotProfile?.board as Record<string, unknown> | undefined)?.port ?? fwCfg.port ?? ''),
+        mcu_family: String((activeRobotProfile?.board as Record<string, unknown> | undefined)?.mcu_family ?? connectProbe?.mcu_guess ?? 'unknown'),
+      },
+      hardware: {
+        imu_type: String((activeRobotProfile?.parts as Record<string, unknown> | undefined)?.imu_type ?? 'unknown_imu'),
+        motor_driver: String((activeRobotProfile?.parts as Record<string, unknown> | undefined)?.motor_driver ?? 'unknown_driver'),
+      },
+      pins: {
+        motor_l_pwm: Number(pinmap.motor_l_pwm ?? 5),
+        motor_l_dir: Number(pinmap.motor_l_dir ?? 4),
+        motor_r_pwm: Number(pinmap.motor_r_pwm ?? 6),
+        motor_r_dir: Number(pinmap.motor_r_dir ?? 7),
+        imu_sda: Number(pinmap.imu_sda ?? 18),
+        imu_scl: Number(pinmap.imu_scl ?? 19),
+        gate_enable: Number(pinmap.gate_enable ?? 8),
+        led: Number(pinmap.led ?? 13),
+        enc_l_a: Number(pinmap.enc_l_a ?? -1),
+        enc_l_b: Number(pinmap.enc_l_b ?? -1),
+        enc_r_a: Number(pinmap.enc_r_a ?? -1),
+        enc_r_b: Number(pinmap.enc_r_b ?? -1),
+      },
+    };
+    try {
+      const out = await firmwareGenerateDocsPack(
+        profile,
+        `${profileLabel.trim() || 'upright'}_firmware`,
+        sketchContent,
+        sketchPath || undefined,
+        true,
+      );
+      setMsg(`Firmware docs pack generated: ${out.docs_folder} (zip: ${out.archive})`);
+      return out;
+    } catch (e) {
+      setMsg(`docs pack generation error: ${(e as Error).message}`);
+      return null;
+    }
+  }, [activeRobotProfile?.board, activeRobotProfile?.label, activeRobotProfile?.parts, activeRobotProfile?.pinmap, connectProbe?.mcu_guess, fwCfg.fqbn, fwCfg.port, profileLabel, setMsg, sketchContent, sketchPath]);
+
+  const initDraftsFromStatus = useCallback((s: Status) => {
+    setPidDraft({ kp: n(s.kp, 31), ki: n(s.ki, 0.05), kd: n(s.kd, 1.05) });
+    setMotionDraft({ kv: n(s.kv, 0), kx: n(s.kx, 0) });
+    setSetpointDraft(n(s.set, 0));
+  }, []);
+
+  useBridgePolling({
+    setHealth,
+    setBridgeOnline,
+    setStatus,
+    setControl,
+    setImuHistory,
+    initDraftsFromStatus,
+    runCompatProbe: () => void runCompatProbe(),
+    setMsg,
+    historyMax: HISTORY_MAX,
+    n,
+  });
+
+  const refreshBoards = useCallback(async () => {
     try {
       const b = await firmwareBoards();
       setBoardScan(b);
-      if (b.ok && b.ports.length > 0) {
-        const first = b.ports[0];
+      if (b.recommended_fqbn || b.recommended_port) {
         setFwCfg((prev) => ({
-          sketch: prev.sketch,
-          fqbn: b.recommended_fqbn || prev.fqbn || first.fqbn || 'arduino:avr:nano',
-          port: b.recommended_port || prev.port || first.address || '',
+          ...prev,
+          fqbn: b.recommended_fqbn || prev.fqbn,
+          port: b.recommended_port || prev.port,
         }));
       }
       setMsg(b.ok ? `Found ${b.ports.length} serial port(s)` : `Board scan failed: ${b.error ?? 'unknown error'}`);
     } catch (e) {
       setMsg(`board scan error: ${(e as Error).message}`);
     }
-  };
+  }, [setBoardScan, setFwCfg, setMsg]);
 
-  const loadSketch = async () => {
+  const loadSketch = useCallback(async () => {
     try {
       const sk = await firmwareReadSketch(sketchPath || undefined);
       setSketchPath(sk.path);
@@ -547,9 +779,134 @@ export default function App() {
     } catch (e) {
       setMsg(`sketch load error: ${(e as Error).message}`);
     }
-  };
+  }, [setMsg, setSketchContent, setSketchPath, sketchPath]);
 
-  const saveSketch = async () => {
+  const refreshSerialDiag = useCallback(async () => {
+    try {
+      const d = await serialDiag();
+      setSerialHealth(d);
+    } catch {
+      setSerialHealth(null);
+    }
+  }, []);
+
+  const refreshBurstInfo = useCallback(async () => {
+    try {
+      const b = await burstStatus();
+      setBurstInfo(b);
+    } catch {
+      setBurstInfo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sketchContent) void loadSketch();
+    if (!boardScan) void refreshBoards();
+    void refreshSerialDiag();
+    void refreshBurstInfo();
+    void refreshProfiles();
+  }, [boardScan, loadSketch, refreshBoards, refreshBurstInfo, refreshSerialDiag, sketchContent]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshBurstInfo();
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [refreshBurstInfo]);
+
+  const syncFromBot = useCallback(() => {
+    setPidDraft({ kp: n(status.kp, 31), ki: n(status.ki, 0.05), kd: n(status.kd, 1.05) });
+    setMotionDraft({ kv: n(status.kv, 0), kx: n(status.kx, 0) });
+    setSetpointDraft(n(status.set, 0));
+    setMsg('Drafts synced from bot status');
+  }, [setMsg, status.kd, status.ki, status.kp, status.kv, status.kx, status.set]);
+
+  const runFirmwareCheck = useCallback(async () => {
+    try {
+      const r = await firmwareCheck();
+      setFwCheck(r);
+      setMsg(r.ok ? 'Arduino CLI detected' : `Arduino CLI check failed: ${r.error ?? 'unknown error'}`);
+    } catch (e) {
+      setMsg(`firmware check error: ${(e as Error).message}`);
+    }
+  }, [setFwCheck, setMsg]);
+
+  const runFirmwareInstall = useCallback(async () => {
+    try {
+      const st = await firmwareInstallCli();
+      setFw(st);
+      setMsg('Arduino CLI install started');
+    } catch (e) {
+      setMsg(`install error: ${(e as Error).message}`);
+    }
+  }, [setFw, setMsg]);
+
+  const runFirmwareCompile = useCallback(async () => {
+    try {
+      const st = await firmwareCompile(fwCfg.sketch, fwCfg.fqbn);
+      setFw(st);
+      setMsg('Firmware compile started');
+    } catch (e) {
+      setMsg(`compile error: ${(e as Error).message}`);
+    }
+  }, [fwCfg.fqbn, fwCfg.sketch, setFw, setMsg]);
+
+  const runFirmwareUpload = useCallback(async () => {
+    try {
+      const st = await firmwareUpload(fwCfg.sketch, fwCfg.fqbn, fwCfg.port);
+      setFw(st);
+      setMsg('Firmware upload started');
+    } catch (e) {
+      setMsg(`upload error: ${(e as Error).message}`);
+    }
+  }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, setFw, setMsg]);
+
+  const runFirmwareUploadGuarded = useCallback(async () => {
+    setPreflightOpen(true);
+  }, []);
+
+  const executeGuardedFlash = useCallback(async () => {
+    try {
+      setPreflightOpen(false);
+      const st = await firmwareUploadGuarded(fwCfg.sketch, fwCfg.fqbn, fwCfg.port);
+      setFw(st);
+      setMsg('Guarded flash started');
+    } catch (e) {
+      setMsg(`guarded flash error: ${(e as Error).message}`);
+    }
+  }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, setFw, setMsg]);
+
+  const runGenerateUnified = useCallback(async () => {
+    try {
+      let profile: Record<string, unknown>;
+      try {
+        profile = JSON.parse(unifiedProfileJson) as Record<string, unknown>;
+      } catch (e) {
+        setMsg(`unified profile JSON parse error: ${(e as Error).message}`);
+        return;
+      }
+      const out = await firmwareGenerateUnified(profile, unifiedSketchName);
+      const loaded = await firmwareReadSketch(out.main_file);
+      setSketchPath(loaded.path);
+      setSketchContent(loaded.content);
+      setFwCfg((prev) => ({ ...prev, sketch: out.sketch_folder }));
+      setMsg(`Unified scaffold generated: ${out.sketch_folder} (zip: ${out.archive})`);
+    } catch (e) {
+      setMsg(`unified generate error: ${(e as Error).message}`);
+    }
+  }, [setFwCfg, setMsg, setSketchContent, setSketchPath, unifiedProfileJson, unifiedSketchName]);
+
+  const applyPastedSketch = useCallback((text: string) => {
+    const next = text.trim();
+    if (!next) {
+      setMsg('Paste sketch is empty');
+      return;
+    }
+    setSketchContent(next);
+    setMsg('Pasted sketch loaded into IDE buffer');
+  }, [setMsg, setSketchContent]);
+
+  const saveSketch = useCallback(async () => {
     try {
       const out = await firmwareWriteSketch(sketchContent, sketchPath || undefined);
       setSketchPath(out.path);
@@ -557,339 +914,59 @@ export default function App() {
     } catch (e) {
       setMsg(`sketch save error: ${(e as Error).message}`);
     }
-  };
+  }, [setMsg, setSketchPath, sketchContent, sketchPath]);
 
-  const sendSerialLine = async () => {
+  const sendSerialLine = useCallback(async () => {
     const cmd = serialWrite.trim();
     if (!cmd) return;
     try {
-      await postCommand(cmd);
+      const verb = cmd.split(/\s+/, 1)[0]?.toUpperCase() ?? '';
+      const timeoutS = verb === 'GET' || verb === 'HELP' || verb.startsWith('LOG') ? 6.0 : 2.5;
+      await postCommand(cmd, undefined, timeoutS);
       setSerialWrite('');
       setMsg(`Sent: ${cmd}`);
-      await refreshLogs();
+      const ls = await getLines(200);
+      setLines(ls);
+      await refreshSerialDiag();
     } catch (e) {
       setMsg(`serial send error: ${(e as Error).message}`);
     }
-  };
+  }, [refreshSerialDiag, serialWrite, setMsg, setSerialWrite]);
 
-  const sendAi = async () => {
-    const message = aiInput.trim();
-    if (!message || aiBusy) return;
-    setAiBusy(true);
+  const sendSerialCommand = useCallback(async (cmdRaw: string) => {
+    const cmd = cmdRaw.trim();
+    if (!cmd) return;
     try {
-      const out = await aiChat(message);
-      setAi(out.ai);
-      setAiHistory(out.history);
-      setAiInput('');
-    } catch (e) {
-      const raw = (e as Error).message;
-      const mapped = raw.includes('openai_tls_cert_verify_failed')
-        ? 'OpenAI TLS certificate verification failed on this machine. Install/update system Python certificates (certifi).'
-        : raw;
-      setAuthAlert({ tone: 'error', text: mapped });
-      setMsg(`codex chat error: ${mapped}`);
-    } finally {
-      setAiBusy(false);
-    }
-  };
-
-  const applySession = (token: string | null) => {
-    setSessionToken(token);
-    if (token) localStorage.setItem(AUTH_SESSION_KEY, token);
-    else localStorage.removeItem(AUTH_SESSION_KEY);
-  };
-
-  const submitAuth = async () => {
-    const email = authEmail.trim();
-    const password = authPassword;
-    if (!email || !password) {
-      setAuthAlert({ tone: 'error', text: 'Email and password are required.' });
-      setMsg('Email and password required');
-      return;
-    }
-    setAuthAlert(null);
-    setAuthBusy(true);
-    try {
-      const out = authMode === 'register' ? await authRegister(email, password) : await authLogin(email, password);
-      applySession(out.session_token);
-      setAuthUser(out.user);
-      setAuthAlert({ tone: 'ok', text: `${authMode === 'register' ? 'Account created' : 'Login successful'}.` });
-      setMsg(`${authMode === 'register' ? 'Registered' : 'Logged in'} as ${out.user.email}`);
-    } catch (e) {
-      const raw = (e as Error).message;
-      const mapped =
-        raw.includes('invalid_credentials') ? 'Wrong email or password.' :
-        raw.includes('weak_password') ? 'Password must be at least 8 characters.' :
-        raw.includes('email_exists') ? 'That email is already registered.' :
-        raw.includes('invalid_email') ? 'Please enter a valid email address.' :
-        raw.includes('unauthenticated') ? 'You are not authenticated.' :
-        raw;
-      setAuthAlert({ tone: 'error', text: mapped });
-      setMsg(`auth error: ${mapped}`);
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const runLogout = async () => {
-    try {
-      await authLogout();
-    } catch {
-      // best-effort
-    }
-    applySession(null);
-    setAuthUser(null);
-    setAuthAlert({ tone: 'ok', text: 'Logged out.' });
-    setAi({ configured: false, model: 'unknown', history_len: 0 });
-    setAiHistory([]);
-    setMsg('Logged out');
-  };
-
-  const saveUserOpenAiKey = async () => {
-    const k = openAiKeyInput.trim();
-    if (!k) {
-      setMsg('API key required');
-      return;
-    }
-    try {
-      const out = await authSetOpenAiKey(k, openAiModelInput || 'gpt-5-mini');
-      setAuthUser((u) => (u ? { ...u, openai_configured: out.configured, openai_model: out.model } : u));
-      setOpenAiKeyInput('');
-      setAuthAlert({ tone: 'ok', text: `OpenAI key synced. Model: ${out.model}` });
-      try {
-        const st = await aiStatus();
-        setAi(st.ai);
-        setAiHistory(st.history);
-      } catch {
-        // best effort refresh
-      }
-      setMsg('OpenAI key saved for this user');
-    } catch (e) {
-      const raw = (e as Error).message;
-      const mapped =
-        raw.includes('invalid_openai_key') ? 'OpenAI key is invalid.' :
-        raw.includes('unauthenticated') ? 'Please login first.' :
-        raw.includes('missing') ? 'OpenAI key is required.' :
-        raw;
-      setAuthAlert({ tone: 'error', text: mapped });
-      setMsg(`save key error: ${mapped}`);
-    }
-  };
-
-  const clearUserOpenAiKey = async () => {
-    try {
-      const out = await authDeleteOpenAiKey();
-      setAuthUser((u) => (u ? { ...u, openai_configured: out.configured, openai_model: out.model } : u));
-      setAuthAlert({ tone: 'ok', text: 'OpenAI key removed for this account.' });
-      setAi({ configured: false, model: 'unknown', history_len: 0 });
-      setAiHistory([]);
-      setMsg('OpenAI key removed for this user');
-    } catch (e) {
-      const raw = (e as Error).message;
-      const mapped = raw.includes('unauthenticated') ? 'Please login first.' : raw;
-      setAuthAlert({ tone: 'error', text: mapped });
-      setMsg(`delete key error: ${mapped}`);
-    }
-  };
-
-  useEffect(() => {
-    let mounted = true;
-
-    const tick = async () => {
-      try {
-        const [h, s, hb] = await Promise.all([getHealth(), getStatus(), heartbeat()]);
-        if (!mounted) return;
-        setHealth(h.health);
-        if (h.control) setControl(h.control);
-        setControl(hb);
-        setStatus(s.status);
-        setImuHistory((prev) => {
-          const next = [...prev, {
-            t: Date.now(),
-            kf: n(s.status.ang, 0),
-            raw: n(s.status.raw, 0),
-            gyro: n(s.status.gyro ?? s.status.gyr ?? s.status.gx, 0),
-            out: n(s.status.out, 0),
-          }];
-          if (next.length > HISTORY_MAX) next.splice(0, next.length - HISTORY_MAX);
-          return next;
-        });
-        if (s.control) setControl(s.control);
-        if (!draftsInitializedRef.current) {
-          setPidDraft({ kp: n(s.status.kp, 31), ki: n(s.status.ki, 0.05), kd: n(s.status.kd, 1.05) });
-          setMotionDraft({ kv: n(s.status.kv, 0), kx: n(s.status.kx, 0) });
-          setSetpointDraft(n(s.status.set, 0));
-          draftsInitializedRef.current = true;
+      const verb = cmd.split(/\s+/, 1)[0]?.toUpperCase() ?? '';
+      const timeoutS = verb === 'HELP' ? 12.0 : (verb === 'GET' || verb.startsWith('LOG') ? 6.0 : 2.5);
+      const before = await getLines(300);
+      await postCommand(cmd, undefined, timeoutS);
+      setMsg(`Sent: ${cmd}`);
+      let latest = before;
+      for (let i = 0; i < 3; i += 1) {
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 120));
         }
-        if (!compatRequestedRef.current) {
-          compatRequestedRef.current = true;
-          void runCompatProbe();
-        }
-      } catch (e) {
-        if (!mounted) return;
-        setMsg(`bridge error: ${(e as Error).message}`);
+        latest = await getLines(300);
+        setLines(latest);
       }
-    };
+      await refreshSerialDiag();
+      if (verb === 'HELP' && latest.length <= before.length) {
+        const stamped = `${new Date().toLocaleTimeString()} ${LOCAL_COMMAND_REFERENCE[0]}`;
+        setLines((prev) => [...prev, stamped, ...LOCAL_COMMAND_REFERENCE.slice(1)]);
+        setMsg('HELP returned no serial output; showing local command reference');
+      }
+    } catch (e) {
+      setMsg(`serial send error: ${(e as Error).message}`);
+    }
+  }, [refreshSerialDiag, setMsg]);
 
-    void tick();
-    const id = setInterval(() => {
-      void tick();
-    }, 250);
-
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
+  const refreshLogs = useCallback(async () => {
+    const ls = await getLines(200);
+    setLines(ls);
   }, []);
 
-  useEffect(() => {
-    if (!workbenchOpen) return;
-    if (!sketchContent) {
-      void loadSketch();
-    }
-    if (!boardScan) {
-      void refreshBoards();
-    }
-    // Intentionally one-way bootstrap when workbench is first opened.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbenchOpen]);
-
-  useEffect(() => {
-    const tok = localStorage.getItem(AUTH_SESSION_KEY);
-    if (!tok) return;
-    applySession(tok);
-    void (async () => {
-      try {
-        const me = await authMe();
-        setAuthUser(me);
-        const oa = await authOpenAiStatus();
-        setAuthUser((u) => (u ? { ...u, openai_configured: oa.configured, openai_model: oa.model } : u));
-        if (oa.model) setOpenAiModelInput(oa.model);
-      } catch {
-        applySession(null);
-        setAuthUser(null);
-      }
-    })();
-    // bootstrap once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!authUser) {
-      setAi({ configured: false, model: 'unknown', history_len: 0 });
-      setAiHistory([]);
-      return;
-    }
-    let mounted = true;
-    const tickAi = async () => {
-      try {
-        const st = await aiStatus();
-        if (!mounted) return;
-        setAi(st.ai);
-        setAiHistory(st.history);
-      } catch {
-        // AI may be unconfigured.
-      }
-    };
-    void tickAi();
-    const id = setInterval(() => void tickAi(), 3000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
-  }, [authUser]);
-
-  useEffect(() => {
-    let mounted = true;
-    const tickComm = async () => {
-      try {
-        const [st, art, fst] = await Promise.all([commissioningStatus(), commissioningArtifacts(), firmwareStatus()]);
-        if (!mounted) return;
-        setComm({ state: st.state, running: st.running, returncode: st.returncode, log_tail: st.log_tail ?? [] });
-        setCommArtifacts({ latest_metrics: art.latest_metrics, latest_run: art.latest_run });
-        setFw(fst);
-        setFwCfg((prev) => ({
-          sketch: prev.sketch || fst.defaults.sketch || '',
-          fqbn: prev.fqbn || fst.defaults.fqbn || 'arduino:avr:nano',
-          port: prev.port || fst.defaults.port || '',
-        }));
-      } catch {
-        // ignore commissioning polling errors in base control loop
-      }
-    };
-    void tickComm();
-    const id = setInterval(() => void tickComm(), 1000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
-  }, []);
-
-  const healthBadge = useMemo(() => {
-    if (!health) return 'unknown';
-    return health.connected ? 'connected' : 'disconnected';
-  }, [health]);
-
-  const hud = useMemo(() => {
-    const angle = n(status.ang, 0);
-    const output = n(status.out, 0);
-    const voltageRaw = n(status.volRaw, 0);
-    const heartbeatAge = control.heartbeat_age_s ?? null;
-    const heartbeatState =
-      heartbeatAge == null ? 'unknown' : heartbeatAge <= 1.0 ? 'good' : heartbeatAge <= 2.0 ? 'warn' : 'bad';
-
-    return {
-      mode,
-      angle,
-      output,
-      voltageRaw,
-      setpoint: n(status.set, 0),
-      kp: n(status.kp, 0),
-      ki: n(status.ki, 0),
-      kd: n(status.kd, 0),
-      wspd: n(status.wspd, 0),
-      wpos: n(status.wpos, 0),
-      estop: control.estop_latched,
-      armPrepared: control.arm_prepared,
-      heartbeatAge,
-      heartbeatState,
-      connected: healthBadge === 'connected',
-    };
-  }, [control.arm_prepared, control.estop_latched, control.heartbeat_age_s, healthBadge, mode, status]);
-
-
-  const chartBounds = useMemo(() => {
-    if (imuHistory.length === 0) return { min: -10, max: 10 };
-    const maxAbs = Math.max(
-      5,
-      ...imuHistory.map((sample) => Math.abs(sample.kf)),
-      ...imuHistory.map((sample) => Math.abs(sample.raw)),
-    );
-    return { min: -maxAbs, max: maxAbs };
-  }, [imuHistory]);
-
-  const chartPointsKf = useMemo(() => seriesPoints(imuHistory, (sample) => sample.kf, chartBounds.min, chartBounds.max), [imuHistory, chartBounds.max, chartBounds.min]);
-  const chartPointsRaw = useMemo(() => seriesPoints(imuHistory, (sample) => sample.raw, chartBounds.min, chartBounds.max), [imuHistory, chartBounds.max, chartBounds.min]);
-
-  const angleDelta = useMemo(() => {
-    if (imuHistory.length < 2) return 0;
-    const a = imuHistory[imuHistory.length - 1].kf;
-    const b = imuHistory[imuHistory.length - 2].kf;
-    return a - b;
-  }, [imuHistory]);
-
-  const outputDelta = useMemo(() => {
-    if (imuHistory.length < 2) return 0;
-    const a = imuHistory[imuHistory.length - 1].out;
-    const b = imuHistory[imuHistory.length - 2].out;
-    return a - b;
-  }, [imuHistory]);
-
-  const angleDialPct = clamp(Math.abs(hud.angle) / 20, 0, 1);
-  const outputDialPct = clamp(Math.abs(hud.output) / 120, 0, 1);
-  const voltageDialPct = clamp((hud.voltageRaw - 120) / 120, 0, 1);
-
-  const applyPid = async () => {
+  const applyPid = useCallback(async () => {
     const current = { kp: n(status.kp), ki: n(status.ki), kd: n(status.kd) };
     if (balancing) {
       if (
@@ -905,9 +982,9 @@ export default function App() {
     setStatus(r.status);
     if (r.control) setControl(r.control);
     setMsg('PID applied');
-  };
+  }, [balancing, pid.kd, pid.ki, pid.kp, setMsg, status.kd, status.ki, status.kp]);
 
-  const applyMotion = async () => {
+  const applyMotion = useCallback(async () => {
     const current = { kv: n(status.kv), kx: n(status.kx) };
     if (balancing) {
       if (Math.abs(motion.kv - current.kv) > BAL_BOUNDS.kv || Math.abs(motion.kx - current.kx) > BAL_BOUNDS.kx) {
@@ -919,9 +996,9 @@ export default function App() {
     setStatus(r.status);
     if (r.control) setControl(r.control);
     setMsg('MOTION applied');
-  };
+  }, [balancing, motion.kv, motion.kx, setMsg, status.kv, status.kx]);
 
-  const applySetpoint = async () => {
+  const applySetpoint = useCallback(async () => {
     const current = n(status.set);
     if (balancing && Math.abs(setpoint - current) > BAL_BOUNDS.setpoint) {
       setMsg('SETPOINT change too large while BALANCING; DISARM for larger edits.');
@@ -931,787 +1008,746 @@ export default function App() {
     setStatus(r.status);
     if (r.control) setControl(r.control);
     setMsg('SETPOINT applied');
-  };
+  }, [balancing, setMsg, setpoint, status.set]);
 
-  const refreshLogs = async () => {
-    const ls = await getLines(200);
-    setLines(ls);
-  };
+  const revertLatestConfig = useCallback(async () => {
+    if (revertBusy) return;
+    setRevertBusy(true);
+    try {
+      const r = await configRevert();
+      setStatus(r.revert.status);
+      if (r.control) setControl(r.control);
+      const parts = r.revert.reverted.length ? r.revert.reverted.join(', ') : 'none';
+      setMsg(`Reverted config snapshot ${r.revert.snapshot_id ?? '(unknown)'} [${parts}]`);
+    } catch (e) {
+      setMsg(`config revert error: ${(e as Error).message}`);
+    } finally {
+      setRevertBusy(false);
+    }
+  }, [revertBusy, setMsg]);
+
+  const refreshBridge = useCallback(async () => {
+    unlockAlertSource('bridge.poll');
+    try {
+      const [h, s, hb] = await Promise.all([getHealth(), getStatus(), heartbeat()]);
+      setBridgeOnline(true);
+      setHealth(h.health);
+      if (h.control) setControl(h.control);
+      setControl(hb);
+      setStatus(s.status);
+      if (s.control) setControl(s.control);
+      await refreshBurstInfo();
+      setMsg('Refreshed');
+    } catch (e) {
+      setBridgeOnline(false);
+      setMsg(`refresh error: ${(e as Error).message}`);
+    }
+  }, [refreshBurstInfo, setMsg, unlockAlertSource]);
+
+  const armBurstCapture = useCallback(async () => {
+    try {
+      const out = await burstArm(burstDelayMs, burstLines, burstFreqHz);
+      setBurstInfo(out);
+      setMsg(`Burst armed: delay=${burstDelayMs}ms lines=${burstLines} freq=${burstFreqHz.toFixed(1)}Hz`);
+      const ls = await getLines(240);
+      setLines(ls);
+    } catch (e) {
+      setMsg(`burst arm error: ${(e as Error).message}`);
+    }
+  }, [burstDelayMs, burstLines, burstFreqHz, setMsg]);
+
+  const insertKalmanTemplate = useCallback(() => {
+    if (sketchContent.includes('float kalmanUpdate(')) {
+      setMsg('Kalman function already exists in this sketch.');
+      return;
+    }
+    setSketchContent(`${sketchContent.trimEnd()}\n\n${KALMAN_STANDARD_SNIPPET}\n`);
+    setMsg('Inserted Kalman standard snippet (accel+gyro fusion + telemetry contract).');
+  }, [setMsg, setSketchContent, sketchContent]);
+
+  const hudMetrics = useHudTelemetry(status, imuHistory, strings.hud, health?.last_status_age_ms ?? null);
+
+  useEffect(() => {
+    const connected = Boolean(health?.connected) || bridgeOnline;
+    const missingTelemetry = connected && !hudMetrics.requiredInputState.ok;
+    if (missingTelemetry && !missingTelemetryPromptedRef.current) {
+      missingTelemetryPromptedRef.current = true;
+      setMsg('Device connected but telemetry data is missing. Run Compatibility Probe.', 'telemetry.contract');
+      return;
+    }
+    if (!missingTelemetry) {
+      missingTelemetryPromptedRef.current = false;
+    }
+  }, [bridgeOnline, health?.connected, hudMetrics.requiredInputState.ok, setMsg]);
+
+  const codexProps = useMemo(() => ({
+    bridgeReady: bridgeOnline,
+    authUser: codex.state.authUser,
+    ai: codex.state.ai,
+    authAlert: codex.state.authAlert,
+    authMode: codex.state.authMode,
+    setAuthMode: codex.actions.setAuthMode,
+    setAuthAlert: codex.actions.setAuthAlert,
+    authEmail: codex.state.authEmail,
+    setAuthEmail: codex.actions.setAuthEmail,
+    authPassword: codex.state.authPassword,
+    setAuthPassword: codex.actions.setAuthPassword,
+    authBusy: codex.state.authBusy,
+    submitAuth: codex.actions.submitAuth,
+    openAiKeyInput: codex.state.openAiKeyInput,
+    setOpenAiKeyInput: codex.actions.setOpenAiKeyInput,
+    openAiModelInput: codex.state.openAiModelInput,
+    setOpenAiModelInput: codex.actions.setOpenAiModelInput,
+    saveUserOpenAiKey: codex.actions.saveUserOpenAiKey,
+    clearUserOpenAiKey: codex.actions.clearUserOpenAiKey,
+    runLogout: codex.actions.runLogout,
+    aiHistory: codex.state.aiHistory,
+    aiThreads: codex.state.aiThreads,
+    aiActiveThreadId: codex.state.aiActiveThreadId,
+    aiProfiles: codex.state.aiProfiles,
+    aiActiveProfileId: codex.state.aiActiveProfileId,
+    aiProfileLabelInput: codex.state.aiProfileLabelInput,
+    setAiProfileLabelInput: codex.actions.setAiProfileLabelInput,
+    aiProfileDescriptionInput: codex.state.aiProfileDescriptionInput,
+    setAiProfileDescriptionInput: codex.actions.setAiProfileDescriptionInput,
+    aiProfileInstructionsInput: codex.state.aiProfileInstructionsInput,
+    setAiProfileInstructionsInput: codex.actions.setAiProfileInstructionsInput,
+    aiProfileAllowAutoApplyInput: codex.state.aiProfileAllowAutoApplyInput,
+    setAiProfileAllowAutoApplyInput: codex.actions.setAiProfileAllowAutoApplyInput,
+    refreshAiProfiles: codex.actions.refreshAiProfiles,
+    saveAiProfile: codex.actions.saveAiProfile,
+    activateAiProfile: codex.actions.activateAiProfile,
+    aiInput: codex.state.aiInput,
+    setAiInput: codex.actions.setAiInput,
+    aiBusy: codex.state.aiBusy,
+    sendAi: codex.actions.sendAi,
+    requestPasswordReset: codex.actions.requestPasswordReset,
+    confirmPasswordReset: codex.actions.confirmPasswordReset,
+    refreshThreads: codex.actions.refreshThreads,
+    startNewChat: codex.actions.startNewChat,
+    selectChatThread: codex.actions.selectChatThread,
+  }), [bridgeOnline, codex.actions, codex.state.ai, codex.state.aiActiveProfileId, codex.state.aiActiveThreadId, codex.state.aiBusy, codex.state.aiHistory, codex.state.aiInput, codex.state.aiProfileAllowAutoApplyInput, codex.state.aiProfileDescriptionInput, codex.state.aiProfileInstructionsInput, codex.state.aiProfileLabelInput, codex.state.aiProfiles, codex.state.aiThreads, codex.state.authAlert, codex.state.authBusy, codex.state.authEmail, codex.state.authMode, codex.state.authPassword, codex.state.authUser, codex.state.openAiKeyInput, codex.state.openAiModelInput]);
+
+  useEffect(() => {
+    const updateLayoutVars = () => {
+      const root = document.documentElement;
+      const railTop = codexRailRef.current?.getBoundingClientRect().top ?? 120;
+      const statusHeight = statusbarRef.current?.getBoundingClientRect().height ?? 44;
+      root.style.setProperty('--ops-codex-top-offset', `${Math.max(0, Math.ceil(railTop))}px`);
+      root.style.setProperty('--statusbar-clearance', `${Math.max(56, Math.ceil(statusHeight + 20))}px`);
+    };
+
+    updateLayoutVars();
+    window.addEventListener('resize', updateLayoutVars);
+    return () => window.removeEventListener('resize', updateLayoutVars);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const lastAssistant = [...codex.state.aiHistory].reverse().find((m) => m.role === 'assistant');
+    const apply = lastAssistant?.meta?.apply;
+    if (!apply || !apply.ok) return;
+    const key = `${apply.snapshot_id ?? ''}:${lastAssistant?.ts ?? 0}`;
+    if (key === lastAssistantApplyRef.current) return;
+    lastAssistantApplyRef.current = key;
+    if (apply.status) {
+      setStatus(apply.status);
+      initDraftsFromStatus(apply.status);
+    }
+    const artifacts = apply.artifacts ?? {};
+    const sketchCandidate = artifacts.unified_main_file ?? artifacts.sketch_path;
+    if (typeof sketchCandidate === 'string' && sketchCandidate) {
+      void (async () => {
+        try {
+          const loaded = await firmwareReadSketch(sketchCandidate);
+          setSketchPath(loaded.path);
+          setSketchContent(loaded.content);
+          const folder = loaded.path.replace(/\/[^/]+$/, '');
+          setFwCfg((prev) => ({ ...prev, sketch: folder }));
+        } catch {
+          // Non-blocking: assistant message still carries path if read fails.
+        }
+      })();
+    }
+    const sections = Array.isArray(apply.applied) && apply.applied.length ? apply.applied.join(', ') : 'none';
+    setMsg(`Assistant applied: ${sections}.`, 'codex.apply');
+  }, [codex.state.aiHistory, initDraftsFromStatus, setFwCfg, setMsg, setSketchContent, setSketchPath]);
 
   return (
-    <div className={`app-shell ${workbenchOpen ? 'with-workbench' : ''}`}>
-      <header className="topbar">
-        <h1>UpRight.os Ops Console <span className="ui-build-chip">{UI_BUILD}</span></h1>
-        <div className={`badge ${healthBadge}`}>{healthBadge}</div>
+    <div className={`app-shell app-rebuild ${compactUi ? 'compact-ui' : ''}`}>
+      <header className="topbar rebuild-topbar">
+        <div>
+          <h1>{strings.app.title} <span className="ui-build-chip">{strings.app.buildLabel}</span></h1>
+        </div>
+        <div className="topbar-actions">
+          <button className={`badge overwatch-chip ${overwatchTone}`} onClick={() => setOverwatchOpen(true)}>
+            OVERWATCH {overwatchLabel}
+          </button>
+          <div className={`badge ${health?.connected ? 'connected' : 'disconnected'}`}>
+            {health?.connected ? strings.app.connected : strings.app.disconnected}
+          </div>
+        </div>
       </header>
 
-      <div className="workspace-layout">
-        <main className={`panel editor-panel ${tab === 'connect' ? 'panel-compact' : ''}`}>
-          <div className="panel-workflow">
-            <span className="workflow-label">Tuning Module Workflow</span>
-            <nav className="tabs workflow-tabs" aria-label="Module workflow">
-              {TAB_FLOW.map(({ id, step, label }, idx) => (
-                <button
-                  key={id}
-                  className={`step-tab ${tab === id ? 'active' : ''} ${idx < TAB_FLOW.length - 1 ? 'has-connector' : ''}`}
-                  onClick={() => setTab(id)}
-                  aria-current={tab === id ? 'step' : undefined}
-                >
-                  <span className="step-num">{step}</span>
-                  <span className="step-text">{label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-          <section className="system-alerts" aria-live="polite" aria-label="System alerts">
-            <div className="system-alerts-head">
-              <span>System Alerts</span>
-              <button type="button" onClick={() => setUiAlerts([])} disabled={uiAlerts.length === 0}>
-                Clear
-              </button>
-            </div>
-            {uiAlerts.length === 0 && <p className="system-alerts-empty">No events yet.</p>}
-            {uiAlerts.length > 0 && (
-              <div className="system-alerts-list">
-                {uiAlerts.map((a) => (
-                  <div key={a.id} className={`system-alert ${a.tone}`}>
-                    <span className="system-alert-time">{new Date(a.ts).toLocaleTimeString()}</span>
-                    <span className="system-alert-text">{a.text}</span>
-                    <button type="button" onClick={() => dismissAlert(a.id)} aria-label="Dismiss alert">
-                      x
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-          <div className="module-body">
-        {tab === 'connect' && (
-          <section>
-            <h2>Connect</h2>
-            <p className="indicator-line"><span className="indicator-label">Bridge Port:</span> <span className="indicator-value">{health?.port ?? 'n/a'}</span></p>
-            <p className="indicator-line"><span className="indicator-label">Mode:</span> <span className="indicator-value">{mode}</span></p>
-            <p className="indicator-line"><span className="indicator-label">Angle:</span> <span className="indicator-value">{status.ang ?? 'n/a'}</span></p>
-            <p className="indicator-line"><span className="indicator-label">E-Stop Latched:</span> <span className="indicator-value">{control.estop_latched ? 'YES' : 'NO'}</span></p>
-            <p className="indicator-line"><span className="indicator-label">Compatibility:</span> <span className="indicator-value">{compatKnown ? (compatOk ? 'PASS' : 'FAIL') : 'UNTESTED'}</span></p>
-            <div className="row">
-              <button onClick={() => void runCompatProbe()}>Run Compat Probe</button>
-            </div>
-            {compat && (
-              <div className="compat-box">
-                <p><strong>Profile:</strong> {compat.profile}</p>
-                <p><strong>Firmware ID:</strong> {compat.firmware_id ?? 'n/a'}</p>
-                <p><strong>Missing fields:</strong> {compat.missing_fields.length ? compat.missing_fields.join(', ') : 'none'}</p>
-                <p><strong>Missing commands:</strong> {compat.missing_commands.length ? compat.missing_commands.join(', ') : 'none'}</p>
-                <p><strong>Warnings:</strong> {compat.warnings.length ? compat.warnings.join(' | ') : 'none'}</p>
-              </div>
-            )}
-
-            <div className="wizard-box">
-              <h3>Connect Wizard</h3>
-              <p className="wizard-subtitle">Run auto-detect to fingerprint processor/profile/components, then save this bot profile.</p>
-              <div className="row">
-                <button onClick={() => void runConnectWizard()}>Run Auto-Detect</button>
-              </div>
-
-              <div className="wizard-profile-inputs">
-                <label>
-                  Robot Label
-                  <input type="text" value={profileLabel} onChange={(e) => setProfileLabel(e.target.value)} />
-                </label>
-                <label>
-                  Chassis Class
-                  <select value={chassisClass} onChange={(e) => setChassisClass(e.target.value)}>
-                    <option value="2wd_inverted_pendulum">2WD Inverted Pendulum</option>
-                    <option value="2wd_diff_drive">2WD Differential Drive</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </label>
-                <button onClick={saveRobotProfile}>Save Local Profile</button>
-              </div>
-
-              <div className="wizard-actions">
-                <button onClick={loadSavedRobotProfile}>Load Saved Profile</button>
-                <button onClick={() => void exportRobotProfile()}>Export Profile JSON</button>
-                <button onClick={importRobotProfile}>Import Profile JSON</button>
-                <button onClick={deleteSavedRobotProfile}>Delete Profile</button>
-              </div>
-
-              {robotProfile && (
-                <p className="wizard-profile-summary">
-                  Saved Profile: <strong>{robotProfile.label}</strong> · {robotProfile.chassis} · confidence {robotProfile.probe.confidence_pct}%
-                </p>
-              )}
-
-              {connectProbe && (
-                <div className="wizard-results">
-                  <p><strong>Confidence:</strong> {connectProbe.confidence_pct}%</p>
-                  <p><strong>MCU Guess:</strong> {connectProbe.mcu_guess}</p>
-                  <p><strong>Firmware Profile:</strong> {connectProbe.firmware_profile}</p>
-                  <p><strong>USB Device:</strong> {connectProbe.port_meta.description ?? connectProbe.port}</p>
-                  <p>
-                    <strong>Components:</strong>{' '}
-                    IMU={connectProbe.components.imu ? 'Y' : 'N'} ·
-                    Motor={connectProbe.components.motor_driver ? 'Y' : 'N'} ·
-                    Enc={connectProbe.components.encoder_feedback ? 'Y' : 'N'} ·
-                    Volt={connectProbe.components.voltage_telemetry ? 'Y' : 'N'}
-                  </p>
-                  <p><strong>Missing Commands:</strong> {connectProbe.missing_commands.length ? connectProbe.missing_commands.join(', ') : 'none'}</p>
-                  {connectProbe.warnings.length > 0 && (
-                    <p><strong>Warnings:</strong> {connectProbe.warnings.join(' | ')}</p>
-                  )}
-                  <p><strong>Prompt User For:</strong> {connectProbe.next_questions.join(' | ')}</p>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={async () => {
-                const [h, s, hb] = await Promise.all([getHealth(), getStatus(), heartbeat()]);
-                setHealth(h.health);
-                if (h.control) setControl(h.control);
-                setControl(hb);
-                setStatus(s.status);
-                if (s.control) setControl(s.control);
-                setMsg('Refreshed');
-              }}
-            >
-              Refresh
-            </button>
-          </section>
-        )}
-
-        {tab === 'control' && (
-          <section>
-            <h2>Control</h2>
-            <div className="row">
-              <button
-                disabled={control.estop_latched || !compatOk}
-                onClick={async () => {
-                  const c = await armPrepare();
-                  setControl(c);
-                  setMsg('Arm prepared. Press Confirm Arm to execute.');
-                }}
-              >
-                Prepare Arm
-              </button>
-              <button
-                disabled={!control.arm_prepared || control.estop_latched}
-                onClick={async () => {
-                  const r = await armConfirm();
-                  setStatus(r.status);
-                  setControl(r.control);
-                  setMsg('Arm confirmed');
-                }}
-              >
-                Confirm Arm
-              </button>
-              <button
-                onClick={async () => {
-                  const r = await disarm();
-                  setStatus(r.status);
-                  if (r.control) setControl(r.control);
-                  setMsg('Disarmed');
-                }}
-              >
-                Disarm
-              </button>
-            </div>
-            <div className="row">
-              <button
-                disabled={control.estop_latched}
-                onClick={async () => {
-                  const r = await calZero();
-                  setStatus(r.status);
-                  if (r.control) setControl(r.control);
-                  setMsg('CAL ZERO complete');
-                }}
-              >
-                Cal Zero
-              </button>
-              <button
-                onClick={async () => {
-                  await saveCfg();
-                  setMsg('Config saved');
-                }}
-              >
-                Save Config
-              </button>
-              <button
-                onClick={async () => {
-                  const r = await estopLatch();
-                  setStatus(r.status);
-                  setControl(r.control);
-                  setMsg('E-Stop latched');
-                }}
-              >
-                E-Stop Latch
-              </button>
-              <button
-                disabled={!control.estop_latched}
-                onClick={async () => {
-                  const r = await estopReset();
-                  setStatus(r.status);
-                  setControl(r.control);
-                  setMsg('E-Stop reset');
-                }}
-              >
-                E-Stop Reset
-              </button>
-            </div>
-          </section>
-        )}
-
-        {tab === 'tuning' && (
-          <section>
-            <h2>Tuning</h2>
-            <div className="row">
-              <button onClick={syncFromBot}>Sync From Bot</button>
-            </div>
-
-            <div className="grid3">
-              <label>
-                Kp
-                <input type="number" step="0.1" value={pid.kp} onChange={(e) => setPidDraft((p) => ({ ...p, kp: Number(e.target.value) }))} />
-              </label>
-              <label>
-                Ki
-                <input type="number" step="0.01" value={pid.ki} onChange={(e) => setPidDraft((p) => ({ ...p, ki: Number(e.target.value) }))} />
-              </label>
-              <label>
-                Kd
-                <input type="number" step="0.01" value={pid.kd} onChange={(e) => setPidDraft((p) => ({ ...p, kd: Number(e.target.value) }))} />
-              </label>
-            </div>
-            <button disabled={control.estop_latched || !compatOk} onClick={applyPid}>Apply PID</button>
-
-            <div className="grid2">
-              <label>
-                Kv
-                <input type="number" step="0.001" value={motion.kv} onChange={(e) => setMotionDraft((m) => ({ ...m, kv: Number(e.target.value) }))} />
-              </label>
-              <label>
-                Kx
-                <input type="number" step="0.0001" value={motion.kx} onChange={(e) => setMotionDraft((m) => ({ ...m, kx: Number(e.target.value) }))} />
-              </label>
-            </div>
-            <button disabled={control.estop_latched || !compatOk} onClick={applyMotion}>Apply Motion</button>
-
-            <div className="grid1">
-              <label>
-                Setpoint Deg
-                <input type="number" step="0.01" value={setpoint} onChange={(e) => setSetpointDraft(Number(e.target.value))} />
-              </label>
-            </div>
-            <button disabled={control.estop_latched || !compatOk} onClick={applySetpoint}>Apply Setpoint</button>
-
-            <hr />
-            <h3>Performance Checkpoints</h3>
-            <p>One click rating saves current tuning as a checkpoint (keeps last {CHECKPOINT_MAX}).</p>
-            <div className="row">
-              <button onClick={() => makeCheckpoint('poor')}>Rate Poor</button>
-              <button onClick={() => makeCheckpoint('ok')}>Rate OK</button>
-              <button onClick={() => makeCheckpoint('good')}>Rate Good</button>
-              <button onClick={() => makeCheckpoint('great')}>Rate Great</button>
-            </div>
-
-            <div className="checkpoint-list">
-              {checkpoints.length === 0 && <p>No checkpoints yet.</p>}
-              {checkpoints.map((cp) => (
-                <div className="checkpoint-card" key={cp.id}>
-                  <div>
-                    <strong>{cp.rating.toUpperCase()}</strong> · {new Date(cp.ts).toLocaleString()}
-                  </div>
-                  <div>
-                    mode={cp.mode} angle={cp.angle.toFixed(3)} wpos={cp.wpos.toFixed(1)}
-                  </div>
-                  <div>
-                    PID {cp.pid.kp.toFixed(3)} / {cp.pid.ki.toFixed(3)} / {cp.pid.kd.toFixed(3)} · MOTION {cp.motion.kv.toFixed(4)} / {cp.motion.kx.toFixed(5)} · SP {cp.setpoint.toFixed(3)}
-                  </div>
-                  <div className="row">
-                    <button onClick={() => restoreDraftFromCheckpoint(cp)}>Load Draft</button>
-                    <button onClick={() => void applyCheckpointToBot(cp, false)}>Apply To Bot</button>
-                    <button onClick={() => void applyCheckpointToBot(cp, true)}>Apply + SaveCfg</button>
-                    <button onClick={() => deleteCheckpoint(cp.id)}>Delete</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {tab === 'commissioning' && (
-          <section>
-            <h2>Commissioning</h2>
-            <div className="row">
-              <button
-                disabled={comm.running || control.estop_latched}
-                onClick={async () => {
-                  const st = await commissioningRun(true);
-                  setComm({ state: st.state, running: st.running, returncode: st.returncode, log_tail: st.log_tail ?? [] });
-                  setMsg('Commissioning started');
-                }}
-              >
-                Run Full (Auto)
-              </button>
-              <button
-                onClick={async () => {
-                  const [st, art] = await Promise.all([commissioningStatus(), commissioningArtifacts()]);
-                  setComm({ state: st.state, running: st.running, returncode: st.returncode, log_tail: st.log_tail ?? [] });
-                  setCommArtifacts({ latest_metrics: art.latest_metrics, latest_run: art.latest_run });
-                  setMsg('Commissioning status refreshed');
-                }}
-              >
-                Refresh Status
-              </button>
-            </div>
-            <p>State: <strong>{comm.state}</strong> running={comm.running ? 'yes' : 'no'} return={String(comm.returncode)}</p>
-            <p>Latest metrics: {commArtifacts.latest_metrics ?? 'n/a'}</p>
-            <p>Latest run: {commArtifacts.latest_run ?? 'n/a'}</p>
-            <pre className="logbox">{comm.log_tail.join('\n')}</pre>
-          </section>
-        )}
-
-        {tab === 'logs' && (
-          <section>
-            <h2>Logs</h2>
-            <button onClick={refreshLogs}>Refresh Lines</button>
-            <pre className="logbox">{lines.join('\n')}</pre>
-          </section>
-        )}
-          </div>
-      </main>
-
-        <aside className="hud-rail hud-rail-left">
-          <section className="hud-grid" aria-label="Live telemetry dashboard left">
-            <article className="hud-card">
-              <span className="hud-label">Mode</span>
-              <span className="hud-value">{hud.mode}</span>
-              <span className={`hud-pill ${hud.connected ? 'good' : 'bad'}`}>{hud.connected ? 'link up' : 'link down'}</span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Angle</span>
-              <span className="hud-value">{hud.angle.toFixed(3)} deg</span>
-              <span className={`hud-pill ${Math.abs(hud.angle) <= 2 ? 'good' : Math.abs(hud.angle) <= 5 ? 'warn' : 'bad'}`}>
-                {Math.abs(hud.angle) <= 2 ? 'stable' : Math.abs(hud.angle) <= 5 ? 'watch' : 'risk'}
-              </span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Output</span>
-              <span className="hud-value">{hud.output.toFixed(2)}</span>
-              <span className={`hud-pill ${Math.abs(hud.output) <= 30 ? 'good' : Math.abs(hud.output) <= 70 ? 'warn' : 'bad'}`}>
-                motor effort
-              </span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Voltage Raw</span>
-              <span className="hud-value">{hud.voltageRaw.toFixed(0)}</span>
-              <span className={`hud-pill ${hud.voltageRaw >= 170 ? 'good' : hud.voltageRaw >= 140 ? 'warn' : 'bad'}`}>
-                power rail
-              </span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Compat</span>
-              <span className="hud-value">{compatKnown ? (compatOk ? 'PASS' : 'FAIL') : 'UNTESTED'}</span>
-              <span className={`hud-pill ${!compatKnown ? 'unknown' : compatOk ? 'good' : 'bad'}`}>{compat?.profile ?? 'run probe'}</span>
-            </article>
-          </section>
+      <main className="ops-layout" aria-label="Operations workspace">
+        <aside className="ops-codex-rail" ref={codexRailRef}>
+          <CodexPanel {...codexProps} />
         </aside>
 
-        <aside className="hud-rail hud-rail-right">
-          <section className="hud-grid" aria-label="Live telemetry dashboard right">
-            <article className="hud-card">
-              <span className="hud-label">PID</span>
-              <span className="hud-value hud-mono">
-                {hud.kp.toFixed(2)} / {hud.ki.toFixed(3)} / {hud.kd.toFixed(2)}
-              </span>
-              <span className="hud-pill good">k p / i / d</span>
-            </article>
+        <section className="ops-main" aria-label="Main workspace">
+          <div className="ops-tabs" role="tablist" aria-label="Primary app tabs">
+            <button className={`btn-sm ${activeTab === 'setup' ? 'active' : ''}`} onClick={() => setActiveTab('setup')}>1_SETUP</button>
+            <button className={`btn-sm ${activeTab === 'ide' ? 'active' : ''}`} onClick={() => setActiveTab('ide')}>2_IDE</button>
+            <button className={`btn-sm ${activeTab === 'tune' ? 'active' : ''}`} onClick={() => setActiveTab('tune')}>3_TUNE</button>
+          </div>
 
-            <article className="hud-card">
-              <span className="hud-label">Setpoint</span>
-              <span className="hud-value">{hud.setpoint.toFixed(3)} deg</span>
-              <span className="hud-pill good">target tilt</span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Wheel</span>
-              <span className="hud-value hud-mono">
-                v {hud.wspd.toFixed(2)} / x {hud.wpos.toFixed(1)}
-              </span>
-              <span className="hud-pill good">speed / position</span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Safety</span>
-              <span className="hud-value">{hud.estop ? 'E-STOP LATCHED' : hud.armPrepared ? 'ARM PREPARED' : 'CLEAR'}</span>
-              <span className={`hud-pill ${hud.estop ? 'bad' : hud.armPrepared ? 'warn' : 'good'}`}>{hud.estop ? 'blocked' : hud.armPrepared ? 'pending arm' : 'ready'}</span>
-            </article>
-
-            <article className="hud-card">
-              <span className="hud-label">Heartbeat</span>
-              <span className="hud-value">{hud.heartbeatAge == null ? 'n/a' : `${hud.heartbeatAge.toFixed(2)} s`}</span>
-              <span className={`hud-pill ${hud.heartbeatState}`}>{hud.heartbeatState}</span>
-            </article>
-          </section>
-        </aside>
-      </div>
-
-      <aside className={`firmware-drawer ${workbenchOpen ? 'open' : 'collapsed'}`} aria-label="Firmware workbench">
-        <button className="firmware-drawer-toggle" onClick={() => setWorkbenchOpen((v) => !v)}>
-          {workbenchOpen ? 'Hide Workbench' : 'Firmware'}
-        </button>
-        {workbenchOpen && (
-          <div className="firmware-drawer-body">
-            <div className="firmware-drawer-head">
-              <h3>Firmware Workbench</h3>
-              <span className="workflow-label">arduino-cli pipeline</span>
+          {activeTab === 'setup' && (
+            <div className="setup-view-grid">
+              <section className="panel tool-panel" aria-label="Setup workflow">
+                <ConnectPreflightPage
+                  healthPort={health?.port}
+                  mode={mode}
+                  angle={status.ang}
+                  estopLatched={control.estop_latched}
+                  compatKnown={compatKnown}
+                  compatOk={compatOk}
+                  compat={compat}
+                  connectProbe={connectProbe}
+                  profileLabel={profileLabel}
+                  setProfileLabel={setProfileLabel}
+                  chassisClass={chassisClass}
+                  setChassisClass={setChassisClass}
+                  profiles={robotProfilesState.profiles}
+                  robotProfile={activeRobotProfile ? { profile_id: activeRobotProfile.profile_id, label: activeRobotProfile.label, chassis: activeRobotProfile.chassis, updated_at: activeRobotProfile.updated_at, probe: activeRobotProfile.probe } : null}
+                  runCompatProbe={runCompatProbe}
+                  runConnectWizard={runConnectWizard}
+                  runProfileValidation={runProfileValidation}
+                  runOverwatchCheck={runOverwatchCheck}
+                  activateProfileIfValid={activateProfileIfValid}
+                  activateProfileByIdIfValid={activateProfileByIdIfValid}
+                  loadProfileById={loadProfileById}
+                  validation={validation}
+                  overwatch={overwatch}
+                  activeProfileId={robotProfilesState.active_profile_id}
+                  generateFirmwareDocsPack={generateFirmwareDocsPack}
+                  runGenerateUnified={runGenerateUnified}
+                  onPasteSketch={applyPastedSketch}
+                  sketchPrepared={Boolean(sketchContent.trim().length > 0)}
+                  sketchRevision={sketchRevision}
+                  loadAssistantPrompt={loadAssistantPrompt}
+                  goToIde={() => setActiveTab('ide')}
+                  goToTune={() => setActiveTab('tune')}
+                  saveRobotProfile={() => { void saveRobotProfile(); }}
+                  loadSavedRobotProfile={loadSavedRobotProfile}
+                  exportRobotProfile={() => exportRobotProfile()}
+                  exportProfileById={(profileId) => exportProfileById(profileId)}
+                  importRobotProfile={importRobotProfile}
+                  deleteSavedRobotProfile={() => { void deleteSavedRobotProfile(); }}
+                  deleteProfileById={(profileId) => { void deleteProfileById(profileId); }}
+                  refreshBridge={refreshBridge}
+                />
+              </section>
             </div>
-            <nav className="tabs firmware-tabs" aria-label="Firmware workbench tabs">
-              <button className={workbenchTab === 'sketch' ? 'active' : ''} onClick={() => setWorkbenchTab('sketch')}>Sketch</button>
-              <button className={workbenchTab === 'board' ? 'active' : ''} onClick={() => setWorkbenchTab('board')}>Board / Build</button>
-              <button className={workbenchTab === 'serial' ? 'active' : ''} onClick={() => setWorkbenchTab('serial')}>Serial</button>
-              <button className={workbenchTab === 'codex' ? 'active' : ''} onClick={() => setWorkbenchTab('codex')}>Codex</button>
-            </nav>
+          )}
 
-            {workbenchTab === 'sketch' && (
-              <section className="firmware-pane">
-                <label>
-                  Sketch File
-                  <input type="text" value={sketchPath} onChange={(e) => setSketchPath(e.target.value)} />
-                </label>
-                <div className="row">
-                  <button onClick={() => void loadSketch()}>Load Sketch</button>
-                  <button onClick={() => void saveSketch()}>Save Sketch</button>
+          {activeTab === 'tune' && (
+            <div className="tune-view-grid">
+              <section className="panel tool-panel" aria-label="Calibration and tuning">
+                <div className="tool-panel-head tune-head">
+                  <div>
+                    <h3>{strings.tune.title}</h3>
+                    <span className="workflow-label">{strings.tune.subtitle}</span>
+                  </div>
                 </div>
-                <div className="sketch-editor">
-                  <Editor
-                    height="420px"
-                    defaultLanguage="cpp"
-                    value={sketchContent}
-                    onChange={(v) => setSketchContent(v ?? '')}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 13,
-                      wordWrap: 'on',
-                      smoothScrolling: true,
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                    }}
-                    theme="vs-dark"
-                  />
-                </div>
-              </section>
-            )}
+                <div className="tool-panel-body">
+                  <section className="firmware-pane">
+                    <div className="telemetry-grid" aria-label="Calibration status">
+                      <p className="telemetry-row">
+                        <span className="telemetry-label">{strings.tune.mode}:</span>
+                        <span className={`indicator-value telemetry-field ${modeTone} is-live`}>{mode}</span>
+                      </p>
+                      <p className="telemetry-row">
+                        <span className="telemetry-label">{strings.tune.angle}:</span>
+                        <span className={`indicator-value telemetry-field ${angleTone} is-live`}>{status.ang ?? 'n/a'}</span>
+                      </p>
+                      <p className="telemetry-row">
+                        <span className="telemetry-label">{strings.tune.estop}:</span>
+                        <span className={`indicator-value telemetry-field ${estopTone}`}>{control.estop_latched ? strings.status.latched : strings.status.clear}</span>
+                      </p>
+                      <p className="telemetry-row">
+                        <span className="telemetry-label">{strings.tune.compat}:</span>
+                        <span className={`indicator-value telemetry-field ${compatTone}`}>{compatKnown ? (compatOk ? strings.status.pass : strings.status.fail) : strings.status.untested}</span>
+                      </p>
+                    </div>
 
-            {workbenchTab === 'board' && (
-              <section className="firmware-pane">
-                <div className="row">
-                  <button onClick={() => void runFirmwareCheck()}>Check CLI</button>
-                  <button disabled={fw.running} onClick={() => void runFirmwareInstall()}>Install CLI</button>
-                  <button onClick={() => void refreshBoards()}>Scan Boards</button>
-                </div>
-                <label>
-                  Board (FQBN)
-                  <select value={fwCfg.fqbn} onChange={(e) => setFwCfg((p) => ({ ...p, fqbn: e.target.value }))}>
-                    <option value={fwCfg.fqbn}>{fwCfg.fqbn || 'arduino:avr:nano'}</option>
-                    {boardScan?.ports
-                      .filter((p) => Boolean(p.fqbn) && p.fqbn !== fwCfg.fqbn)
-                      .map((p) => (
-                        <option key={`${p.address}-${p.fqbn}`} value={p.fqbn ?? ''}>
-                          {p.board_name ?? 'Detected'} · {p.fqbn}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <label>
-                  Port
-                  <select value={fwCfg.port} onChange={(e) => setFwCfg((p) => ({ ...p, port: e.target.value }))}>
-                    <option value={fwCfg.port}>{fwCfg.port || '/dev/cu.usbserial-...'}</option>
-                    {boardScan?.ports
-                      .filter((p) => Boolean(p.address) && p.address !== fwCfg.port)
-                      .map((p) => (
-                        <option key={p.address ?? 'unknown'} value={p.address ?? ''}>
-                          {p.address} {p.board_name ? `(${p.board_name})` : ''}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <label>
-                  Sketch Folder
-                  <input type="text" value={fwCfg.sketch} onChange={(e) => setFwCfg((p) => ({ ...p, sketch: e.target.value }))} />
-                </label>
-                <div className="row">
-                  <button disabled={fw.running} onClick={() => void runFirmwareCompile()}>Compile</button>
-                  <button disabled={fw.running} onClick={() => void runFirmwareUpload()}>Upload</button>
-                  <button disabled={fw.running} onClick={() => void runFirmwareUploadGuarded()}>
-                    Guarded Flash
-                  </button>
-                </div>
-                {boardScan?.recommended_fqbn && (
-                  <p className="wizard-profile-summary">
-                    Recommended: <strong>{boardScan.recommended_fqbn}</strong> on {boardScan.recommended_port ?? 'n/a'}
-                  </p>
-                )}
-                <p className="wizard-profile-summary">
-                  State: <strong>{fw.state}</strong> · phase={fw.phase} · running={fw.running ? 'yes' : 'no'} · return={String(fw.returncode)}
-                </p>
-                {fwCheck && (
-                  <p className="wizard-profile-summary">
-                    CLI: <strong>{fwCheck.ok ? 'PASS' : 'FAIL'}</strong>{fwCheck.version ? ` · ${fwCheck.version}` : ''}{fwCheck.error ? ` · ${fwCheck.error}` : ''}
-                  </p>
-                )}
-                <pre className="logbox firmware-log">{fw.log_tail.join('\n')}</pre>
-              </section>
-            )}
-
-            {workbenchTab === 'serial' && (
-              <section className="firmware-pane">
-                <p className="wizard-subtitle">Send raw serial commands and tail lines from the firmware.</p>
-                <div className="row serial-send-row">
-                  <input
-                    type="text"
-                    value={serialWrite}
-                    onChange={(e) => setSerialWrite(e.target.value)}
-                    placeholder="e.g. GET or PID 31 0.05 1.05"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void sendSerialLine();
-                    }}
-                  />
-                  <button onClick={() => void sendSerialLine()}>Send</button>
-                  <button onClick={() => void refreshLogs()}>Refresh Tail</button>
-                </div>
-                <pre className="logbox firmware-log">{lines.join('\n')}</pre>
-              </section>
-            )}
-
-            {workbenchTab === 'codex' && (
-              <section className="firmware-pane">
-                <div className="codex-status-row">
-                  <span className={`hud-pill ${authUser ? 'good' : 'bad'}`}>
-                    {authUser ? 'account logged in' : 'account not logged in'}
-                  </span>
-                  <span className={`hud-pill ${ai.configured ? 'good' : 'warn'}`}>
-                    {ai.configured ? 'openai key synced' : 'openai key missing'}
-                  </span>
-                  <span className="hud-pill unknown">model {authUser?.openai_model ?? ai.model ?? 'n/a'}</span>
-                </div>
-                {authAlert && <p className={`auth-alert ${authAlert.tone}`}>{authAlert.text}</p>}
-                {!authUser && (
-                  <>
-                    <p className="wizard-subtitle">Sign in to use your own OpenAI key with Codex.</p>
-                    <p className="wizard-subtitle">This is a local UpRight.os account (not your ChatGPT/Google login).</p>
                     <div className="row">
-                      <button
-                        onClick={() => {
-                          setAuthMode('login');
-                          setAuthAlert(null);
-                        }}
-                        className={authMode === 'login' ? 'active' : ''}
-                      >
-                        Login
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAuthMode('register');
-                          setAuthAlert(null);
-                        }}
-                        className={authMode === 'register' ? 'active' : ''}
-                      >
-                        Register
-                      </button>
+                      <button className="btn-secondary btn-sm btn-intent-discover" onClick={() => void refreshBridge()}>{strings.tune.refresh}</button>
+                      <button className="btn-secondary btn-sm btn-intent-discover btn-cal-zero" onClick={() => void runCompatProbe()}>{strings.tune.compatProbe}</button>
+                      <button className="btn-secondary btn-sm" onClick={syncFromBot}>{strings.tune.syncFromBot}</button>
                     </div>
-                    <label>
-                      Email
-                      <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
-                    </label>
-                    <label>
-                      Password
-                      <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} />
-                    </label>
-                    <button disabled={authBusy} onClick={() => void submitAuth()}>
-                      {authBusy ? 'Working...' : authMode === 'login' ? 'Login' : 'Create Account'}
-                    </button>
-                  </>
-                )}
 
-                {authUser && (
-                  <>
-                    <p className="wizard-subtitle">
-                      Signed in as <strong>{authUser.email}</strong>.{' '}
-                      {authUser.openai_configured ? `Model: ${authUser.openai_model ?? ai.model}` : 'No OpenAI key saved yet.'}
-                    </p>
-                    <div className="grid2">
-                      <label>
-                        OpenAI API Key
-                        <input
-                          type="password"
-                          value={openAiKeyInput}
-                          onChange={(e) => setOpenAiKeyInput(e.target.value)}
-                          placeholder="sk-..."
-                        />
-                      </label>
-                      <label>
-                        Model
-                        <input value={openAiModelInput} onChange={(e) => setOpenAiModelInput(e.target.value)} />
-                      </label>
+                    <div className={`burst-rig tone-${burstTone}`}>
+                      <div className="burst-rig-head">
+                        <span className="burst-rig-title">Burst Capture Rig</span>
+                        <span className={`hud-pill ${burstTone}`}>{burstInfo?.state ?? 'idle'}</span>
+                      </div>
+                      <div className="row burst-controls-row">
+                        <label>Burst Delay ms<input type="number" min={0} step={100} value={burstDelayMs} onChange={(e) => setBurstDelayMs(Math.max(0, Number(e.target.value) || 0))} /></label>
+                        <label>Burst Lines<input type="number" min={1} step={10} value={burstLines} onChange={(e) => setBurstLines(Math.max(1, Number(e.target.value) || 1))} /></label>
+                        <label>Burst Freq Hz<input type="number" min={1} max={100} step={0.5} value={burstFreqHz} onChange={(e) => setBurstFreqHz(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} /></label>
+                        <button className="btn-secondary btn-sm btn-intent-discover" disabled={control.estop_latched} onClick={() => void armBurstCapture()}>Queue Burst CSV</button>
+                        <button className="btn-secondary btn-sm btn-intent-discover" onClick={() => void refreshBurstInfo()}>Burst Status</button>
+                      </div>
+                      <div className="burst-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(burstProgressPct)}>
+                        <span style={{ width: `${burstProgressPct}%` }} />
+                      </div>
+                      <p className="burst-rig-status">
+                        {burstInfo
+                          ? `host=${burstInfo.host_capture.state} (${burstRows}/${burstTarget}) @ ${(burstInfo.host_capture.freq_hz ?? burstFreqHz).toFixed(1)}Hz`
+                          : 'host=n/a'}
+                      </p>
+                      {burstInfo?.last_event && (
+                        <p className="burst-event-chip">{burstInfo.last_event}</p>
+                      )}
                     </div>
-                    <div className="row">
-                      <button onClick={() => void saveUserOpenAiKey()}>Save OpenAI Key</button>
-                      <button onClick={() => void clearUserOpenAiKey()}>Delete OpenAI Key</button>
-                      <button onClick={() => void runLogout()}>Logout</button>
-                    </div>
-                    <div className="codex-chat-log">
-                      {aiHistory.length === 0 && <p className="wizard-subtitle">No chat history yet.</p>}
-                      {aiHistory.map((m, idx) => (
-                        <div key={`${m.ts}-${idx}`} className={`codex-msg ${m.role}`}>
-                          <span className="codex-role">{m.role}</span>
-                          <pre>{m.text}</pre>
+
+                    <div className="action-rig arm-rig">
+                      <div className="action-rig-head">
+                        <span className="action-rig-title">Arm</span>
+                      </div>
+                      <div className="row action-rig-row">
+                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={control.estop_latched || !compatOk} onClick={async () => {
+                          const c = await armPrepare();
+                          setControl(c);
+                          setArmAdvisory(null);
+                          setMsg('Arm prepared. Press Confirm Arm to execute.');
+                        }}>{strings.tune.prepareArm}</button>
+                        <button className="btn-primary btn-lg btn-intent-safety" disabled={!control.arm_prepared || control.estop_latched} onClick={async () => {
+                          try {
+                            const r = await armConfirm();
+                            setStatus(r.status);
+                            setControl(r.control);
+                            const modeAfter = String(r.status.mode ?? '');
+                            const angAbs = Math.abs(n(r.status.ang, 0));
+                            if (modeAfter === 'FAULT' || (modeAfter === 'SAFE_IDLE' && angAbs > 6.0)) {
+                              setArmAdvisory('Arm was blocked by failsafe. Robot may not be zeroed/upright. Run Cal Zero and try again.');
+                              setMsg('Arm blocked by failsafe');
+                            } else {
+                              setArmAdvisory(null);
+                              setMsg('Arm confirmed');
+                            }
+                          } catch (e) {
+                            setArmAdvisory('Arm command failed. If filtered angle is out of arming limits, re-zero with Cal Zero.');
+                            setMsg(`arm confirm error: ${(e as Error).message}`);
+                          }
+                        }}>{strings.tune.confirmArm}</button>
+                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" onClick={async () => {
+                          const r = await disarm();
+                          setStatus(r.status);
+                          if (r.control) setControl(r.control);
+                          setMsg('Disarmed');
+                        }}>{strings.tune.disarm}</button>
+                      </div>
+                      {armAdvisory && (
+                        <div className="compat-box action-rig-advisory">
+                          <p><strong>Arm Advisory:</strong> {armAdvisory}</p>
                         </div>
-                      ))}
+                      )}
                     </div>
-                    <div className="row serial-send-row">
-                      <input
-                        type="text"
-                        value={aiInput}
-                        onChange={(e) => setAiInput(e.target.value)}
-                        placeholder="Ask Codex about tuning, logs, safety, or next steps..."
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void sendAi();
-                        }}
-                      />
-                      <button disabled={!ai.configured || aiBusy} onClick={() => void sendAi()}>
-                        {aiBusy ? 'Thinking...' : 'Send'}
-                      </button>
+
+                    <div className="action-rig estop-rig">
+                      <div className="action-rig-head">
+                        <span className="action-rig-title">Emergency Stop</span>
+                      </div>
+                      <div className="row action-rig-row">
+                        <button
+                          className={
+                            control.estop_latched
+                              ? 'btn-secondary btn-intent-safety btn-prepare-arm btn-estop-toggle'
+                              : 'btn-danger btn-intent-safety btn-prepare-arm btn-estop-latch btn-estop-toggle'
+                          }
+                          onClick={async () => {
+                            if (control.estop_latched) {
+                              const r = await estopReset();
+                              setStatus(r.status);
+                              setControl(r.control);
+                              setMsg('E-Stop reset');
+                              return;
+                            }
+                            const r = await estopLatch();
+                            setStatus(r.status);
+                            setControl(r.control);
+                            setMsg('E-Stop latched');
+                          }}
+                        >
+                          {control.estop_latched ? strings.tune.estopReset : strings.tune.estopLatch}
+                        </button>
+                      </div>
                     </div>
-                    {!ai.configured && <p className="wizard-subtitle">Save an OpenAI key above to enable Codex chat.</p>}
-                  </>
-                )}
+
+                    <div className="action-rig config-rig">
+                      <div className="action-rig-head">
+                        <span className="action-rig-title">Configure</span>
+                      </div>
+                      <div className="row action-rig-row">
+                        <button className="btn-secondary btn-intent-build" onClick={async () => {
+                          await saveCfg();
+                          setMsg('Config saved');
+                        }}>{strings.tune.saveCfg}</button>
+                        <button className="btn-secondary btn-intent-build" disabled={revertBusy} onClick={() => void revertLatestConfig()}>
+                          {revertBusy ? 'Reverting...' : 'Revert Last Config'}
+                        </button>
+                        <button
+                          className="btn-secondary btn-sm btn-intent-safety btn-cal-zero tune-cal-btn config-cal-zero-btn"
+                          disabled={control.estop_latched}
+                          onClick={async () => {
+                            const r = await calZero();
+                            setStatus(r.status);
+                            if (r.control) setControl(r.control);
+                            setMsg('CAL ZERO complete');
+                          }}
+                        >
+                          {strings.tune.calZero}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="tune-param-rigs">
+                      <div className="action-rig tune-param-rig">
+                        <div className="action-rig-head">
+                          <span className="action-rig-title">PID</span>
+                        </div>
+                        <div className="grid3 tune-vars-grid">
+                          <label className="tune-var-label">Kp<input className="tune-var-input" type="number" step="0.1" value={pid.kp} onChange={(e) => setPidDraft((p) => ({ ...p, kp: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">Ki<input className="tune-var-input" type="number" step="0.01" value={pid.ki} onChange={(e) => setPidDraft((p) => ({ ...p, ki: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">Kd<input className="tune-var-input" type="number" step="0.01" value={pid.kd} onChange={(e) => setPidDraft((p) => ({ ...p, kd: Number(e.target.value) }))} /></label>
+                        </div>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyPid()}>{strings.tune.applyPid}</button>
+                      </div>
+
+                      <div className="action-rig tune-param-rig">
+                        <div className="action-rig-head">
+                          <span className="action-rig-title">Motion</span>
+                        </div>
+                        <div className="grid2 tune-vars-grid">
+                          <label className="tune-var-label">Kv<input className="tune-var-input" type="number" step="0.001" value={motion.kv} onChange={(e) => setMotionDraft((m) => ({ ...m, kv: Number(e.target.value) }))} /></label>
+                          <label className="tune-var-label">Kx<input className="tune-var-input" type="number" step="0.0001" value={motion.kx} onChange={(e) => setMotionDraft((m) => ({ ...m, kx: Number(e.target.value) }))} /></label>
+                        </div>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyMotion()}>{strings.tune.applyMotion}</button>
+                      </div>
+
+                      <div className="action-rig tune-param-rig">
+                        <div className="action-rig-head">
+                          <span className="action-rig-title">Setpoint</span>
+                        </div>
+                        <div className="grid1 tune-vars-grid tune-vars-grid-single">
+                          <label className="tune-var-label">{strings.tune.setpoint}<input className="tune-var-input" type="number" step="0.01" value={setpoint} onChange={(e) => setSetpointDraft(Number(e.target.value))} /></label>
+                        </div>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applySetpoint()}>{strings.tune.applySetpoint}</button>
+                      </div>
+                    </div>
+
+                    {compat && (
+                      <div className="compat-box">
+                        <p><strong>Firmware ID:</strong> {compat.firmware_id ?? 'n/a'}</p>
+                        <p><strong>Missing fields:</strong> {compat.missing_fields.length ? compat.missing_fields.join(', ') : 'none'}</p>
+                        <p><strong>Warnings:</strong> {compat.warnings.length ? compat.warnings.join(' | ') : 'none'}</p>
+                      </div>
+                    )}
+                  </section>
+                </div>
               </section>
-            )}
-          </div>
-        )}
-      </aside>
+
+              <aside className="tune-hud-rail" aria-label="Live feed HUD rail">
+                <section className="panel input-hud-panel" aria-label="Live input HUDs">
+                  <div className="tool-panel-head">
+                    <h3>{strings.hud.title}</h3>
+                    <span className="workflow-label">{strings.hud.subtitle}</span>
+                  </div>
+                  <div className="input-hud-grid">
+                    {hudMetrics.cards.map((card) => (
+                      <article key={card.id} className="input-hud-card">
+                        <span className="input-hud-label">{card.label}</span>
+                        {(card.id === 'filteredAngle' || card.id === 'rawAngle') && (
+                          <svg className="input-semi-dial" viewBox="0 0 40 28" role="img" aria-label={`${card.label} semicircle dial`}>
+                            <path d={miniSemiTrackPath(14.5)} className="input-semi-dial-track" />
+                            <line x1="20" y1="3.5" x2="20" y2="8.6" className="input-semi-dial-axis" />
+                            <path
+                              d={miniSemiFillPath(
+                                14.5,
+                                card.id === 'filteredAngle' ? hudMetrics.hud.angle : hudMetrics.hud.rawAngle,
+                                Math.max(0, Math.min(1, Math.abs(card.id === 'filteredAngle' ? hudMetrics.hud.angle : hudMetrics.hud.rawAngle) / 90)),
+                              )}
+                              className={`input-semi-dial-fill ${card.id === 'filteredAngle' ? 'filtered' : 'raw'}`}
+                            />
+                          </svg>
+                        )}
+                        {card.id === 'gyroRate' && (
+                          <div className="hud-bidir-slider" role="img" aria-label="Gyro rate bidirectional slider">
+                            <span className="hud-bidir-center" />
+                            {hudMetrics.gyroRate != null && (
+                              <span
+                                className={`hud-bidir-fill ${hudMetrics.gyroRate >= 0 ? 'pos' : 'neg'}`}
+                                style={{ width: `${Math.max(0, Math.min(100, (Math.abs(hudMetrics.gyroRate) / 260) * 100))}%` }}
+                              />
+                            )}
+                          </div>
+                        )}
+                        <strong className={`input-hud-value ${(card.id === 'filteredAngle' || card.id === 'rawAngle') ? 'angle-semi-value' : ''}`}>
+                          {card.value}
+                          {card.unit ? <small>{card.unit}</small> : null}
+                        </strong>
+                        {card.id === 'loopFeed' && (
+                          <span className="loop-feed-stats">
+                            status: {hudMetrics.loopFeedQuality} | avg 5m: {hudMetrics.loopFeedAvg5mHz != null ? hudMetrics.loopFeedAvg5mHz.toFixed(1) : 'n/a'} Hz | min 5m: {hudMetrics.loopFeedMin5mHz != null ? hudMetrics.loopFeedMin5mHz.toFixed(1) : 'n/a'} Hz
+                          </span>
+                        )}
+                        {card.id === 'output' && (
+                          <div className="output-session-stats">
+                            <span className="output-session-stat">
+                              <small>mean</small>
+                              <strong>{hudMetrics.outputSessionMeanPct != null ? `${hudMetrics.outputSessionMeanPct.toFixed(0)}%` : 'n/a'}</strong>
+                            </span>
+                            <span className="output-session-stat">
+                              <small>max</small>
+                              <strong>{hudMetrics.outputSessionMaxPct != null ? `${hudMetrics.outputSessionMaxPct.toFixed(0)}%` : 'n/a'}</strong>
+                            </span>
+                          </div>
+                        )}
+                        {card.id === 'contract' && (
+                          <span className="loop-feed-stats">
+                            source decay: {hudMetrics.telemetryDecayMs != null ? `${hudMetrics.telemetryDecayMs.toFixed(0)} ms` : 'n/a'} | effective decay: {hudMetrics.perceivedDecayMs != null ? `${hudMetrics.perceivedDecayMs.toFixed(0)} ms` : 'n/a'}
+                          </span>
+                        )}
+                        {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' && (
+                          <span className="output-caution-text">CAUTION</span>
+                        )}
+                        <span className={`hud-pill ${card.tone}`}>
+                          {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' ? 'caution' : card.tone}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <HudVisuals
+                  show={true}
+                  hud={{ angle: hudMetrics.hud.angle, rawAngle: hudMetrics.hud.rawAngle, output: hudMetrics.hud.output, voltageRaw: hudMetrics.hud.voltageRaw }}
+                  angleDelta={hudMetrics.angleDelta}
+                  outputDelta={hudMetrics.outputDelta}
+                  angleDialPct={hudMetrics.angleDialPct}
+                  rawAngleDialPct={hudMetrics.rawAngleDialPct}
+                  outputDialPct={hudMetrics.outputDialPct}
+                  voltageDialPct={hudMetrics.voltageDialPct}
+                  chartPointsRaw={hudMetrics.chartPointsRaw}
+                  chartPointsKf={hudMetrics.chartPointsKf}
+                  chartPointsRef={hudMetrics.chartPointsRef}
+                  imuHistory={imuHistory}
+                  chartBounds={hudMetrics.chartBounds}
+                />
+              </aside>
+            </div>
+          )}
+
+          {activeTab === 'ide' && (
+            <div className="ide-view-grid">
+              <WorkbenchPanel
+                workbenchTab={workbenchTab}
+                setWorkbenchTab={setWorkbenchTab}
+                sketchPath={sketchPath}
+                setSketchPath={setSketchPath}
+                sketchContent={sketchContent}
+                setSketchContent={setSketchContent}
+                loadSketch={loadSketch}
+                saveSketch={saveSketch}
+                runFirmwareCheck={runFirmwareCheck}
+                runFirmwareInstall={runFirmwareInstall}
+                refreshBoards={refreshBoards}
+                fw={fw}
+                fwCheck={fwCheck}
+                fwCfg={fwCfg}
+                setFwCfg={setFwCfg}
+                boardScan={boardScan}
+                runFirmwareCompile={runFirmwareCompile}
+                runFirmwareUpload={runFirmwareUpload}
+                runFirmwareUploadGuarded={runFirmwareUploadGuarded}
+                unifiedSketchName={unifiedSketchName}
+                setUnifiedSketchName={setUnifiedSketchName}
+                unifiedProfileJson={unifiedProfileJson}
+                setUnifiedProfileJson={setUnifiedProfileJson}
+                runGenerateUnified={runGenerateUnified}
+                serialWrite={serialWrite}
+                setSerialWrite={setSerialWrite}
+                sendSerialLine={sendSerialLine}
+                sendSerialCommand={sendSerialCommand}
+                refreshLogs={refreshLogs}
+                serialDiag={serialHealth}
+                refreshSerialDiag={refreshSerialDiag}
+                lines={lines}
+                insertKalmanTemplate={insertKalmanTemplate}
+                ideMode={true}
+              />
+
+              <section className="panel input-hud-panel input-hud-panel-compact" aria-label="Compact input HUDs">
+                <div className="tool-panel-head">
+                  <h3>{strings.hud.title}</h3>
+                  <span className="workflow-label">{strings.ide.subtitle}</span>
+                </div>
+                <div className="input-hud-grid input-hud-grid-compact">
+                  {hudMetrics.cards.map((card) => (
+                    <article key={`${card.id}-compact`} className="input-hud-card">
+                      <span className="input-hud-label">{card.label}</span>
+                      {card.id === 'gyroRate' && (
+                        <div className="hud-bidir-slider" role="img" aria-label="Gyro rate bidirectional slider">
+                          <span className="hud-bidir-center" />
+                          {hudMetrics.gyroRate != null && (
+                            <span
+                              className={`hud-bidir-fill ${hudMetrics.gyroRate >= 0 ? 'pos' : 'neg'}`}
+                              style={{ width: `${Math.max(0, Math.min(100, (Math.abs(hudMetrics.gyroRate) / 260) * 100))}%` }}
+                            />
+                          )}
+                        </div>
+                      )}
+                      <strong className="input-hud-value">
+                        {card.value}
+                        {card.unit ? <small>{card.unit}</small> : null}
+                      </strong>
+                      {card.id === 'loopFeed' && (
+                        <span className="loop-feed-stats">
+                          status: {hudMetrics.loopFeedQuality} | avg 5m: {hudMetrics.loopFeedAvg5mHz != null ? hudMetrics.loopFeedAvg5mHz.toFixed(1) : 'n/a'} Hz | min 5m: {hudMetrics.loopFeedMin5mHz != null ? hudMetrics.loopFeedMin5mHz.toFixed(1) : 'n/a'} Hz
+                        </span>
+                      )}
+                      {card.id === 'output' && (
+                        <div className="output-session-stats">
+                          <span className="output-session-stat">
+                            <small>mean</small>
+                            <strong>{hudMetrics.outputSessionMeanPct != null ? `${hudMetrics.outputSessionMeanPct.toFixed(0)}%` : 'n/a'}</strong>
+                          </span>
+                          <span className="output-session-stat">
+                            <small>max</small>
+                            <strong>{hudMetrics.outputSessionMaxPct != null ? `${hudMetrics.outputSessionMaxPct.toFixed(0)}%` : 'n/a'}</strong>
+                          </span>
+                        </div>
+                      )}
+                      {card.id === 'contract' && (
+                        <span className="loop-feed-stats">
+                          source decay: {hudMetrics.telemetryDecayMs != null ? `${hudMetrics.telemetryDecayMs.toFixed(0)} ms` : 'n/a'} | effective decay: {hudMetrics.perceivedDecayMs != null ? `${hudMetrics.perceivedDecayMs.toFixed(0)} ms` : 'n/a'}
+                        </span>
+                      )}
+                      {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' && (
+                        <span className="output-caution-text">CAUTION</span>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+        </section>
+      </main>
 
       {preflightOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Guarded flash preflight checklist">
           <div className="preflight-modal">
-            <h3>Guarded Flash Preflight</h3>
-            <p className="wizard-subtitle">Complete all checks before flashing.</p>
-            <label className="check-item">
-              <input
-                type="checkbox"
-                checked={preflightChecks.ide_closed}
-                onChange={(e) => setPreflightChecks((p) => ({ ...p, ide_closed: e.target.checked }))}
-              />
-              Arduino IDE / Serial Monitor is closed
-            </label>
-            <label className="check-item">
-              <input
-                type="checkbox"
-                checked={preflightChecks.bot_safe}
-                onChange={(e) => setPreflightChecks((p) => ({ ...p, bot_safe: e.target.checked }))}
-              />
-              Robot is in safe posture (wheels clear / supported)
-            </label>
-            <label className="check-item">
-              <input
-                type="checkbox"
-                checked={preflightChecks.correct_port}
-                onChange={(e) => setPreflightChecks((p) => ({ ...p, correct_port: e.target.checked }))}
-              />
-              Selected port is correct ({fwCfg.port || 'not set'})
-            </label>
-            <label className="check-item">
-              <input
-                type="checkbox"
-                checked={preflightChecks.power_expected}
-                onChange={(e) => setPreflightChecks((p) => ({ ...p, power_expected: e.target.checked }))}
-              />
-              Power configuration matches your upload plan (USB-only vs external battery)
-            </label>
+            <h3>{strings.modal.title}</h3>
+            <p className="wizard-subtitle">{strings.modal.subtitle}</p>
+            <label className="check-item"><input type="checkbox" checked={preflightChecks.ide_closed} onChange={(e) => setPreflightChecks((p) => ({ ...p, ide_closed: e.target.checked }))} />{strings.modal.ideClosed}</label>
+            <label className="check-item"><input type="checkbox" checked={preflightChecks.bot_safe} onChange={(e) => setPreflightChecks((p) => ({ ...p, bot_safe: e.target.checked }))} />{strings.modal.botSafe}</label>
+            <label className="check-item"><input type="checkbox" checked={preflightChecks.correct_port} onChange={(e) => setPreflightChecks((p) => ({ ...p, correct_port: e.target.checked }))} />{strings.modal.portCorrectPrefix} ({fwCfg.port || 'not set'})</label>
+            <label className="check-item"><input type="checkbox" checked={preflightChecks.power_expected} onChange={(e) => setPreflightChecks((p) => ({ ...p, power_expected: e.target.checked }))} />{strings.modal.powerExpected}</label>
             <div className="row">
-              <button onClick={() => setPreflightOpen(false)}>Cancel</button>
-              <button
-                disabled={!Object.values(preflightChecks).every(Boolean) || fw.running}
-                onClick={() => void executeGuardedFlash()}
-              >
-                Start Guarded Flash
-              </button>
+              <button className="btn-secondary" onClick={() => setPreflightOpen(false)}>{strings.modal.cancel}</button>
+              <button className="btn-primary btn-lg" disabled={!Object.values(preflightChecks).every(Boolean) || fw.running} onClick={() => void executeGuardedFlash()}>{strings.modal.start}</button>
             </div>
           </div>
         </div>
       )}
 
-      <section className="hud-visuals" aria-label="Persistent telemetry visuals">
-        <article className="dial-panel">
-          <h3>Reactor Dials</h3>
-          <div className="dial-row">
-            <div className="dial-card">
-              <svg className="dial" viewBox="0 0 120 120" role="img" aria-label="Angle dial">
-                <circle cx="60" cy="60" r="46" className="dial-track" />
-                <circle cx="60" cy="60" r="46" className="dial-fill dial-angle" strokeDasharray={`${(2 * Math.PI * 46 * angleDialPct).toFixed(1)} ${(2 * Math.PI * 46).toFixed(1)}`} />
-              </svg>
-              <span className="dial-label">ANGLE</span>
-              <span className="dial-value">{hud.angle.toFixed(2)}°</span>
-              <span className={`trend ${Math.abs(angleDelta) < 0.05 ? 'flat' : angleDelta > 0 ? 'up' : 'down'}`}>
-                Δ {angleDelta.toFixed(3)}
-              </span>
+      {overwatchOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Overwatch integrity diagnostics" onClick={() => setOverwatchOpen(false)}>
+          <div className="preflight-modal overwatch-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="firmware-docs-head">
+              <h3>Overwatch Diagnostics</h3>
+              <button className="firmware-docs-close" aria-label="Close Overwatch diagnostics" onClick={() => setOverwatchOpen(false)}>
+                ×
+              </button>
             </div>
-
-            <div className="dial-card">
-              <svg className="dial" viewBox="0 0 120 120" role="img" aria-label="Output dial">
-                <circle cx="60" cy="60" r="46" className="dial-track" />
-                <circle cx="60" cy="60" r="46" className="dial-fill dial-output" strokeDasharray={`${(2 * Math.PI * 46 * outputDialPct).toFixed(1)} ${(2 * Math.PI * 46).toFixed(1)}`} />
-              </svg>
-              <span className="dial-label">OUTPUT</span>
-              <span className="dial-value">{hud.output.toFixed(1)}</span>
-              <span className={`trend ${Math.abs(outputDelta) < 0.2 ? 'flat' : outputDelta > 0 ? 'up' : 'down'}`}>
-                Δ {outputDelta.toFixed(2)}
-              </span>
+            <p className="wizard-subtitle">
+              Persistent integrity monitor across sketch, docs, contracts, telemetry, and deployment readiness.
+            </p>
+            <div className="overwatch-summary-row">
+              <span className={`hud-pill ${overwatchTone}`}>{overwatch ? String(overwatchEffective.overall).toUpperCase() : 'PENDING'}</span>
+              <span>Score: {overwatch ? `${overwatchEffective.score_pct}%` : 'n/a'}</span>
+              <span>Checks: {overwatch ? `${overwatchEffective.pass}/${overwatchEffective.warn}/${overwatchEffective.fail}` : 'n/a'}</span>
+              <span>Accepted: {overwatch ? overwatchEffective.accepted : 0}</span>
+              <span>Updated: {overwatch ? new Date(overwatch.generated_at * 1000).toLocaleTimeString() : 'n/a'}</span>
             </div>
-
-            <div className="dial-card">
-              <svg className="dial" viewBox="0 0 120 120" role="img" aria-label="Voltage dial">
-                <circle cx="60" cy="60" r="46" className="dial-track" />
-                <circle cx="60" cy="60" r="46" className="dial-fill dial-voltage" strokeDasharray={`${(2 * Math.PI * 46 * voltageDialPct).toFixed(1)} ${(2 * Math.PI * 46).toFixed(1)}`} />
-              </svg>
-              <span className="dial-label">VOLT RAW</span>
-              <span className="dial-value">{hud.voltageRaw.toFixed(0)}</span>
-              <span className="trend flat">rail health</span>
+            <div className="overwatch-checks-list">
+              {(overwatch?.checks ?? []).map((c) => (
+                <article key={c.id} className={`overwatch-check-item ${c.status}`}>
+                  <div className="overwatch-check-head">
+                    <strong>{c.label}</strong>
+                    <span className={`hud-pill ${acceptedOverwatchChecks[c.id] ? 'unknown' : (c.status === 'pass' ? 'good' : c.status === 'warn' ? 'warn' : 'bad')}`}>
+                      {acceptedOverwatchChecks[c.id] ? 'ACCEPTED' : c.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <p>{c.detail}</p>
+                  {c.evidence ? <p className="overwatch-evidence"><code>{c.evidence}</code></p> : null}
+                  {c.status !== 'pass' && (
+                    <div className="overwatch-check-actions">
+                      {acceptedOverwatchChecks[c.id] ? (
+                        <button className="btn-secondary btn-sm" onClick={() => restoreOverwatchCheck(c.id)}>
+                          Bring Back Into Consideration
+                        </button>
+                      ) : (
+                        <button className="btn-secondary btn-sm" onClick={() => acceptOverwatchCheck(c.id)}>
+                          Accept Deficiency
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+              {!overwatch && <p className="wizard-subtitle">No report yet. Run diagnostics.</p>}
             </div>
+            <div className="row">
+              <button className="btn-secondary btn-sm btn-intent-discover" onClick={() => void runOverwatchCheck()}>
+                Run Diagnostics
+              </button>
+              <button className="btn-secondary btn-sm" onClick={() => setOverwatchOpen(false)}>
+                Close
+              </button>
+            </div>
+            {overwatchDiagNote && <p className="setup-rig-test-note">{overwatchDiagNote}</p>}
           </div>
-        </article>
+        </div>
+      )}
 
-        <article className="imu-chart-panel">
-          <h3>IMU Overlay (Raw vs Kalman)</h3>
-          <div className="chart-legend">
-            <span className="legend-item"><i className="legend-dot raw" /> raw angle</span>
-            <span className="legend-item"><i className="legend-dot kf" /> kalman angle</span>
-          </div>
-          <svg className="imu-chart" viewBox="0 0 820 160" role="img" aria-label="IMU and Kalman overlay chart">
-            <line x1="0" y1="80" x2="820" y2="80" className="chart-axis" />
-            {chartPointsRaw && <polyline className="chart-line raw" points={chartPointsRaw} />}
-            {chartPointsKf && <polyline className="chart-line kf" points={chartPointsKf} />}
-          </svg>
-          <div className="chart-meta">
-            <span>samples: {imuHistory.length}</span>
-            <span>range: {chartBounds.min.toFixed(1)}° to {chartBounds.max.toFixed(1)}°</span>
-          </div>
-        </article>
-      </section>
+      <input
+        ref={profileImportRef}
+        type="file"
+        accept="application/json"
+        className="profile-import-input"
+        onChange={(e) => { void onProfileImportFile(e); }}
+      />
 
-
-
-      <footer className="statusbar">
-        <span>{msg}</span>
-        <span>State: {mode}</span>
-        <span>Angle: {status.ang ?? 'n/a'}</span>
-        <span>E-Stop: {control.estop_latched ? 'LATCHED' : 'CLEAR'}</span>
+      <footer className="statusbar" ref={statusbarRef}>
+        <div className="statusbar-meta">
+          <span>{statusMsg}</span>
+          <span>State: {mode}</span>
+          <span>Angle: {status.ang ?? 'n/a'}</span>
+          <span>E-Stop: {control.estop_latched ? strings.status.latched : strings.status.clear}</span>
+        </div>
+        <GlobalAlertRail
+          active={alertsActive}
+          activeTotal={alertsAllActive.length}
+          history={alertsHistory}
+          filter={alertsFilter}
+          onDismiss={dismissAlert}
+          onClearNonError={clearNonErrorAlerts}
+          onClearAll={clearAllAlerts}
+          onClearHistory={clearAlertHistory}
+          onSetFilter={setAlertsFilter}
+        />
       </footer>
     </div>
   );

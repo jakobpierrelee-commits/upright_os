@@ -21,6 +21,12 @@ npm install
 npm run dev
 ```
 
+Managed start (recommended):
+```bash
+npm run dev:managed
+```
+This starts the bridge if needed, waits for `/health`, then launches the UI.
+
 Set bridge base URL if needed:
 ```bash
 VITE_BRIDGE_BASE=http://127.0.0.1:8787 npm run dev
