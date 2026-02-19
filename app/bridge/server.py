@@ -1038,60 +1038,110 @@ class AIManager:
         self.base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.ssl_context = self._build_ssl_context()
         self.state_path = repo_root / "app" / "bridge" / "ai_threads.json"
+        self.state_backup_dir = repo_root / "app" / "bridge" / "ai_threads_backups"
+        self.max_state_backups = 8
         self._lock = threading.Lock()
         self._threads: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._active_thread: Dict[str, str] = {}
         self._load_state()
 
+    def _load_state_from_raw(self, raw: Any) -> bool:
+        if not isinstance(raw, dict):
+            return False
+        threads = raw.get("threads")
+        active = raw.get("active_thread")
+        if not isinstance(threads, dict):
+            return False
+
+        clean_threads: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for skey, bucket in threads.items():
+            if not isinstance(skey, str) or not isinstance(bucket, dict):
+                continue
+            clean_bucket: Dict[str, Dict[str, Any]] = {}
+            for tid, entry in bucket.items():
+                if not isinstance(tid, str) or not isinstance(entry, dict):
+                    continue
+                msgs = entry.get("messages", [])
+                if not isinstance(msgs, list):
+                    msgs = []
+                clean_msgs = []
+                for m in msgs[-120:]:
+                    if not isinstance(m, dict):
+                        continue
+                    role = str(m.get("role", "assistant"))
+                    text = str(m.get("text", ""))
+                    ts = float(m.get("ts", time.time()) or time.time())
+                    clean_msgs.append({"ts": ts, "role": role, "text": text})
+                clean_bucket[tid] = {
+                    "id": tid,
+                    "title": str(entry.get("title", "New Chat") or "New Chat"),
+                    "created_at": float(entry.get("created_at", time.time()) or time.time()),
+                    "updated_at": float(entry.get("updated_at", time.time()) or time.time()),
+                    "messages": clean_msgs,
+                }
+            if clean_bucket:
+                clean_threads[skey] = clean_bucket
+
+        clean_active: Dict[str, str] = {}
+        if isinstance(active, dict):
+            clean_active = {str(k): str(v) for k, v in active.items() if isinstance(k, str) and isinstance(v, str)}
+
+        self._threads = clean_threads
+        self._active_thread = clean_active
+        return True
+
+    def _load_state_file(self, path: pathlib.Path) -> bool:
+        try:
+            if not path.exists():
+                return False
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return self._load_state_from_raw(raw)
+        except Exception:
+            return False
+
+    def _state_backups(self) -> list[pathlib.Path]:
+        if not self.state_backup_dir.exists():
+            return []
+        files = sorted(self.state_backup_dir.glob("ai_threads_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return files
+
     def _load_state(self) -> None:
         try:
-            if not self.state_path.exists():
+            if self._load_state_file(self.state_path):
                 return
-            raw = json.loads(self.state_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            threads = raw.get("threads")
-            active = raw.get("active_thread")
-            if isinstance(threads, dict):
-                clean_threads: Dict[str, Dict[str, Dict[str, Any]]] = {}
-                for skey, bucket in threads.items():
-                    if not isinstance(skey, str) or not isinstance(bucket, dict):
-                        continue
-                    clean_bucket: Dict[str, Dict[str, Any]] = {}
-                    for tid, entry in bucket.items():
-                        if not isinstance(tid, str) or not isinstance(entry, dict):
-                            continue
-                        msgs = entry.get("messages", [])
-                        if not isinstance(msgs, list):
-                            msgs = []
-                        clean_msgs = []
-                        for m in msgs[-120:]:
-                            if not isinstance(m, dict):
-                                continue
-                            role = str(m.get("role", "assistant"))
-                            text = str(m.get("text", ""))
-                            ts = float(m.get("ts", time.time()) or time.time())
-                            clean_msgs.append({"ts": ts, "role": role, "text": text})
-                        clean_bucket[tid] = {
-                            "id": tid,
-                            "title": str(entry.get("title", "New Chat") or "New Chat"),
-                            "created_at": float(entry.get("created_at", time.time()) or time.time()),
-                            "updated_at": float(entry.get("updated_at", time.time()) or time.time()),
-                            "messages": clean_msgs,
-                        }
-                    if clean_bucket:
-                        clean_threads[skey] = clean_bucket
-                self._threads = clean_threads
-            if isinstance(active, dict):
-                self._active_thread = {str(k): str(v) for k, v in active.items() if isinstance(k, str) and isinstance(v, str)}
+            for backup in self._state_backups():
+                if self._load_state_file(backup):
+                    # Restore primary from latest healthy backup for next boot.
+                    self._save_state_locked()
+                    return
         except Exception:
             # Keep chat available even if persisted state is malformed.
             return
 
     def _save_state_locked(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_backup_dir.mkdir(parents=True, exist_ok=True)
         payload = {"threads": self._threads, "active_thread": self._active_thread}
-        self.state_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        blob = json.dumps(payload, ensure_ascii=True)
+        tmp_path = self.state_path.with_suffix(".tmp")
+        tmp_path.write_text(blob, encoding="utf-8")
+
+        if self.state_path.exists():
+            stamp = int(time.time() * 1000)
+            backup_path = self.state_backup_dir / f"ai_threads_{stamp}.json"
+            try:
+                shutil.copy2(self.state_path, backup_path)
+            except Exception:
+                pass
+
+        os.replace(tmp_path, self.state_path)
+
+        backups = self._state_backups()
+        for stale in backups[self.max_state_backups:]:
+            try:
+                stale.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     @staticmethod
     def _build_ssl_context() -> ssl.SSLContext:
