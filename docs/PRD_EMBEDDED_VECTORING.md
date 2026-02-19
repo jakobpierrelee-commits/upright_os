@@ -136,7 +136,15 @@ Expected:
 - No unknown branch switches/reset activity.
 - Runtime/generated artifacts may remain untracked but should be explicitly called out.
 
-### 6.2 Regression Gate (minimum)
+### 6.2 Traceability Check (automated)
+
+```bash
+python3 scripts/prd_traceability_check.py --output traceability.json
+```
+
+This generates a machine-readable JSON artifact mapping PRD capabilities -> source files -> tests -> status.
+
+### 6.3 Regression Gate (minimum)
 
 ```bash
 python3 -m pytest app/bridge/tests/test_codex_tools.py app/bridge/tests/test_codex_t2_tools.py -v
@@ -144,7 +152,13 @@ python3 -m pytest app/bridge/tests/test_codex_rag.py app/bridge/tests/test_codex
 cd app/ui/ops-console && npm test -- --run
 ```
 
-### 6.3 Handoff Record Requirements
+Or run traceability check with tests:
+
+```bash
+python3 scripts/prd_traceability_check.py --run-tests --output traceability.json
+```
+
+### 6.4 Handoff Record Requirements
 
 Each handoff must include:
 
