@@ -37,6 +37,8 @@ MAX_TOOL_ITERATIONS = 5
 
 # OpenAI request timeout in seconds
 OPENAI_TIMEOUT_S = 45
+MAX_HISTORY_MESSAGES = 16
+MAX_HISTORY_CHARS_PER_MESSAGE = 1200
 
 
 class ToolExecutionError(Exception):
@@ -166,6 +168,7 @@ class CodexAgent:
         active_robot_id: Optional[str] = None,
         board_fqbn: Optional[str] = None,
         port: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Chat with optional tool calling support.
@@ -181,6 +184,7 @@ class CodexAgent:
             active_robot_id: Current robot ID for tools
             board_fqbn: Board FQBN for firmware tools
             port: Serial port for firmware tools
+            conversation_history: Optional prior thread history entries
             
         Returns:
             Dict with: answer, tool_calls (list of executed tools), raw_response
@@ -212,6 +216,31 @@ class CodexAgent:
             messages.append({
                 "role": "system",
                 "content": f"relevant_documentation:\n{rag_context}",
+            })
+
+        # Preserve conversation continuity for tools endpoint.
+        if conversation_history:
+            trimmed_history = conversation_history[-MAX_HISTORY_MESSAGES:]
+            for entry in trimmed_history:
+                role = str(entry.get("role", "")).strip().lower()
+                if role not in {"user", "assistant"}:
+                    continue
+                text = str(entry.get("text", "")).strip()
+                if not text:
+                    continue
+                if len(text) > MAX_HISTORY_CHARS_PER_MESSAGE:
+                    text = text[-MAX_HISTORY_CHARS_PER_MESSAGE:]
+                messages.append({"role": role, "content": text})
+
+        mission_facts = context.get("mission_facts")
+        if isinstance(mission_facts, dict) and mission_facts:
+            # Keep mission facts close to the current user turn so they remain salient.
+            messages.append({
+                "role": "system",
+                "content": (
+                    "mission_facts=" + json.dumps(mission_facts, ensure_ascii=True, separators=(",", ":")) +
+                    ". Treat these as durable user-provided facts unless explicitly corrected by user."
+                ),
             })
 
         messages.append({"role": "user", "content": user_msg})

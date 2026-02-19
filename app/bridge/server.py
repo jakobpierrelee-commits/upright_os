@@ -2384,8 +2384,57 @@ def _resolve_system_prompt(profile: Dict[str, Any], *, allow_apply: bool, repo_r
         )
     else:
         action_block = "Do not request direct hardware actions; provide recommendations only."
-    
-    return "\n\n".join(x for x in [codexrules, custom, action_block] if x).strip()
+
+    response_contract = (
+        "Response contract (strict): "
+        "1) If user asks for one sentence, return exactly one sentence (<=30 words). "
+        "2) Default to one sentence (<=30 words) unless user explicitly asks for depth/checklist. "
+        "3) Answer directly first; ask a clarifying question only when a missing parameter blocks execution of the requested action. "
+        "4) Persist and reuse mission facts explicitly provided by user in prior turns (branch, target, guardrail, priority, board/IMU) until user changes them. "
+        "5) Do not claim environment limitations unless a tool or endpoint in this turn failed with that exact limitation. "
+        "Project facts: v1 telemetry readiness requires mode,ang,raw,out,kp,ki,kd,set plus one gyro alias (gyro|gyr|gx). "
+        "v2 anti-drift readiness fields are gyro_bias, vel_meas, outer_loop_enabled. "
+        "For this project, 'secure bridge link' means authenticated bridge API access with health check + valid bearer token + stable thread_id continuity."
+    )
+
+    return "\n\n".join(x for x in [codexrules, custom, action_block, response_contract] if x).strip()
+
+
+def _extract_mission_facts(history: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Extract durable mission facts from user turns.
+
+    Supports explicit seeded forms such as:
+      - "Store these mission facts exactly: branch=..., target=..., guardrail=..., priority=..."
+      - "Store this extra fact: preferred robot board is Arduino Nano + MPU6050."
+    """
+    facts: Dict[str, str] = {}
+    for item in history:
+        if str(item.get("role", "")).strip().lower() != "user":
+            continue
+        txt = str(item.get("text", "")).strip()
+        if not txt:
+            continue
+        low = txt.lower()
+
+        if "store these mission facts exactly:" in low:
+            _, tail = txt.split(":", 1)
+            for part in tail.split(","):
+                if "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                key = k.strip().lower()
+                val = v.strip()
+                if key in {"branch", "target", "guardrail", "priority"} and val:
+                    facts[key] = val
+
+        if "store this extra fact:" in low:
+            _, tail = txt.split(":", 1)
+            val = tail.strip().rstrip(".")
+            if val:
+                facts["board_imu"] = val
+
+    return facts
 
 
 class RobotProfilesManager:
@@ -4230,6 +4279,11 @@ def build_handler(
                                 if str(exc) == "thread_not_found":
                                     return _json(self, 404, {"ok": False, "error": "thread_not_found"})
                                 raise
+                        full_history = ai.history(skey, thread_id) if thread_id else []
+                        prior_history = full_history[-20:]
+                        mission_facts = _extract_mission_facts(full_history)
+                        if mission_facts:
+                            ctx["mission_facts"] = mission_facts
                         result = codex_agent.chat_with_tools(
                             message=msg,
                             context=ctx,
@@ -4241,6 +4295,7 @@ def build_handler(
                             active_robot_id=robot_id,
                             board_fqbn=board_fqbn,
                             port=port,
+                            conversation_history=prior_history,
                         )
                         tid = ai._append(skey, "user", msg, thread_id=thread_id)
                         ai._append(skey, "assistant", result["answer"], thread_id=tid)
