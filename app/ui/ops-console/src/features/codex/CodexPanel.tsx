@@ -4,6 +4,7 @@ import { aiConfirmUpload } from '../../api';
 import { strings } from '../../strings';
 import { ToolCallList } from './ToolCallCard';
 import { UploadConfirmModal, extractPendingUpload, type PendingUpload } from './UploadConfirmModal';
+import { RagStatusBadge } from './RagStatusBadge';
 
 const WORKING_STEPS = [
   'reviewing telemetry and current context...',
@@ -282,6 +283,7 @@ export function CodexPanel(props: Props) {
               {ai.configured ? strings.codex.keySynced : strings.codex.keyMissing}
             </span>
             <span className="hud-pill unknown">{strings.codex.model} {authUser?.openai_model ?? ai.model ?? 'n/a'}</span>
+            <RagStatusBadge authReady={Boolean(authUser)} />
           </div>
           {networkError && (
             <div className="codex-network-banner">

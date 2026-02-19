@@ -1045,3 +1045,16 @@ export async function setSetpoint(deg: number): Promise<{ status: Status; contro
   });
   return { status: d.status, control: d.control };
 }
+
+export type RagStats = {
+  doc_chunk_count: number;
+  embedded_docs_count: number;
+  embedding_model: string;
+  chunk_size: number;
+  has_openai_key: boolean;
+};
+
+export async function aiRagStats(): Promise<RagStats> {
+  const d = await req<{ ok: true; stats: RagStats; ts: number }>('/ai/rag/stats');
+  return d.stats;
+}
