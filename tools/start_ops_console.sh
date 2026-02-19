@@ -10,23 +10,36 @@ BRIDGE_PORT="${APP_BRIDGE_PORT:-8787}"
 HEALTH_URL="http://${BRIDGE_HOST}:${BRIDGE_PORT}/health"
 PID_FILE="${RUNLOG_DIR}/bridge.pid"
 LOG_FILE="${RUNLOG_DIR}/bridge.log"
+SUPERVISOR_PID_FILE="${RUNLOG_DIR}/bridge-supervisor.pid"
+SUPERVISOR_LOG_FILE="${RUNLOG_DIR}/bridge-supervisor.log"
+SUPERVISOR_SCRIPT="${ROOT_DIR}/tools/bridge_supervisor.sh"
 
 health_ok() {
   curl -fsS --max-time 1 "${HEALTH_URL}" >/dev/null 2>&1
 }
 
-start_bridge_if_needed() {
+start_bridge_supervisor_if_needed() {
+  if [ -f "${SUPERVISOR_PID_FILE}" ]; then
+    SUP_PID="$(cat "${SUPERVISOR_PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${SUP_PID:-}" ] && kill -0 "${SUP_PID}" 2>/dev/null && ps -p "${SUP_PID}" -o args= 2>/dev/null | grep -q "tools/bridge_supervisor.sh"; then
+      echo "[launcher] bridge supervisor already running (pid=${SUP_PID})"
+      return 0
+    fi
+  fi
+
+  echo "[launcher] starting bridge supervisor..."
+  (
+    cd "${ROOT_DIR}"
+    nohup "${SUPERVISOR_SCRIPT}" >"${SUPERVISOR_LOG_FILE}" 2>&1 &
+    echo $! >"${SUPERVISOR_PID_FILE}"
+  )
+}
+
+wait_for_bridge() {
   if health_ok; then
     echo "[launcher] bridge already healthy at ${HEALTH_URL}"
     return 0
   fi
-
-  echo "[launcher] starting bridge..."
-  (
-    cd "${ROOT_DIR}"
-    nohup python3 app/bridge/server.py >"${LOG_FILE}" 2>&1 &
-    echo $! >"${PID_FILE}"
-  )
 
   local tries=0
   local max_tries=80
@@ -57,5 +70,6 @@ start_ui() {
   fi
 }
 
-start_bridge_if_needed
+start_bridge_supervisor_if_needed
+wait_for_bridge
 start_ui
