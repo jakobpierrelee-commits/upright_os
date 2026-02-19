@@ -39,7 +39,7 @@ Success condition is not "RAG exists"; success is an end-to-end, reliable operat
 | Tool execution UI transparency | Implemented | Tool call cards shown in chat UI | `app/ui/ops-console/src/features/codex/ToolCallCard.tsx` |
 | Thread/history persistence | Partial | Persisted thread store exists; robustness/ops hardening still evolving | `app/bridge/ai_threads.json`, `app/bridge/server.py` |
 | RAG observability in UI | Partial | Backend endpoints exist; dedicated UI status/index affordances still limited | `app/bridge/server.py`, `app/ui/ops-console/src/api.ts` |
-| Retrieval quality guardrails | Partial | Basic similarity thresholding exists; no stronger relevance eval loop yet | `app/bridge/codex_rag.py` |
+| Retrieval quality guardrails | Implemented | Similarity thresholding + quality harness with precision/recall/MRR metrics | `app/bridge/codex_rag.py`, `scripts/rag_quality_harness.py` |
 
 ### 2.2 Recent Developments Since v1.0
 
@@ -84,9 +84,9 @@ Success condition is not "RAG exists"; success is an end-to-end, reliable operat
 
 ### P1 (next)
 
-1. Retrieval quality harness (known queries + expected source hits).
+1. ~~Retrieval quality harness (known queries + expected source hits).~~ **Done** — `scripts/rag_quality_harness.py`
 2. Thread store hardening and backup/rotation strategy.
-3. Better operator affordances for "why this tool ran" explanations.
+3. ~~Better operator affordances for "why this tool ran" explanations.~~ **Done** — Tool reasoning in `ToolCallCard.tsx`
 
 ### P2 (later)
 
