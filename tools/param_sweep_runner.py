@@ -16,7 +16,9 @@ sys.path.insert(0, str(REPO_ROOT / "app" / "bridge"))
 from param_sweep import (  # noqa: E402
     ParameterSweepRunner,
     SweepConfig,
+    best_candidate_summary,
     parse_range_spec,
+    write_sweep_csv,
 )
 from serial_gateway import NanoSerialGateway  # noqa: E402
 
@@ -45,6 +47,7 @@ def main() -> int:
     ap.add_argument("--no-restore-baseline-at-end", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--output", default="")
+    ap.add_argument("--csv-output", default="", help="Optional CSV output path for per-candidate rows")
     args = ap.parse_args()
 
     rollback_on_fail = args.rollback_on_fail and not args.no_rollback_on_fail
@@ -72,12 +75,15 @@ def main() -> int:
         gateway.wait_ready(timeout=15.0)
         runner = ParameterSweepRunner(gateway)
         report = runner.run(config)
+        print(best_candidate_summary(report))
         text = _to_json(report)
         print(text)
         if args.output:
             out = Path(args.output)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(text + "\n", encoding="utf-8")
+        if args.csv_output:
+            write_sweep_csv(Path(args.csv_output), report.get("rows", []))
         return 0
     except Exception as exc:
         print(_to_json({"ok": False, "error": str(exc)}))

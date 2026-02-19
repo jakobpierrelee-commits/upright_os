@@ -5,9 +5,11 @@ Automated parameter sweep for hardware-in-the-loop tuning.
 from __future__ import annotations
 
 import itertools
+import csv
 import statistics
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
@@ -69,6 +71,68 @@ def build_candidates(config: SweepConfig) -> List[PidCandidate]:
     if len(out) > config.max_candidates:
         raise ValueError(f"candidate_count {len(out)} exceeds max_candidates {config.max_candidates}")
     return out
+
+
+def flatten_row_for_csv(row: Dict[str, Any]) -> Dict[str, Any]:
+    metrics = row.get("metrics") or {}
+    failures = row.get("failures") or []
+    return {
+        "index": row.get("index"),
+        "kp": row.get("kp"),
+        "ki": row.get("ki"),
+        "kd": row.get("kd"),
+        "ok": row.get("ok"),
+        "score": row.get("score"),
+        "applied": row.get("applied"),
+        "rolled_back": row.get("rolled_back"),
+        "error": row.get("error", ""),
+        "failures": ",".join(str(x) for x in failures),
+        "sample_count": metrics.get("sample_count"),
+        "angle_variance": metrics.get("angle_variance"),
+        "angle_peak": metrics.get("angle_peak"),
+        "output_saturation_pct": metrics.get("output_saturation_pct"),
+        "oscillation_detected": metrics.get("oscillation_detected"),
+    }
+
+
+def write_sweep_csv(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "index",
+        "kp",
+        "ki",
+        "kd",
+        "ok",
+        "score",
+        "applied",
+        "rolled_back",
+        "error",
+        "failures",
+        "sample_count",
+        "angle_variance",
+        "angle_peak",
+        "output_saturation_pct",
+        "oscillation_detected",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(flatten_row_for_csv(row))
+
+
+def best_candidate_summary(report: Dict[str, Any]) -> str:
+    ranked = report.get("ranked_top") or []
+    if not ranked:
+        return "BEST none"
+    top = ranked[0]
+    metrics = top.get("metrics") or {}
+    return (
+        f"BEST kp={top.get('kp')} ki={top.get('ki')} kd={top.get('kd')} "
+        f"score={top.get('score')} ok={top.get('ok')} "
+        f"var={metrics.get('angle_variance')} sat={metrics.get('output_saturation_pct')} "
+        f"osc={metrics.get('oscillation_detected')}"
+    )
 
 
 def _detect_oscillation(angles: List[float]) -> bool:
@@ -253,5 +317,6 @@ class ParameterSweepRunner:
             "candidate_count": len(candidates),
             "rows": rows,
             "ranked_top": top,
+            "best_candidate_summary": best_candidate_summary({"ranked_top": top}),
             "pass_count": sum(1 for r in rows if r.get("ok")),
         }

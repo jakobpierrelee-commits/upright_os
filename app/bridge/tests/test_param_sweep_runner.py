@@ -15,8 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from param_sweep import (  # noqa: E402
     ParameterSweepRunner,
     SweepConfig,
+    best_candidate_summary,
     build_candidates,
     parse_range_spec,
+    write_sweep_csv,
 )
 
 
@@ -135,3 +137,57 @@ def test_parameter_sweep_rolls_back_on_failure() -> None:
     assert bad["rolled_back"] is True
     assert "angle_variance" in bad["failures"]
     assert "output_saturation_pct" in bad["failures"]
+
+
+def test_write_sweep_csv_exports_expected_columns(tmp_path) -> None:
+    rows = [
+        {
+            "index": 1,
+            "kp": 32.0,
+            "ki": 0.06,
+            "kd": 1.2,
+            "ok": True,
+            "score": 97.1,
+            "applied": True,
+            "rolled_back": False,
+            "failures": [],
+            "metrics": {
+                "sample_count": 20,
+                "angle_variance": 0.5,
+                "angle_peak": 0.8,
+                "output_saturation_pct": 10.0,
+                "oscillation_detected": False,
+            },
+        }
+    ]
+    out = tmp_path / "sweep.csv"
+    write_sweep_csv(out, rows)
+    text = out.read_text(encoding="utf-8")
+    assert "kp,ki,kd" in text
+    assert "32.0,0.06,1.2" in text
+    assert "angle_variance" in text
+
+
+def test_best_candidate_summary_includes_core_fields() -> None:
+    report = {
+        "ranked_top": [
+            {
+                "kp": 32.0,
+                "ki": 0.06,
+                "kd": 1.2,
+                "score": 98.5,
+                "ok": True,
+                "metrics": {
+                    "angle_variance": 0.4,
+                    "output_saturation_pct": 5.0,
+                    "oscillation_detected": False,
+                },
+            }
+        ]
+    }
+    s = best_candidate_summary(report)
+    assert "BEST" in s
+    assert "kp=32.0" in s
+    assert "ki=0.06" in s
+    assert "kd=1.2" in s
+    assert "score=98.5" in s
