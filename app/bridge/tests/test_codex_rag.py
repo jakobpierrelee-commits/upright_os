@@ -21,6 +21,7 @@ from codex_rag import (
     cosine_similarity,
     compute_file_hash,
     estimate_tokens,
+    tokenize_for_keyword_score,
     CHUNK_SIZE_CHARS,
     CHUNK_OVERLAP_CHARS,
 )
@@ -88,6 +89,15 @@ def test_cosine_similarity():
     assert sim == 0.0, "Zero vector should give 0 similarity"
 
     print("✓ Cosine similarity passed")
+
+
+def test_tokenize_for_keyword_score():
+    """Test lexical token extraction for hybrid retrieval."""
+    tokens = tokenize_for_keyword_score("Tune Kp/Ki/Kd for balance_v2 loop!!!")
+    assert "tune" in tokens
+    assert "balance_v2" in tokens
+    assert "kp" not in tokens, "Short 2-char tokens are ignored"
+    print("✓ Tokenize for keyword score passed")
 
 
 def test_file_hash():
@@ -262,6 +272,85 @@ def test_index_stats():
         db_path.unlink(missing_ok=True)
 
 
+def test_search_keyword_fallback_when_embeddings_unavailable():
+    """If embeddings are unavailable, search should still work via keyword overlap."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = Path(f.name)
+
+    try:
+        db = CodexDB(db_path)
+        db.init_schema()
+
+        chunks = [
+            DocChunk(
+                source_path="docs/pid.md",
+                chunk_index=0,
+                content="Kp Ki Kd tuning guide for balance controller",
+                embedding_json=json.dumps([0.0] * 1536),
+                created_at=time.time(),
+                token_count=12,
+            ),
+            DocChunk(
+                source_path="docs/misc.md",
+                chunk_index=0,
+                content="Unrelated assembly notes and battery handling",
+                embedding_json=json.dumps([0.0] * 1536),
+                created_at=time.time(),
+                token_count=10,
+            ),
+        ]
+        db.save_doc_chunks(chunks)
+
+        rag = CodexRAG(db=db)
+        results = rag.search_docs("tuning balance controller", k=3, min_score=0.2)
+        assert len(results) >= 1
+        assert results[0].source_path == "docs/pid.md"
+        print("✓ Keyword fallback search passed")
+    finally:
+        db.close()
+        db_path.unlink(missing_ok=True)
+
+
+def test_search_hybrid_boosts_keyword_relevance():
+    """Hybrid score should prefer chunk with matching terms when semantic scores are equal."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = Path(f.name)
+
+    try:
+        db = CodexDB(db_path)
+        db.init_schema()
+
+        shared_embedding = [0.2] * 1536
+        db.save_doc_chunks([
+            DocChunk(
+                source_path="docs/relevant.md",
+                chunk_index=0,
+                content="This page explains kalman filter bias tuning for gyro drift.",
+                embedding_json=json.dumps(shared_embedding),
+                created_at=time.time(),
+                token_count=16,
+            ),
+            DocChunk(
+                source_path="docs/irrelevant.md",
+                chunk_index=0,
+                content="This page discusses user interface spacing and color themes.",
+                embedding_json=json.dumps(shared_embedding),
+                created_at=time.time(),
+                token_count=14,
+            ),
+        ])
+
+        rag = CodexRAG(db=db)
+        rag._get_embedding = lambda texts: [shared_embedding for _ in texts]
+        results = rag.search_docs("kalman gyro bias", k=2, min_score=0.0)
+        assert len(results) == 2
+        assert results[0].source_path == "docs/relevant.md"
+        print("✓ Hybrid keyword boost passed")
+    finally:
+        db.close()
+        db_path.unlink(missing_ok=True)
+
+
 def run_all_tests():
     """Run all validation tests."""
     print("\n" + "=" * 60)
@@ -272,12 +361,15 @@ def run_all_tests():
         ("Chunk Text Basic", test_chunk_text_basic),
         ("Chunk Text Paragraph Breaks", test_chunk_text_paragraph_breaks),
         ("Cosine Similarity", test_cosine_similarity),
+        ("Tokenize for Keyword Score", test_tokenize_for_keyword_score),
         ("File Hash", test_file_hash),
         ("Token Estimation", test_token_estimation),
         ("RAG Initialization", test_rag_initialization),
         ("Search with Mock Embeddings", test_search_with_mock_embeddings),
         ("Context Formatting", test_context_formatting),
         ("Index Stats", test_index_stats),
+        ("Search Keyword Fallback", test_search_keyword_fallback_when_embeddings_unavailable),
+        ("Search Hybrid Boost", test_search_hybrid_boosts_keyword_relevance),
     ]
 
     passed = 0

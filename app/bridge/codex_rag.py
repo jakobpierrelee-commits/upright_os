@@ -40,6 +40,8 @@ MIN_CHUNK_CHARS = 100
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
 MAX_TOKENS_PER_BATCH = 8000  # Conservative batch size
+HYBRID_SEMANTIC_WEIGHT = 0.85
+HYBRID_KEYWORD_WEIGHT = 0.15
 
 # Default paths to index (relative to repo root)
 DEFAULT_DOC_PATHS = [
@@ -145,6 +147,11 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
         return 0.0
 
     return dot_product / (norm_a * norm_b)
+
+
+def tokenize_for_keyword_score(text: str) -> set[str]:
+    """Extract normalized keyword tokens for lightweight lexical scoring."""
+    return {tok for tok in re.findall(r"[a-z0-9_]+", text.lower()) if len(tok) > 2}
 
 
 class CodexRAG:
@@ -409,13 +416,12 @@ class CodexRAG:
         if not query.strip():
             return []
 
-        # Get query embedding
+        query_tokens = tokenize_for_keyword_score(query)
+        # Get query embedding; if unavailable, fall back to keyword-only retrieval.
         query_embedding = self._get_embedding([query])[0]
-
-        # Check if embedding is valid (not all zeros)
-        if all(v == 0.0 for v in query_embedding):
-            logger.warning("Query embedding failed - returning empty results")
-            return []
+        has_query_embedding = any(v != 0.0 for v in query_embedding)
+        if not has_query_embedding:
+            logger.warning("Query embedding unavailable - using keyword-only retrieval")
 
         # Get all chunks with embeddings
         all_chunks = self.db.get_all_chunks_with_embeddings()
@@ -434,11 +440,24 @@ class CodexRAG:
 
         for chunk in all_chunks:
             try:
+                semantic_score = 0.0
                 chunk_embedding = json.loads(chunk.embedding_json)
-                if not chunk_embedding or all(v == 0.0 for v in chunk_embedding):
-                    continue
+                has_chunk_embedding = bool(chunk_embedding) and any(v != 0.0 for v in chunk_embedding)
+                if has_query_embedding and has_chunk_embedding:
+                    semantic_score = cosine_similarity(query_embedding, chunk_embedding)
 
-                score = cosine_similarity(query_embedding, chunk_embedding)
+                keyword_score = 0.0
+                if query_tokens:
+                    chunk_tokens = tokenize_for_keyword_score(chunk.content)
+                    if chunk_tokens:
+                        overlap = len(query_tokens & chunk_tokens)
+                        keyword_score = overlap / len(query_tokens)
+
+                if has_query_embedding:
+                    score = (semantic_score * HYBRID_SEMANTIC_WEIGHT) + (keyword_score * HYBRID_KEYWORD_WEIGHT)
+                else:
+                    score = keyword_score
+
                 if score >= min_score:
                     scored_results.append((score, chunk))
             except (json.JSONDecodeError, TypeError):
