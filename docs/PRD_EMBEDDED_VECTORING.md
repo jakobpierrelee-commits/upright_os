@@ -152,6 +152,12 @@ python3 -m pytest app/bridge/tests/test_codex_rag.py app/bridge/tests/test_codex
 cd app/ui/ops-console && npm test -- --run
 ```
 
+Endpoint smoke gate:
+
+```bash
+python3 scripts/embedded_vectoring_smoke.py --base http://127.0.0.1:8787
+```
+
 Or run traceability check with tests:
 
 ```bash
