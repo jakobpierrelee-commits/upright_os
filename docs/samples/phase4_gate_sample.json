@@ -1,0 +1,99 @@
+{
+  "ok": true,
+  "duration_s": 1.002,
+  "step_count": 5,
+  "passed_steps": 5,
+  "steps": [
+    {
+      "name": "pytest:control_math_parity",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_control_math_parity.py",
+        "-q"
+      ],
+      "stdout_tail": "........                                                                 [100%]\n8 passed in 0.01s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "pytest:trace_replay",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_trace_replay_runner.py",
+        "-q"
+      ],
+      "stdout_tail": "...                                                                      [100%]\n3 passed in 0.02s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "pytest:param_sweep",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_param_sweep_runner.py",
+        "-q"
+      ],
+      "stdout_tail": "......                                                                   [100%]\n6 passed in 0.02s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "trace_replay_runner:nominal",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "tools/trace_replay_runner.py",
+        "--input",
+        "app/bridge/tests/fixtures/trace_replay_nominal.csv",
+        "--cmd-rmse-max",
+        "1",
+        "--cmd-abs-max",
+        "3"
+      ],
+      "stdout_tail": "      }\n    ],\n    \"ok\": true,\n    \"pass\": true,\n    \"summary\": {\n      \"max_abs_command_error\": 0.00031250000000060396,\n      \"rmse_command\": 0.0003124999999999883,\n      \"rmse_motion\": 0.0,\n      \"rmse_pid\": 0.0003124999999999883,\n      \"sample_count\": 11\n    }\n  },\n  \"trace\": \"app/bridge/tests/fixtures/trace_replay_nominal.csv\"\n}",
+      "stderr_tail": ""
+    },
+    {
+      "name": "trace_replay_runner:regressed_expected_fail",
+      "ok": true,
+      "returncode": 1,
+      "expected_codes": [
+        1
+      ],
+      "cmd": [
+        "python3",
+        "tools/trace_replay_runner.py",
+        "--input",
+        "app/bridge/tests/fixtures/trace_replay_regressed.csv",
+        "--cmd-rmse-max",
+        "5",
+        "--cmd-abs-max",
+        "10"
+      ],
+      "stdout_tail": "      }\n    ],\n    \"ok\": true,\n    \"pass\": false,\n    \"summary\": {\n      \"max_abs_command_error\": 29.9996875,\n      \"rmse_command\": 29.9996875,\n      \"rmse_motion\": 0.0,\n      \"rmse_pid\": 0.0003124999999999883,\n      \"sample_count\": 11\n    }\n  },\n  \"trace\": \"app/bridge/tests/fixtures/trace_replay_regressed.csv\"\n}",
+      "stderr_tail": ""
+    }
+  ]
+}
