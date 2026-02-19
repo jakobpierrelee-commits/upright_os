@@ -246,6 +246,22 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
     const message = state.aiInput.trim();
     if (!message) return;
     const sentAt = Date.now();
+    const previousHistory = state.aiHistory;
+    const shouldLogAiTurn = import.meta.env.DEV || (() => {
+      try {
+        return localStorage.getItem('upright.ai.debug') === '1';
+      } catch {
+        return false;
+      }
+    })();
+    if (shouldLogAiTurn) {
+      const lastTwo = previousHistory.slice(-2).map((m) => ({ role: m.role, text: m.text }));
+      console.info('[codex.sendAi][request]', {
+        thread_id: state.aiActiveThreadId ?? null,
+        message_count: previousHistory.length,
+        last_two_messages: lastTwo,
+      });
+    }
     const optimisticHistory = [...state.aiHistory, { ts: sentAt, role: 'user' as const, text: message, meta: { sent_at: sentAt } }];
     dispatch({ type: 'set_ai_history', payload: optimisticHistory });
     dispatch({ type: 'set_ai_input', payload: '' });
@@ -261,16 +277,41 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       dispatch({ type: 'set_ai', payload: r.ai });
       dispatch({ type: 'set_ai_threads', payload: r.threads });
       dispatch({ type: 'set_ai_active_thread', payload: r.thread_id ?? r.ai.active_thread_id ?? state.aiActiveThreadId ?? null });
+      if (shouldLogAiTurn) {
+        const lastTwo = timed.slice(-2).map((m) => ({ role: m.role, text: m.text }));
+        console.info('[codex.sendAi][response]', {
+          thread_id: r.thread_id ?? r.ai.active_thread_id ?? null,
+          message_count: timed.length,
+          last_two_messages: lastTwo,
+        });
+      }
       if (Array.isArray(r.tool_calls) && r.tool_calls.length > 0) {
         onMessage(`Codex tools executed: ${r.tool_calls.length}`);
       }
     } catch (e) {
-      dispatch({ type: 'set_ai_history', payload: optimisticHistory });
-      onMessage(`Codex chat error: ${(e as Error).message}`);
+      const errMsg = (e as Error).message || String(e);
+      dispatch({ type: 'set_ai_history', payload: previousHistory });
+      dispatch({ type: 'set_ai_input', payload: message });
+      if (shouldLogAiTurn) {
+        console.warn('[codex.sendAi][error]', {
+          thread_id: state.aiActiveThreadId ?? null,
+          error: errMsg,
+        });
+      }
+      if (errMsg.includes('thread_not_found')) {
+        onMessage('Codex thread expired or missing. Resynced threads; please retry.');
+        try {
+          await refreshAi();
+        } catch {
+          // keep local state if refresh fails
+        }
+      } else {
+        onMessage(`Codex chat error: ${errMsg}`);
+      }
     } finally {
       dispatch({ type: 'set_ai_busy', payload: false });
     }
-  }, [onMessage, state.aiActiveThreadId, state.aiHistory, state.aiInput]);
+  }, [onMessage, refreshAi, state.aiActiveThreadId, state.aiHistory, state.aiInput]);
 
   const refreshThreads = useCallback(async () => {
     const r = await aiThreads();

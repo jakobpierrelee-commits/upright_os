@@ -1105,6 +1105,10 @@ class AIManager:
         if chosen and chosen in bucket:
             self._active_thread[session_key] = chosen
             return chosen, bucket[chosen]
+        if thread_id and thread_id not in bucket:
+            # Explicit thread selection must never silently fall back; callers
+            # rely on this to detect stale/missing thread IDs.
+            raise RuntimeError("thread_not_found")
 
         if not chosen and bucket:
             picked = max(bucket.values(), key=lambda t: float(t.get("updated_at") or 0.0))
@@ -4056,6 +4060,13 @@ def build_handler(
                     }
                     skey = f"user:{me['id']}"
                     thread_id = str(body.get("thread_id", "")).strip() or None
+                    if thread_id:
+                        try:
+                            ai.history(skey, thread_id)
+                        except RuntimeError as exc:
+                            if str(exc) == "thread_not_found":
+                                return _json(self, 404, {"ok": False, "error": "thread_not_found"})
+                            raise
                     out = ai.chat(
                         message=msg,
                         context=ctx,
@@ -4134,6 +4145,15 @@ def build_handler(
                     board_fqbn = str(body.get("board", fw_status.get("board", "arduino:avr:nano")))
                     port = str(body.get("port", fw_status.get("port", "")))
                     try:
+                        skey = f"user:{me['id']}"
+                        thread_id = str(body.get("thread_id", "")).strip() or None
+                        if thread_id:
+                            try:
+                                ai.history(skey, thread_id)
+                            except RuntimeError as exc:
+                                if str(exc) == "thread_not_found":
+                                    return _json(self, 404, {"ok": False, "error": "thread_not_found"})
+                                raise
                         result = codex_agent.chat_with_tools(
                             message=msg,
                             context=ctx,
@@ -4146,8 +4166,6 @@ def build_handler(
                             board_fqbn=board_fqbn,
                             port=port,
                         )
-                        skey = f"user:{me['id']}"
-                        thread_id = str(body.get("thread_id", "")).strip() or None
                         tid = ai._append(skey, "user", msg, thread_id=thread_id)
                         ai._append(skey, "assistant", result["answer"], thread_id=tid)
                         return _json(
@@ -4316,6 +4334,13 @@ def build_handler(
                     }
                     skey = f"user:{me['id']}"
                     thread_id = str(body.get("thread_id", "")).strip() or None
+                    if thread_id:
+                        try:
+                            ai.history(skey, thread_id)
+                        except RuntimeError as exc:
+                            if str(exc) == "thread_not_found":
+                                return _json(self, 404, {"ok": False, "error": "thread_not_found"})
+                            raise
 
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
