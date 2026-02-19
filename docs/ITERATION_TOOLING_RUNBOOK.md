@@ -61,7 +61,7 @@ Parameter sweep dry setup (real hardware required):
 
 ```bash
 python3 tools/param_sweep_runner.py \
-  --port /dev/cu.usbserial-XXXX \
+  --port /dev/cu.usbserial-2210 \
   --kp 31,32 \
   --ki 0.05,0.06 \
   --kd 1.0,1.2 \
@@ -77,6 +77,19 @@ What to check:
 - JSON contains `ranked_top` and `best_candidate_summary`.
 - CSV contains one row per candidate with pass/fail fields.
 
+Validated conservative run (2026-02-19):
+- Command:
+  - `python3 tools/param_sweep_runner.py --port /dev/cu.usbserial-2210 --baud 115200 --kp 31,32 --ki 0.05,0.06 --kd 1.0,1.2 --observe-s 2 --settle-s 1 --max-candidates 20 --output tests/results/iteration_tooling/hardware_sweep_v1.json --csv-output tests/results/iteration_tooling/hardware_sweep_v1.csv`
+- Result:
+  - `BEST kp=32.0 ki=0.05 kd=1.0 score=99.662 ok=True`
+  - `pass_count=8/8` (all candidates within configured guardrails)
+
+Suggested next (expanded) sweep after conservative pass:
+- `--kp 31,32,33`
+- `--ki 0.04,0.05,0.06`
+- `--kd 0.9,1.0,1.1,1.2`
+- Keep rollback enabled and run from SAFE_IDLE.
+
 ## Phase 4 Acceptance Gate
 Non-hardware gate:
 
@@ -89,9 +102,27 @@ Hardware smoke gate:
 ```bash
 python3 scripts/iteration_tooling_gate.py \
   --with-hardware \
-  --port /dev/cu.usbserial-XXXX \
+  --port /dev/cu.usbserial-2210 \
   --baud 115200
 ```
+
+Validated hardware gate (2026-02-19):
+- Command:
+  - `python3 scripts/iteration_tooling_gate.py --with-hardware --port /dev/cu.usbserial-2210 --baud 115200 --output tests/results/iteration_tooling/phase4_gate_hardware.json`
+- Result:
+  - `PASS (6/6)` including `param_sweep_runner:hardware_smoke`.
+
+Daily handoff gate command:
+
+```bash
+python3 scripts/iteration_tooling_gate.py --with-hardware --port /dev/cu.usbserial-2210 --baud 115200
+```
+
+Threshold tuning note (2026-02-19):
+- No threshold changes were required after first hardware validation.
+- Keep current defaults:
+  - Replay: `cmd_rmse_max=6.0`, `cmd_abs_max=20.0`
+  - Sweep: `max_angle_variance=8.0`, `max_output_saturation_pct=85.0`
 
 ## Output Artifacts
 - Gate report JSON:

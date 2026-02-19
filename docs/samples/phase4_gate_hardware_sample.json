@@ -1,0 +1,133 @@
+{
+  "ok": true,
+  "duration_s": 15.558,
+  "step_count": 6,
+  "passed_steps": 6,
+  "steps": [
+    {
+      "name": "pytest:control_math_parity",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_control_math_parity.py",
+        "-q"
+      ],
+      "stdout_tail": "........                                                                 [100%]\n8 passed in 0.01s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "pytest:trace_replay",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_trace_replay_runner.py",
+        "-q"
+      ],
+      "stdout_tail": "...                                                                      [100%]\n3 passed in 0.01s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "pytest:param_sweep",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "-m",
+        "pytest",
+        "app/bridge/tests/test_param_sweep_runner.py",
+        "-q"
+      ],
+      "stdout_tail": "......                                                                   [100%]\n6 passed in 0.02s",
+      "stderr_tail": ""
+    },
+    {
+      "name": "trace_replay_runner:nominal",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "tools/trace_replay_runner.py",
+        "--input",
+        "app/bridge/tests/fixtures/trace_replay_nominal.csv",
+        "--cmd-rmse-max",
+        "1",
+        "--cmd-abs-max",
+        "3"
+      ],
+      "stdout_tail": "      }\n    ],\n    \"ok\": true,\n    \"pass\": true,\n    \"summary\": {\n      \"max_abs_command_error\": 0.00031250000000060396,\n      \"rmse_command\": 0.0003124999999999883,\n      \"rmse_motion\": 0.0,\n      \"rmse_pid\": 0.0003124999999999883,\n      \"sample_count\": 11\n    }\n  },\n  \"trace\": \"app/bridge/tests/fixtures/trace_replay_nominal.csv\"\n}",
+      "stderr_tail": ""
+    },
+    {
+      "name": "trace_replay_runner:regressed_expected_fail",
+      "ok": true,
+      "returncode": 1,
+      "expected_codes": [
+        1
+      ],
+      "cmd": [
+        "python3",
+        "tools/trace_replay_runner.py",
+        "--input",
+        "app/bridge/tests/fixtures/trace_replay_regressed.csv",
+        "--cmd-rmse-max",
+        "5",
+        "--cmd-abs-max",
+        "10"
+      ],
+      "stdout_tail": "      }\n    ],\n    \"ok\": true,\n    \"pass\": false,\n    \"summary\": {\n      \"max_abs_command_error\": 29.9996875,\n      \"rmse_command\": 29.9996875,\n      \"rmse_motion\": 0.0,\n      \"rmse_pid\": 0.0003124999999999883,\n      \"sample_count\": 11\n    }\n  },\n  \"trace\": \"app/bridge/tests/fixtures/trace_replay_regressed.csv\"\n}",
+      "stderr_tail": ""
+    },
+    {
+      "name": "param_sweep_runner:hardware_smoke",
+      "ok": true,
+      "returncode": 0,
+      "expected_codes": [
+        0
+      ],
+      "cmd": [
+        "python3",
+        "tools/param_sweep_runner.py",
+        "--port",
+        "/dev/cu.usbserial-2210",
+        "--baud",
+        "115200",
+        "--kp",
+        "31,32",
+        "--ki",
+        "0.05",
+        "--kd",
+        "1.05",
+        "--observe-s",
+        "1.5",
+        "--settle-s",
+        "0.5",
+        "--max-candidates",
+        "10",
+        "--output",
+        "tests/results/iteration_tooling/hardware_sweep_smoke.json",
+        "--csv-output",
+        "tests/results/iteration_tooling/hardware_sweep_smoke.csv"
+      ],
+      "stdout_tail": "      \"kp\": 32.0,\n      \"metrics\": {\n        \"angle_peak\": 0.064,\n        \"angle_variance\": 3.0810606060606064e-05,\n        \"oscillation_detected\": false,\n        \"output_saturation_pct\": 0.0,\n        \"sample_count\": 12\n      },\n      \"ok\": true,\n      \"rolled_back\": false,\n      \"score\": 99.744\n    }\n  ]\n}",
+      "stderr_tail": ""
+    }
+  ]
+}
