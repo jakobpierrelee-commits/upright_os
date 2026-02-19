@@ -37,7 +37,7 @@ Success condition is not "RAG exists"; success is an end-to-end, reliable operat
 | Firmware upload confirmation gate | Implemented | UI confirmation modal present | `app/ui/ops-console/src/features/codex/UploadConfirmModal.tsx` |
 | Serial busy protection (critical paths) | Implemented | Added busy guards + retry hint in rollback/experiment paths | `app/bridge/codex_tools.py`, `app/bridge/tests/test_codex_t2_tools.py` |
 | Tool execution UI transparency | Implemented | Tool call cards shown in chat UI | `app/ui/ops-console/src/features/codex/ToolCallCard.tsx` |
-| Thread/history persistence | Partial | Persisted thread store exists; robustness/ops hardening still evolving | `app/bridge/ai_threads.json`, `app/bridge/server.py` |
+| Thread/history persistence | Implemented | Atomic writes + backup recovery + rotation landed for resilient thread continuity | `app/bridge/ai_threads.json`, `app/bridge/server.py`, `app/bridge/tests/test_ai_thread_store_hardening.py` |
 | RAG observability in UI | Partial | Backend endpoints exist; dedicated UI status/index affordances still limited | `app/bridge/server.py`, `app/ui/ops-console/src/api.ts` |
 | Retrieval quality guardrails | Implemented | Similarity thresholding + quality harness with precision/recall/MRR metrics | `app/bridge/codex_rag.py`, `scripts/rag_quality_harness.py` |
 

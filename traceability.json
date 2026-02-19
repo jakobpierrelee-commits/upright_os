@@ -1,0 +1,206 @@
+{
+  "prd_path": "docs/PRD_EMBEDDED_VECTORING.md",
+  "prd_version": "1.1",
+  "branch": "recover/uiux-restore-2026-02-19",
+  "commit": "6ae87ad",
+  "generated_at": "2026-02-19T10:28:27Z",
+  "capabilities": [
+    {
+      "capability": "RAG core (chunk/embed/search)",
+      "status": "Implemented",
+      "notes": "Search path operational; SQLite-backed chunk storage",
+      "files": [
+        {
+          "path": "app/bridge/codex_rag.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_rag.py",
+          "test_exists": true
+        },
+        {
+          "path": "app/bridge/codex_db.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_db.py",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "`search_docs` tool wiring",
+      "status": "Implemented",
+      "notes": "Tool exposed via executor",
+      "files": [
+        {
+          "path": "app/bridge/codex_tools.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_tools.py",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Agent loop with tool calls",
+      "status": "Implemented",
+      "notes": "Iterative tool-call loop + cap",
+      "files": [
+        {
+          "path": "app/bridge/codex_agent.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_agent.py",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Tool safety allowlists",
+      "status": "Implemented",
+      "notes": "Command/edit restrictions in place",
+      "files": [
+        {
+          "path": "app/bridge/codex_tools.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_tools.py",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Firmware upload confirmation gate",
+      "status": "Implemented",
+      "notes": "UI confirmation modal present",
+      "files": [
+        {
+          "path": "app/ui/ops-console/src/features/codex/UploadConfirmModal.tsx",
+          "exists": true,
+          "test_file": "app/ui/ops-console/src/features/codex/UploadConfirmModal.test.tsx",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Serial busy protection (critical paths)",
+      "status": "Implemented",
+      "notes": "Added busy guards + retry hint in rollback/experiment paths",
+      "files": [
+        {
+          "path": "app/bridge/codex_tools.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_tools.py",
+          "test_exists": true
+        },
+        {
+          "path": "app/bridge/tests/test_codex_t2_tools.py",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Tool execution UI transparency",
+      "status": "Implemented",
+      "notes": "Tool call cards shown in chat UI",
+      "files": [
+        {
+          "path": "app/ui/ops-console/src/features/codex/ToolCallCard.tsx",
+          "exists": true,
+          "test_file": "app/ui/ops-console/src/features/codex/ToolCallCard.test.tsx",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    },
+    {
+      "capability": "Thread/history persistence",
+      "status": "Implemented",
+      "notes": "Atomic writes + backup recovery + rotation landed for resilient thread continuity",
+      "files": [
+        {
+          "path": "app/bridge/ai_threads.json",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        },
+        {
+          "path": "app/bridge/server.py",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        },
+        {
+          "path": "app/bridge/tests/test_ai_thread_store_hardening.py",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": false
+    },
+    {
+      "capability": "RAG observability in UI",
+      "status": "Partial",
+      "notes": "Backend endpoints exist; dedicated UI status/index affordances still limited",
+      "files": [
+        {
+          "path": "app/bridge/server.py",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        },
+        {
+          "path": "app/ui/ops-console/src/api.ts",
+          "exists": true,
+          "test_file": null,
+          "test_exists": false
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": false
+    },
+    {
+      "capability": "Retrieval quality guardrails",
+      "status": "Implemented",
+      "notes": "Similarity thresholding + quality harness with precision/recall/MRR metrics",
+      "files": [
+        {
+          "path": "app/bridge/codex_rag.py",
+          "exists": true,
+          "test_file": "app/bridge/tests/test_codex_rag.py",
+          "test_exists": true
+        },
+        {
+          "path": "scripts/rag_quality_harness.py",
+          "exists": true,
+          "test_file": "scripts/tests/test_rag_quality_harness.py",
+          "test_exists": true
+        }
+      ],
+      "all_files_exist": true,
+      "has_tests": true
+    }
+  ],
+  "tests_run": false,
+  "tests_passed": null,
+  "test_results": null,
+  "summary": {
+    "total_capabilities": 10,
+    "implemented": 9,
+    "partial": 1,
+    "files_verified": 10,
+    "with_tests": 8,
+    "coverage_pct": 100.0
+  }
+}
