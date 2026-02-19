@@ -4161,6 +4161,18 @@ pre,
   stroke-width: 2;
 }
 
+.scope-band {
+  opacity: 0.22;
+}
+
+.scope-band.angle {
+  fill: rgba(92, 172, 245, 0.35);
+}
+
+.scope-band.out {
+  fill: rgba(103, 219, 177, 0.28);
+}
+
 .scope-line.kf {
   stroke: #59c7ff;
 }

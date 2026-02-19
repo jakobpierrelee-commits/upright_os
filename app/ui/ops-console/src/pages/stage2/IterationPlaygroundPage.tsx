@@ -79,6 +79,18 @@ function sparkline(values: number[], minY: number, maxY: number): string {
     .join(' ');
 }
 
+function sparkBandArea(center: number[], band: number[], minY: number, maxY: number): string {
+  if (center.length <= 1 || center.length !== band.length) return '';
+  const w = 640;
+  const h = 140;
+  const span = Math.max(0.0001, maxY - minY);
+  const upper = center.map((v, i) => ({ x: (i / (center.length - 1)) * w, y: h - (((v + Math.abs(band[i])) - minY) / span) * h }));
+  const lower = center.map((v, i) => ({ x: (i / (center.length - 1)) * w, y: h - (((v - Math.abs(band[i])) - minY) / span) * h }));
+  const pathUpper = upper.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+  const pathLower = lower.reverse().map((p) => `L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+  return `${pathUpper} ${pathLower} Z`;
+}
+
 function runSim(opts: {
   name: string;
   kp: number;
@@ -302,6 +314,27 @@ export function IterationPlaygroundPage(props: Props) {
     [series],
   );
   const outSpark = useMemo(() => sparkline(series.out, series.outMin, series.outMax), [series]);
+  const confidenceBand = useMemo(() => {
+    const confidence = surrogateReport?.model?.confidence ?? 0;
+    const dist = surrogateReport?.model?.distance_from_known ?? 0;
+    const base = clamp((1 - confidence) * 8 + (dist * 4), 0.3, 9.0);
+    const angleBand = series.kf.map(() => base);
+    const outBand = series.out.map(() => clamp(base * 16, 6, 80));
+    return {
+      angleArea: sparkBandArea(series.kf, angleBand, series.angleMin, series.angleMax),
+      outArea: sparkBandArea(series.out, outBand, series.outMin, series.outMax),
+      base,
+    };
+  }, [series, surrogateReport?.model?.confidence, surrogateReport?.model?.distance_from_known]);
+  const gainEnvelope = surrogateReport?.model?.gain_ranges;
+  const inKnownEnvelope = useMemo(() => {
+    if (!gainEnvelope) return null;
+    return (
+      simKp >= gainEnvelope.kp.min && simKp <= gainEnvelope.kp.max
+      && simKi >= gainEnvelope.ki.min && simKi <= gainEnvelope.ki.max
+      && simKd >= gainEnvelope.kd.min && simKd <= gainEnvelope.kd.max
+    );
+  }, [gainEnvelope, simKd, simKi, simKp]);
 
   const runTraceReplay = async () => {
     setTraceBusy(true);
@@ -576,6 +609,9 @@ export function IterationPlaygroundPage(props: Props) {
                 <span className="action-rig-title">Angle Relationship</span>
               </div>
               <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Angle relationship chart">
+                {mode === 'sim' && surrogateReport?.ok && confidenceBand.angleArea && (
+                  <path className="scope-band angle" d={confidenceBand.angleArea} />
+                )}
                 <polyline className="scope-line set" points={angleSpark.set} />
                 <polyline className="scope-line raw" points={angleSpark.raw} />
                 <polyline className="scope-line kf" points={angleSpark.kf} />
@@ -586,6 +622,9 @@ export function IterationPlaygroundPage(props: Props) {
                 <span className="action-rig-title">Control Output Trend</span>
               </div>
               <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Output trend chart">
+                {mode === 'sim' && surrogateReport?.ok && confidenceBand.outArea && (
+                  <path className="scope-band out" d={confidenceBand.outArea} />
+                )}
                 <polyline className="scope-line out" points={outSpark} />
               </svg>
             </div>
@@ -658,6 +697,16 @@ export function IterationPlaygroundPage(props: Props) {
                   <p><strong>Surrogate Confidence:</strong> {(surrogateReport.model.confidence * 100).toFixed(0)}%</p>
                   <p><strong>Distance From Known Gains:</strong> {surrogateReport.model.distance_from_known.toFixed(2)}</p>
                   <p><strong>Training Rows:</strong> {surrogateReport.model.sample_count} from {surrogateReport.model.log_count} logs</p>
+                  {gainEnvelope && (
+                    <p>
+                      <strong>Known Envelope:</strong> kp[{gainEnvelope.kp.min.toFixed(2)}, {gainEnvelope.kp.max.toFixed(2)}]
+                      {' '}ki[{gainEnvelope.ki.min.toFixed(3)}, {gainEnvelope.ki.max.toFixed(3)}]
+                      {' '}kd[{gainEnvelope.kd.min.toFixed(3)}, {gainEnvelope.kd.max.toFixed(3)}]
+                    </p>
+                  )}
+                  {inKnownEnvelope != null && (
+                    <p><strong>Envelope Status:</strong> {inKnownEnvelope ? 'inside_known_range' : 'outside_known_range'}</p>
+                  )}
                   {surrogateReport.model.warning && (
                     <p><strong>Warning:</strong> {surrogateReport.model.warning}</p>
                   )}
