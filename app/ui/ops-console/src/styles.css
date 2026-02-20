@@ -549,6 +549,159 @@ p {
   box-shadow: 0 0 0 3px rgba(62, 165, 245, 0.22);
 }
 
+.tune-help-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tune-help-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(113, 181, 244, 0.52);
+  background: linear-gradient(180deg, rgba(18, 47, 77, 0.95), rgba(12, 31, 53, 0.95));
+  color: var(--text-0);
+  font-weight: 800;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.tune-help-btn.is-open {
+  border-color: rgba(118, 208, 255, 0.95);
+  box-shadow: 0 0 0 2px rgba(77, 164, 246, 0.25);
+}
+
+.tune-help-popover {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 36;
+  width: min(360px, 72vw);
+  border-radius: 10px;
+  border: 1px solid rgba(112, 184, 246, 0.42);
+  background: linear-gradient(160deg, rgba(10, 22, 39, 0.98), rgba(8, 18, 33, 0.98));
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tune-help-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-0);
+}
+
+.tune-help-graphic {
+  width: 100%;
+  height: 82px;
+  border-radius: 8px;
+  border: 1px solid rgba(106, 171, 237, 0.26);
+  background: radial-gradient(circle at 22% 18%, rgba(38, 86, 132, 0.32), rgba(8, 18, 33, 0.92) 64%);
+}
+
+.tune-help-list {
+  display: grid;
+  gap: 5px;
+}
+
+.tune-help-item {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 0.71rem;
+  line-height: 1.36;
+}
+
+.tune-help-item strong {
+  color: var(--text-0);
+}
+
+.tune-help-foot {
+  color: var(--text-2);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+}
+
+.tune-help-line {
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tune-help-line-a {
+  stroke: rgba(87, 196, 255, 0.95);
+}
+
+.tune-help-line-b {
+  stroke: rgba(149, 183, 255, 0.8);
+}
+
+.tune-help-line-noise {
+  stroke: rgba(242, 164, 91, 0.85);
+}
+
+.tune-help-node {
+  fill: rgba(148, 218, 255, 0.9);
+}
+
+.tune-help-bar {
+  stroke: rgba(100, 176, 244, 0.5);
+  stroke-width: 1;
+}
+
+.tune-help-bar-kp {
+  fill: rgba(85, 198, 255, 0.4);
+}
+
+.tune-help-bar-ki {
+  fill: rgba(127, 171, 255, 0.35);
+}
+
+.tune-help-bar-kd {
+  fill: rgba(96, 145, 236, 0.3);
+}
+
+.tune-help-wheel {
+  fill: rgba(20, 42, 69, 0.78);
+  stroke: rgba(124, 189, 247, 0.82);
+  stroke-width: 2;
+}
+
+.tune-help-arrow {
+  fill: rgba(96, 198, 245, 0.45);
+  stroke: rgba(121, 226, 255, 0.9);
+  stroke-width: 1.7;
+}
+
+.tune-help-target {
+  stroke: rgba(255, 197, 100, 0.9);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.tune-help-clamp {
+  stroke: rgba(250, 183, 104, 0.9);
+  stroke-width: 2.2;
+}
+
+.tune-help-clamp-box {
+  fill: rgba(255, 187, 112, 0.18);
+  stroke: rgba(255, 189, 114, 0.9);
+  stroke-width: 1.5;
+}
+
+.tune-help-clamp-text {
+  fill: rgba(255, 220, 176, 0.95);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 @keyframes telemetryPulse {
   0% {
     transform: scale(0.9);
@@ -2333,7 +2486,22 @@ pre,
 }
 
 .codex-msg.thinking {
-  opacity: 0.85;
+  opacity: 0.82;
+}
+
+.codex-thinking-stream {
+  display: grid;
+  gap: 4px;
+  max-width: 68ch;
+  color: #8196b8;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+}
+
+.codex-thinking-stream p {
+  margin: 0;
+  font-style: italic;
 }
 
 .codex-thread-list {
@@ -2870,14 +3038,20 @@ pre,
 
 .codex-send-row textarea {
   min-height: 64px;
-  max-height: 180px;
+  height: 64px;
   width: 100%;
   padding-right: 44px;
   resize: none;
+  overflow-y: hidden;
   font-family: var(--font-ui);
   font-size: 0.82rem;
   line-height: 1.4;
+  transition: height 180ms ease;
   scrollbar-color: rgba(111, 180, 230, 0.45) rgba(8, 20, 39, 0.65);
+}
+
+.codex-send-row textarea.collapsing {
+  transition: height 220ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .codex-send-row button {
@@ -3895,6 +4069,67 @@ pre,
   gap: 12px;
 }
 
+.playground-lesson-shell {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.playground-lesson-rail {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.playground-lesson-item {
+  text-align: left;
+  border: 1px solid rgba(96, 151, 226, 0.35);
+  background: rgba(8, 20, 37, 0.74);
+  color: var(--text-1);
+  border-radius: 8px;
+  padding: 8px 9px;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+.playground-lesson-item.active {
+  border-color: rgba(127, 206, 255, 0.8);
+  box-shadow: 0 0 0 1px rgba(107, 188, 255, 0.35) inset;
+  background: linear-gradient(140deg, rgba(17, 44, 73, 0.95), rgba(10, 27, 46, 0.95));
+}
+
+.playground-lesson-main {
+  display: grid;
+  gap: 12px;
+}
+
+.playground-lesson-card {
+  margin-bottom: 0;
+}
+
+.playground-lesson-objective,
+.playground-lesson-why {
+  margin: 0;
+}
+
+.playground-lesson-refs {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.playground-lesson-refs a {
+  font-size: 0.68rem;
+  color: #87cfff;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+
+.playground-lesson-refs a:hover {
+  text-decoration: underline;
+  color: #b4e2ff;
+}
+
 .playground-mode-toggle {
   display: flex;
   gap: 8px;
@@ -4137,6 +4372,23 @@ pre,
   gap: 4px 12px;
 }
 
+.playground-linear-bench {
+  margin-top: 10px;
+}
+
+.playground-linear-hints {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 2px;
+}
+
+.playground-linear-hints p {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+
 .playground-trace-picker {
   border: 1px solid rgba(94, 146, 208, 0.34);
   border-radius: 9px;
@@ -4249,6 +4501,14 @@ pre,
   .playground-visual-grid,
   .playground-scope-grid {
     grid-template-columns: 1fr;
+  }
+
+  .playground-lesson-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .playground-lesson-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .playground-stat-row {

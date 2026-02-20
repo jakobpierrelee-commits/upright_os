@@ -1,17 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { AiHistoryItem, AiProfile, AiStatus, AiThreadSummary, AuthUser } from '../../api';
 import { aiConfirmUpload } from '../../api';
 import { strings } from '../../strings';
 import { ToolCallList } from './ToolCallCard';
 import { UploadConfirmModal, extractPendingUpload, type PendingUpload } from './UploadConfirmModal';
 import { RagStatusBadge } from './RagStatusBadge';
-
-const WORKING_STEPS = [
-  'reviewing telemetry and current context...',
-  'checking safe actions and tool constraints...',
-  'executing requested task...',
-  'preparing concise response...',
-];
 
 type Props = {
   bridgeReady: boolean;
@@ -53,6 +46,7 @@ type Props = {
   aiInput: string;
   setAiInput: (value: string) => void;
   aiBusy: boolean;
+  aiBusyDetail: string | null;
   sendAi: () => Promise<void>;
   refreshThreads: () => Promise<void>;
   startNewChat: () => Promise<void>;
@@ -93,6 +87,7 @@ export function CodexPanel(props: Props) {
     aiInput,
     setAiInput,
     aiBusy,
+    aiBusyDetail,
     sendAi,
     refreshThreads,
     startNewChat,
@@ -109,11 +104,11 @@ export function CodexPanel(props: Props) {
   const [showHistory, setShowHistory] = useState(false);
   const [showProfilePicker, setShowProfilePicker] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
-  const [nowTick, setNowTick] = useState(Date.now());
-  const [workingText, setWorkingText] = useState('');
+  const [thinkingLines, setThinkingLines] = useState<string[]>([]);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const chatLogRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Network connectivity check - detect disconnects
   useEffect(() => {
@@ -230,39 +225,87 @@ export function CodexPanel(props: Props) {
   }, [aiActiveThreadId, aiHistory]);
 
   useEffect(() => {
-    if (!aiBusy) return;
-    const id = window.setInterval(() => setNowTick(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, [aiBusy]);
+    if (!aiBusy || !chatLogRef.current) return;
+    // Keep viewport pinned to latest live progress lines while assistant is working.
+    chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
+  }, [aiBusy, thinkingLines]);
 
   useEffect(() => {
     if (!aiBusy) {
-      setWorkingText('');
+      setThinkingLines([]);
       return;
     }
-    let phraseIndex = 0;
-    let charIndex = 0;
-    let holdTicks = 0;
-    const tick = window.setInterval(() => {
-      const phrase = WORKING_STEPS[phraseIndex] ?? '';
-      if (charIndex < phrase.length) {
-        charIndex += 1;
-        setWorkingText(phrase.slice(0, charIndex));
-        return;
-      }
-      holdTicks += 1;
-      if (holdTicks < 8) return;
-      holdTicks = 0;
-      phraseIndex = (phraseIndex + 1) % WORKING_STEPS.length;
-      charIndex = 0;
-      setWorkingText('');
-    }, 42);
-    return () => window.clearInterval(tick);
+    setThinkingLines((prev) => (prev.length ? prev : ['Preparing request...']));
   }, [aiBusy]);
 
   const formatClock = (ts?: number) => (ts ? new Date(ts).toLocaleTimeString() : 'n/a');
   const pendingSentAt = [...aiHistory].reverse().find((m) => m.role === 'user')?.meta?.sent_at;
-  const thinkingElapsedMs = pendingSentAt ? Math.max(0, nowTick - pendingSentAt) : 0;
+
+  useEffect(() => {
+    if (!aiBusy || !aiBusyDetail) return;
+    setThinkingLines((prev) => {
+      if (prev[prev.length - 1] === aiBusyDetail) return prev;
+      return [...prev, aiBusyDetail].slice(-6);
+    });
+  }, [aiBusy, aiBusyDetail]);
+
+  useEffect(() => {
+    if (!aiBusy) return;
+    const tick = window.setInterval(() => {
+      const elapsedMs = pendingSentAt ? Math.max(0, Date.now() - pendingSentAt) : 0;
+      const elapsedS = (elapsedMs / 1000).toFixed(1);
+      const heartbeat = `Still working (${elapsedS}s)...`;
+      setThinkingLines((prev) => {
+        if (prev[prev.length - 1] === heartbeat) return prev;
+        return [...prev, heartbeat].slice(-6);
+      });
+    }, 3500);
+    return () => window.clearInterval(tick);
+  }, [aiBusy, pendingSentAt]);
+
+  const autoSizeComposer = useCallback(() => {
+    const el = composerRef.current;
+    if (!el || el.classList.contains('collapsing')) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    autoSizeComposer();
+  }, [aiInput, autoSizeComposer]);
+
+  const handleSend = useCallback(async () => {
+    if (!bridgeReady || aiBusy || !aiInput.trim()) return;
+    const el = composerRef.current;
+    if (el) {
+      el.classList.add('collapsing');
+      el.style.height = `${el.scrollHeight}px`;
+      window.requestAnimationFrame(() => {
+        if (composerRef.current) composerRef.current.style.height = '64px';
+      });
+    }
+    try {
+      await sendAi();
+    } finally {
+      window.setTimeout(() => {
+        if (!composerRef.current) return;
+        composerRef.current.classList.remove('collapsing');
+        autoSizeComposer();
+      }, 220);
+    }
+  }, [aiBusy, aiInput, autoSizeComposer, bridgeReady, sendAi]);
+
+  const handleInputChange = useCallback((value: string) => {
+    setAiInput(value);
+    window.requestAnimationFrame(() => autoSizeComposer());
+  }, [autoSizeComposer, setAiInput]);
+
+  const handleComposerKeyDown = useCallback((e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }, [handleSend]);
 
   return (
     <section className="panel tool-panel codex-panel" aria-label="Codex assistant">
@@ -472,24 +515,24 @@ export function CodexPanel(props: Props) {
                     {aiBusy && (
                       <div className="codex-msg assistant thinking">
                         <span className="codex-role">assistant</span>
-                        <pre>{`working ${thinkingElapsedMs > 0 ? `(${(thinkingElapsedMs / 1000).toFixed(1)}s)` : ''}\n${workingText || '...'}`}</pre>
+                        <div className="codex-thinking-stream" aria-live="polite">
+                          {thinkingLines.map((line, idx) => (
+                            <p key={`${idx}-${line}`}>{line}</p>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="row serial-send-row codex-send-row">
                   <textarea
+                    ref={composerRef}
                     value={aiInput}
-                    onChange={(e) => setAiInput(e.target.value)}
+                    onChange={(e) => handleInputChange(e.target.value)}
                     placeholder={strings.codex.chatPlaceholder}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          if (bridgeReady) void sendAi();
-                        }
-                      }}
+                    onKeyDown={handleComposerKeyDown}
                   />
-                  <button className="codex-send-btn" disabled={!ai.configured || aiBusy || !bridgeReady} onClick={() => void sendAi()}>
+                  <button className="codex-send-btn" disabled={!ai.configured || aiBusy || !bridgeReady} onClick={() => void handleSend()}>
                     ↑
                   </button>
                 </div>

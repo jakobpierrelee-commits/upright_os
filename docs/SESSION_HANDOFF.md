@@ -73,3 +73,35 @@
   - `.vscode/`
   - `app/bridge/.auth_secret`
   - `app/bridge/upright_auth.db`
+
+## Required Session Handoff Template
+Copy and fill this block at every agent handoff:
+
+```
+## Handoff Snapshot
+- Branch: <branch>
+- Head SHA: <sha>
+- Working Tree: <clean|dirty> (+ short summary)
+
+## Scope Completed
+- Files changed:
+  - <path>
+  - <path>
+- Behavior changes:
+  - <what changed>
+  - <what changed>
+
+## Verification
+- Commands run:
+  - <command>
+  - <command>
+- Results:
+  - <exact pass/fail summary>
+
+## Risks / Open Issues
+- <risk or blocker>
+- <risk or blocker>
+
+## Next Task
+- <single highest-priority next action>
+```

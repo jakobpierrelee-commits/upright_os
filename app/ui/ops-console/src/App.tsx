@@ -200,6 +200,174 @@ function miniSemiFillPath(radius: number, value: number, pct: number): string {
   return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 ${sweepFlag} ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
 }
 
+type TuneHelpKind = 'pid' | 'motion' | 'setpoint' | 'limits' | 'filter_windup';
+
+const TUNE_HELP_CONTENT: Record<TuneHelpKind, { title: string; defs: Array<{ key: string; value: string }> }> = {
+  pid: {
+    title: 'PID Variables',
+    defs: [
+      { key: 'Kp', value: 'Proportional gain. Corrects present tilt error; higher = faster response, too high = oscillation/saturation.' },
+      { key: 'Ki', value: 'Integral gain. Removes steady-state bias over time; too high can cause windup and slow recovery.' },
+      { key: 'Kd', value: 'Derivative gain. Damps rapid tilt changes; too high can amplify noise and make output jittery.' },
+    ],
+  },
+  motion: {
+    title: 'Motion Variables',
+    defs: [
+      { key: 'Kv', value: 'Velocity feedback gain. Pushes wheel speed back toward target to reduce drift.' },
+      { key: 'Kx', value: 'Position feedback gain. Pulls wheel position toward reference to prevent runaway travel.' },
+    ],
+  },
+  setpoint: {
+    title: 'Setpoint Variable',
+    defs: [
+      { key: 'Setpoint Deg', value: 'Target body angle. Small offsets trim lean bias from build asymmetry or calibration error.' },
+    ],
+  },
+  limits: {
+    title: 'Limits Variables',
+    defs: [
+      { key: 'Out Max', value: 'Maximum absolute motor command. Lower values add safety but reduce control authority.' },
+      { key: 'Tip Deg', value: 'Safety envelope angle for arming/fall logic. Beyond this, balancing should be blocked or disarmed.' },
+      { key: 'I Max', value: 'Integrator clamp. Caps accumulated I-term to limit windup during saturation or persistent error.' },
+    ],
+  },
+  filter_windup: {
+    title: 'Filter + Anti-Windup',
+    defs: [
+      { key: 'LPF Cutoff Hz', value: 'Low-pass cutoff frequency. Lower = less noise, more lag; higher = less lag, more noise.' },
+      { key: 'Conditional I', value: 'Integrate only when unsaturated or when error drives command back inward, reducing windup.' },
+    ],
+  },
+};
+
+function renderTuneHelpGraphic(kind: TuneHelpKind): JSX.Element {
+  if (kind === 'pid') {
+    return (
+      <svg className="tune-help-graphic" viewBox="0 0 160 82" aria-hidden="true">
+        <polyline points="10,68 42,68 58,42 84,42 96,24 146,24" className="tune-help-line tune-help-line-a" />
+        <circle cx="58" cy="42" r="3" className="tune-help-node" />
+        <circle cx="96" cy="24" r="3" className="tune-help-node" />
+        <rect x="18" y="14" width="12" height="54" className="tune-help-bar tune-help-bar-kp" />
+        <rect x="34" y="28" width="12" height="40" className="tune-help-bar tune-help-bar-ki" />
+        <rect x="50" y="38" width="12" height="30" className="tune-help-bar tune-help-bar-kd" />
+      </svg>
+    );
+  }
+  if (kind === 'motion') {
+    return (
+      <svg className="tune-help-graphic" viewBox="0 0 160 82" aria-hidden="true">
+        <line x1="18" y1="61" x2="142" y2="61" className="tune-help-line tune-help-line-b" />
+        <circle cx="54" cy="61" r="15" className="tune-help-wheel" />
+        <circle cx="108" cy="61" r="15" className="tune-help-wheel" />
+        <polyline points="28,26 66,26 66,16 88,30 66,44 66,34 28,34" className="tune-help-arrow" />
+      </svg>
+    );
+  }
+  if (kind === 'setpoint') {
+    return (
+      <svg className="tune-help-graphic" viewBox="0 0 160 82" aria-hidden="true">
+        <line x1="18" y1="58" x2="142" y2="58" className="tune-help-line tune-help-line-b" />
+        <line x1="32" y1="58" x2="104" y2="30" className="tune-help-line tune-help-line-a" />
+        <line x1="112" y1="18" x2="112" y2="70" className="tune-help-target" />
+        <circle cx="112" cy="30" r="4" className="tune-help-node" />
+      </svg>
+    );
+  }
+  if (kind === 'limits') {
+    return (
+      <svg className="tune-help-graphic" viewBox="0 0 160 82" aria-hidden="true">
+        <polyline points="18,70 42,44 56,54 72,24 90,34 116,12 142,22" className="tune-help-line tune-help-line-a" />
+        <line x1="18" y1="12" x2="18" y2="70" className="tune-help-clamp" />
+        <line x1="142" y1="12" x2="142" y2="70" className="tune-help-clamp" />
+        <line x1="18" y1="12" x2="142" y2="12" className="tune-help-clamp" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="tune-help-graphic" viewBox="0 0 160 82" aria-hidden="true">
+      <polyline points="10,52 30,44 50,58 70,34 90,50 110,28 130,40 150,22" className="tune-help-line tune-help-line-noise" />
+      <polyline points="10,56 40,54 70,46 100,40 130,34 150,30" className="tune-help-line tune-help-line-a" />
+      <rect x="118" y="16" width="28" height="20" rx="4" className="tune-help-clamp-box" />
+      <text x="132" y="30" textAnchor="middle" className="tune-help-clamp-text">I</text>
+    </svg>
+  );
+}
+
+function TuneRigHelp({ kind }: { kind: TuneHelpKind }) {
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const hoverTimerRef = useRef<number | null>(null);
+  const content = TUNE_HELP_CONTENT[kind];
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current !== null) {
+        window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearHoverTimer = () => {
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
+
+  const onHoverStart = () => {
+    clearHoverTimer();
+    hoverTimerRef.current = window.setTimeout(() => {
+      setOpen(true);
+    }, 1000);
+  };
+
+  const onHoverEnd = () => {
+    clearHoverTimer();
+    if (!pinned) {
+      setOpen(false);
+    }
+  };
+
+  const onTogglePin = () => {
+    clearHoverTimer();
+    setPinned((prev) => {
+      const next = !prev;
+      setOpen(next);
+      return next;
+    });
+  };
+
+  return (
+    <div className="tune-help-wrap" onMouseEnter={onHoverStart} onMouseLeave={onHoverEnd}>
+      <button
+        type="button"
+        className={`tune-help-btn ${open ? 'is-open' : ''}`}
+        aria-label={`Explain ${content.title}`}
+        aria-expanded={open}
+        onClick={onTogglePin}
+      >
+        ?
+      </button>
+      {open && (
+        <div className="tune-help-popover" role="dialog" aria-label={content.title}>
+          <div className="tune-help-title">{content.title}</div>
+          {renderTuneHelpGraphic(kind)}
+          <div className="tune-help-list">
+            {content.defs.map((item) => (
+              <p key={item.key} className="tune-help-item">
+                <strong>{item.key}:</strong> {item.value}
+              </p>
+            ))}
+          </div>
+          <div className="tune-help-foot">{pinned ? 'Pinned: click ? to close' : 'Tip: hover 1s or click to pin'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const codexRailRef = useRef<HTMLElement | null>(null);
   const statusbarRef = useRef<HTMLElement | null>(null);
@@ -1385,13 +1553,14 @@ export default function App() {
     aiInput: codex.state.aiInput,
     setAiInput: codex.actions.setAiInput,
     aiBusy: codex.state.aiBusy,
+    aiBusyDetail: codex.state.aiBusyDetail,
     sendAi: codex.actions.sendAi,
     requestPasswordReset: codex.actions.requestPasswordReset,
     confirmPasswordReset: codex.actions.confirmPasswordReset,
     refreshThreads: codex.actions.refreshThreads,
     startNewChat: codex.actions.startNewChat,
     selectChatThread: codex.actions.selectChatThread,
-  }), [bridgeOnline, codex.actions, codex.state.ai, codex.state.aiActiveProfileId, codex.state.aiActiveThreadId, codex.state.aiBusy, codex.state.aiHistory, codex.state.aiInput, codex.state.aiProfileAllowAutoApplyInput, codex.state.aiProfileDescriptionInput, codex.state.aiProfileInstructionsInput, codex.state.aiProfileLabelInput, codex.state.aiProfiles, codex.state.aiThreads, codex.state.authAlert, codex.state.authBusy, codex.state.authEmail, codex.state.authMode, codex.state.authPassword, codex.state.authUser, codex.state.openAiKeyInput, codex.state.openAiModelInput]);
+  }), [bridgeOnline, codex.actions, codex.state.ai, codex.state.aiActiveProfileId, codex.state.aiActiveThreadId, codex.state.aiBusy, codex.state.aiBusyDetail, codex.state.aiHistory, codex.state.aiInput, codex.state.aiProfileAllowAutoApplyInput, codex.state.aiProfileDescriptionInput, codex.state.aiProfileInstructionsInput, codex.state.aiProfileLabelInput, codex.state.aiProfiles, codex.state.aiThreads, codex.state.authAlert, codex.state.authBusy, codex.state.authEmail, codex.state.authMode, codex.state.authPassword, codex.state.authUser, codex.state.openAiKeyInput, codex.state.openAiModelInput]);
 
   useEffect(() => {
     const updateLayoutVars = () => {
@@ -1681,6 +1850,7 @@ export default function App() {
                       <div className="action-rig tune-param-rig">
                         <div className="action-rig-head">
                           <span className="action-rig-title">PID</span>
+                          <TuneRigHelp kind="pid" />
                         </div>
                         <div className="grid3 tune-vars-grid">
                           <label className="tune-var-label">Kp<input className="tune-var-input" type="number" step="0.1" value={pid.kp} onChange={(e) => setPidDraft((p) => ({ ...p, kp: Number(e.target.value) }))} /></label>
@@ -1693,6 +1863,7 @@ export default function App() {
                       <div className="action-rig tune-param-rig">
                         <div className="action-rig-head">
                           <span className="action-rig-title">Motion</span>
+                          <TuneRigHelp kind="motion" />
                         </div>
                         <div className="grid2 tune-vars-grid">
                           <label className="tune-var-label">Kv<input className="tune-var-input" type="number" step="0.001" value={motion.kv} onChange={(e) => setMotionDraft((m) => ({ ...m, kv: Number(e.target.value) }))} /></label>
@@ -1704,6 +1875,7 @@ export default function App() {
                       <div className="action-rig tune-param-rig">
                         <div className="action-rig-head">
                           <span className="action-rig-title">Setpoint</span>
+                          <TuneRigHelp kind="setpoint" />
                         </div>
                         <div className="grid1 tune-vars-grid tune-vars-grid-single">
                           <label className="tune-var-label">{strings.tune.setpoint}<input className="tune-var-input" type="number" step="0.01" value={setpoint} onChange={(e) => setSetpointDraft(Number(e.target.value))} /></label>
@@ -1714,6 +1886,7 @@ export default function App() {
                       <div className="action-rig tune-param-rig">
                         <div className="action-rig-head">
                           <span className="action-rig-title">Limits</span>
+                          <TuneRigHelp kind="limits" />
                         </div>
                         <div className="grid3 tune-vars-grid">
                           <label className="tune-var-label">Out Max<input className="tune-var-input" type="number" step="1" value={limits.outMax} onChange={(e) => setLimitsDraft((l) => ({ ...l, outMax: Number(e.target.value) }))} /></label>
@@ -1726,6 +1899,7 @@ export default function App() {
                       <div className="action-rig tune-param-rig">
                         <div className="action-rig-head">
                           <span className="action-rig-title">Filter + Anti-Windup</span>
+                          <TuneRigHelp kind="filter_windup" />
                         </div>
                         <div className="grid2 tune-vars-grid">
                           <label className="tune-var-label">LPF Cutoff Hz<input className="tune-var-input" type="number" step="0.1" value={simControls.lowpassCutoffHz} onChange={(e) => setSimControls((v) => ({ ...v, lowpassCutoffHz: Number(e.target.value) }))} /></label>

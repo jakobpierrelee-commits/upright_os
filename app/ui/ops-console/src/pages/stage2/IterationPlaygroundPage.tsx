@@ -1,19 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  armConfirm,
-  armPrepare,
-  disarm,
-  estopLatch,
-  estopReset,
-  toolingListTraces,
-  toolingParamSweep,
-  toolingTraceReplay,
-  type ParamSweepResult,
-  type SurrogateSimResult,
-  type TraceReplayResult,
-  toolingSurrogateSim,
-} from '../../api';
-import type { ImuSample } from '../../hooks/useHudTelemetry';
 import { strings } from '../../strings';
 import type { ControlState, Status } from '../../types';
 
@@ -21,44 +6,247 @@ type Props = {
   bridgeOnline: boolean;
   status: Status;
   control: ControlState;
-  imuHistory: ImuSample[];
+  imuHistory: unknown[];
   refreshBridge: () => Promise<void>;
   setMsg: (text: string, source?: string) => void;
 };
 
-type ModelMode = 'live' | 'sim';
+type LessonKey = 'kp' | 'pd' | 'windup' | 'filter' | 'workflow';
 
-type SimSample = {
-  t: number;
-  ang: number;
-  out: number;
-  set: number;
-};
-
-type SimRun = {
-  id: string;
-  name: string;
-  params: {
+type LessonDef = {
+  key: LessonKey;
+  title: string;
+  objective: string;
+  why: string;
+  sourceRefs: Array<{ label: string; url: string }>;
+  passCriteria: string[];
+  tips: string[];
+  editable: {
+    kp: boolean;
+    ki: boolean;
+    kd: boolean;
+    iMax: boolean;
+    outMax: boolean;
+    conditionalI: boolean;
+    noise: boolean;
+    cutoff: boolean;
+  };
+  defaults: {
     kp: number;
     ki: number;
     kd: number;
     setpoint: number;
     durationS: number;
     disturbance: number;
+    noiseAmp: number;
+    cutoffHz: number;
+    iMax: number;
+    outMax: number;
+    conditionalI: boolean;
   };
-  metrics: {
-    rmse: number;
-    overshoot: number;
-    settleS: number | null;
-    maxOutPct: number;
-  };
-  samples: SimSample[];
 };
 
-function n(v: string | undefined, fallback = 0): number {
-  const parsed = Number.parseFloat(v ?? '');
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+type BenchSample = {
+  t: number;
+  y: number;
+  yMeas: number;
+  yFilt: number;
+  u: number;
+  set: number;
+};
+
+type BenchMetrics = {
+  riseS: number | null;
+  overshootPct: number;
+  settleS: number | null;
+  steadyStateError: number;
+  saturationPct: number;
+  iae: number;
+  score: number;
+};
+
+type BenchRun = {
+  id: string;
+  lesson: LessonKey;
+  samples: BenchSample[];
+  metrics: BenchMetrics;
+  pass: boolean;
+  notes: string[];
+};
+
+const LESSONS: LessonDef[] = [
+  {
+    key: 'kp',
+    title: '1) Proportional Response',
+    objective: 'Find a Kp that is responsive without sustained oscillation.',
+    why: 'Kp is the fastest way to improve correction, but too much creates oscillation and saturation.',
+    sourceRefs: [
+      { label: 'Part 1: What Is PID Control?', url: 'https://www.youtube.com/watch?v=wkfEZmsQqiA' },
+      { label: 'Part 7: Important PID Concepts', url: 'https://www.youtube.com/watch?v=tbgV6caAVcs' },
+    ],
+    passCriteria: [
+      'Overshoot < 35%',
+      'Saturation < 45%',
+      'No sustained oscillation trend',
+    ],
+    tips: [
+      'Raise Kp in small steps.',
+      'Watch overshoot and saturation together.',
+      'Stop increasing when response starts ringing.',
+    ],
+    editable: { kp: true, ki: false, kd: false, iMax: false, outMax: false, conditionalI: false, noise: false, cutoff: false },
+    defaults: {
+      kp: 16,
+      ki: 0,
+      kd: 0,
+      setpoint: 1,
+      durationS: 5,
+      disturbance: 0.35,
+      noiseAmp: 0,
+      cutoffHz: 0,
+      iMax: 70,
+      outMax: 180,
+      conditionalI: false,
+    },
+  },
+  {
+    key: 'pd',
+    title: '2) Add Damping (PD)',
+    objective: 'Use Kd to reduce overshoot and tighten settling time.',
+    why: 'Derivative opposes fast movement and helps stop ringing caused by aggressive Kp.',
+    sourceRefs: [
+      { label: 'Part 1: What Is PID Control?', url: 'https://www.youtube.com/watch?v=wkfEZmsQqiA' },
+      { label: 'Part 3: Noise Filtering in PID', url: 'https://www.youtube.com/watch?v=7dUVdrs1e18' },
+    ],
+    passCriteria: [
+      'Overshoot < 18%',
+      'Settle < 3.2 s',
+      'No obvious derivative chatter',
+    ],
+    tips: [
+      'Keep Kp near your good value from step 1.',
+      'Increase Kd until overshoot drops.',
+      'If output gets noisy, Kd is too high for the signal quality.',
+    ],
+    editable: { kp: true, ki: false, kd: true, iMax: false, outMax: false, conditionalI: false, noise: false, cutoff: false },
+    defaults: {
+      kp: 21,
+      ki: 0,
+      kd: 0.9,
+      setpoint: 1,
+      durationS: 5,
+      disturbance: 0.35,
+      noiseAmp: 0,
+      cutoffHz: 0,
+      iMax: 70,
+      outMax: 180,
+      conditionalI: false,
+    },
+  },
+  {
+    key: 'windup',
+    title: '3) Integral + Anti-Windup',
+    objective: 'Use Ki to remove offset while preventing windup with I limit/conditional integration.',
+    why: 'Integral fixes steady-state bias but can store too much energy when the actuator is saturated.',
+    sourceRefs: [
+      { label: 'Part 2: Anti-windup for PID', url: 'https://www.youtube.com/watch?v=NVLXCwc8HzM' },
+      { label: 'Part 7: Important PID Concepts', url: 'https://www.youtube.com/watch?v=tbgV6caAVcs' },
+    ],
+    passCriteria: [
+      '|Steady-state error| < 0.06',
+      'Saturation < 45%',
+      'No slow hunting after disturbance',
+    ],
+    tips: [
+      'Add Ki slowly after PD is stable.',
+      'If recovery is sluggish or oscillatory, reduce Ki or iMax.',
+      'Enable conditional integration when saturation is frequent.',
+    ],
+    editable: { kp: true, ki: true, kd: true, iMax: true, outMax: true, conditionalI: true, noise: false, cutoff: false },
+    defaults: {
+      kp: 20,
+      ki: 0.06,
+      kd: 0.95,
+      setpoint: 1,
+      durationS: 6,
+      disturbance: 0.55,
+      noiseAmp: 0,
+      cutoffHz: 0,
+      iMax: 70,
+      outMax: 180,
+      conditionalI: true,
+    },
+  },
+  {
+    key: 'filter',
+    title: '4) Noise + Filter',
+    objective: 'Balance noise rejection and lag using cutoff frequency.',
+    why: 'Lower cutoff smooths noise but increases lag; higher cutoff is quicker but noisier.',
+    sourceRefs: [
+      { label: 'Part 3: Noise Filtering in PID', url: 'https://www.youtube.com/watch?v=7dUVdrs1e18' },
+      { label: 'Part 7: Important PID Concepts', url: 'https://www.youtube.com/watch?v=tbgV6caAVcs' },
+    ],
+    passCriteria: [
+      'Overshoot < 22%',
+      'IAE < 2.8',
+      'Acceptable control smoothness',
+    ],
+    tips: [
+      'Start moderate, then lower only if output chatter is high.',
+      'Too low cutoff increases delay and can hurt stability.',
+      'Tune Kd with realistic noise and filter settings.',
+    ],
+    editable: { kp: true, ki: false, kd: true, iMax: false, outMax: false, conditionalI: false, noise: true, cutoff: true },
+    defaults: {
+      kp: 19,
+      ki: 0,
+      kd: 1.2,
+      setpoint: 1,
+      durationS: 6,
+      disturbance: 0.3,
+      noiseAmp: 0.35,
+      cutoffHz: 6,
+      iMax: 70,
+      outMax: 180,
+      conditionalI: false,
+    },
+  },
+  {
+    key: 'workflow',
+    title: '5) Practical Tuning Workflow',
+    objective: 'Run structured A/B comparisons and pick the safer/better tune.',
+    why: 'Reliable tuning is a process: isolate variables, compare runs, and promote only measurable improvements.',
+    sourceRefs: [
+      { label: 'Part 4: PID Tuning Guide', url: 'https://www.youtube.com/watch?v=sFOEsA0Irjs' },
+      { label: 'Part 5: Build a Model', url: 'https://www.youtube.com/watch?v=qhIjIu-Zk10' },
+      { label: 'Part 6: Manual/Auto Tuning Methods', url: 'https://www.youtube.com/watch?v=qj8vTO1eIHo' },
+    ],
+    passCriteria: [
+      'Score >= 75',
+      'Saturation < 40%',
+      'Settle < 3.5 s',
+    ],
+    tips: [
+      'Change one family at a time (P/D/I/limits/filter).',
+      'Compare A/B with the same disturbance profile.',
+      'Prefer lower saturation and better settling over just fast rise.',
+    ],
+    editable: { kp: true, ki: true, kd: true, iMax: true, outMax: true, conditionalI: true, noise: true, cutoff: true },
+    defaults: {
+      kp: 20,
+      ki: 0.05,
+      kd: 1.05,
+      setpoint: 1,
+      durationS: 6,
+      disturbance: 0.45,
+      noiseAmp: 0.25,
+      cutoffHz: 6,
+      iMax: 70,
+      outMax: 180,
+      conditionalI: true,
+    },
+  },
+];
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -79,439 +267,330 @@ function sparkline(values: number[], minY: number, maxY: number): string {
     .join(' ');
 }
 
-function sparkBandArea(center: number[], band: number[], minY: number, maxY: number): string {
-  if (center.length <= 1 || center.length !== band.length) return '';
-  const w = 640;
-  const h = 140;
-  const span = Math.max(0.0001, maxY - minY);
-  const upper = center.map((v, i) => ({ x: (i / (center.length - 1)) * w, y: h - (((v + Math.abs(band[i])) - minY) / span) * h }));
-  const lower = center.map((v, i) => ({ x: (i / (center.length - 1)) * w, y: h - (((v - Math.abs(band[i])) - minY) / span) * h }));
-  const pathUpper = upper.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
-  const pathLower = lower.reverse().map((p) => `L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
-  return `${pathUpper} ${pathLower} Z`;
+function lpfAlpha(cutoffHz: number, dt: number): number {
+  if (cutoffHz <= 0) return 1;
+  const tau = 1 / (2 * Math.PI * cutoffHz);
+  return dt / (tau + dt);
 }
 
-function runSim(opts: {
-  name: string;
+function seededNoise(seedRef: { v: number }): number {
+  seedRef.v = (1664525 * seedRef.v + 1013904223) >>> 0;
+  return (seedRef.v / 0xffffffff) * 2 - 1;
+}
+
+function evaluateRun(lesson: LessonKey, m: BenchMetrics): { pass: boolean; notes: string[] } {
+  const notes: string[] = [];
+  if (m.overshootPct > 30) notes.push('Overshoot is high.');
+  if (m.saturationPct > 40) notes.push('Output saturation is high.');
+  if (m.settleS == null) notes.push('Response did not settle in window.');
+
+  let pass = false;
+  if (lesson === 'kp') {
+    pass = m.overshootPct < 35 && m.saturationPct < 45;
+  } else if (lesson === 'pd') {
+    pass = m.overshootPct < 18 && (m.settleS ?? 99) < 3.2;
+  } else if (lesson === 'windup') {
+    pass = Math.abs(m.steadyStateError) < 0.06 && m.saturationPct < 45;
+  } else if (lesson === 'filter') {
+    pass = m.overshootPct < 22 && m.iae < 2.8;
+  } else {
+    pass = m.score >= 75 && m.saturationPct < 40 && (m.settleS ?? 99) < 3.5;
+  }
+
+  if (pass) notes.unshift('Objective met.');
+  return { pass, notes: notes.slice(0, 3) };
+}
+
+function runBench(opts: {
+  lesson: LessonKey;
+  seed: number;
   kp: number;
   ki: number;
   kd: number;
   setpoint: number;
   durationS: number;
   disturbance: number;
-}): SimRun {
-  const dt = 0.02;
-  const steps = Math.max(25, Math.floor(opts.durationS / dt));
-  let theta = (Math.random() - 0.5) * 0.6;
-  let omega = 0;
-  let iTerm = 0;
-  let prevErr = 0;
-  const actuatorDelayTicks = 2;
-  const cmdQueue: number[] = Array.from({ length: actuatorDelayTicks }, () => 0);
+  noiseAmp: number;
+  cutoffHz: number;
+  iMax: number;
+  outMax: number;
+  conditionalI: boolean;
+}): BenchRun {
+  const dt = 0.01;
+  const steps = Math.max(100, Math.floor(opts.durationS / dt));
+  const gain = 0.05;
+  const tau = 0.34;
+  const delayTicks = 3;
+  const cmdQueue: number[] = Array.from({ length: delayTicks }, () => 0);
+  const seedRef = { v: opts.seed >>> 0 };
 
-  const samples: SimSample[] = [];
+  let y = 0;
+  let yFilt = 0;
+  let iTerm = 0;
+  let prevFilt = 0;
+  let iae = 0;
+  let satCount = 0;
+
+  const samples: BenchSample[] = [];
+
   for (let i = 0; i < steps; i += 1) {
     const t = i * dt;
-    const external = (Math.exp(-t * 0.9) * opts.disturbance) + ((Math.random() - 0.5) * 0.05);
-    const err = opts.setpoint - theta;
-    iTerm = clamp(iTerm + (err * dt), -16, 16);
-    const dTerm = (err - prevErr) / dt;
-    prevErr = err;
+    const disturbancePulse = t > 0.3 ? (opts.disturbance * Math.exp(-(t - 0.3) * 1.6)) : 0;
 
-    let out = (opts.kp * err) + (opts.ki * iTerm) + (opts.kd * dTerm);
-    if (Math.abs(out) < 4.0) out = 0; // motor deadband
-    out = clamp(out, -180, 180);
-    cmdQueue.push(out);
-    const delayedOut = cmdQueue.shift() ?? 0;
+    const noise = seededNoise(seedRef) * opts.noiseAmp;
+    const yMeas = y + noise;
+    const alpha = lpfAlpha(opts.cutoffHz, dt);
+    yFilt = yFilt + alpha * (yMeas - yFilt);
 
-    // Unstable around upright: gravity term amplifies deviation.
-    // Control term counters instability when gains are adequate.
-    const thetaRad = (theta * Math.PI) / 180;
-    const gravity = 46 * Math.sin(thetaRad);
-    const accel = gravity - (delayedOut * 0.34) - (omega * 0.95) + external;
-    omega += accel * dt;
-    theta += omega * dt;
-    theta = clamp(theta, -86, 86);
+    const err = opts.setpoint - yFilt;
+    const dTerm = -(yFilt - prevFilt) / dt;
+    prevFilt = yFilt;
 
-    samples.push({ t, ang: theta, out: delayedOut, set: opts.setpoint });
-    if (Math.abs(theta) >= 72) {
-      // Faceplant / unrecoverable region; stop run early.
-      break;
+    const wouldInt = iTerm + (err * dt);
+    const tentative = (opts.kp * err) + (opts.ki * wouldInt) + (opts.kd * dTerm);
+    const saturated = Math.abs(tentative) > opts.outMax;
+    const pushesOutward = Math.sign(tentative) === Math.sign(err) && Math.abs(err) > 0.001;
+    const allowI = !opts.conditionalI || !saturated || !pushesOutward;
+
+    if (allowI) {
+      iTerm = clamp(wouldInt, -opts.iMax, opts.iMax);
     }
+
+    let u = (opts.kp * err) + (opts.ki * iTerm) + (opts.kd * dTerm);
+    if (Math.abs(u) > opts.outMax) satCount += 1;
+    u = clamp(u, -opts.outMax, opts.outMax);
+
+    cmdQueue.push(u);
+    const uDelayed = cmdQueue.shift() ?? u;
+
+    const yDot = (-(y) + (gain * uDelayed) + disturbancePulse) / tau;
+    y += yDot * dt;
+    iae += Math.abs(err) * dt;
+
+    samples.push({ t, y, yMeas, yFilt, u: uDelayed, set: opts.setpoint });
   }
 
-  const errs = samples.map((s) => s.ang - opts.setpoint);
-  const rmse = Math.sqrt(errs.reduce((sum, e) => sum + (e * e), 0) / Math.max(1, errs.length));
-  const overshoot = Math.max(0, ...samples.map((s) => Math.abs(s.ang - opts.setpoint)));
-  const maxOutPct = Math.max(0, ...samples.map((s) => Math.abs(s.out) / 180)) * 100;
+  const setAbs = Math.max(0.001, Math.abs(opts.setpoint));
+  const maxY = Math.max(...samples.map((s) => s.y));
+  const minY = Math.min(...samples.map((s) => s.y));
+  const peak = opts.setpoint >= 0 ? maxY : minY;
+  const overshootPct = Math.max(0, (Math.abs(peak - opts.setpoint) / setAbs) * 100);
+
+  let t10: number | null = null;
+  let t90: number | null = null;
+  const lo = opts.setpoint * 0.1;
+  const hi = opts.setpoint * 0.9;
+  for (const s of samples) {
+    if (opts.setpoint >= 0) {
+      if (t10 == null && s.y >= lo) t10 = s.t;
+      if (t90 == null && s.y >= hi) t90 = s.t;
+    } else {
+      if (t10 == null && s.y <= lo) t10 = s.t;
+      if (t90 == null && s.y <= hi) t90 = s.t;
+    }
+  }
+  const riseS = t10 != null && t90 != null && t90 >= t10 ? (t90 - t10) : null;
+
   let settleS: number | null = null;
-  const band = 1.1;
+  const settleBand = setAbs * 0.02;
   for (let i = 0; i < samples.length; i += 1) {
     const tail = samples.slice(i);
-    if (tail.every((s) => Math.abs(s.ang - opts.setpoint) <= band)) {
+    if (tail.every((s) => Math.abs(s.y - opts.setpoint) <= settleBand)) {
       settleS = samples[i].t;
       break;
     }
   }
 
+  const steadyStateError = opts.setpoint - samples[samples.length - 1].y;
+  const saturationPct = (satCount / samples.length) * 100;
+
+  const score = clamp(
+    100
+    - Math.min(40, overshootPct * 0.8)
+    - Math.min(28, Math.abs(steadyStateError) * 95)
+    - Math.min(24, saturationPct * 0.6)
+    - Math.min(20, iae * 1.2)
+    - (settleS == null ? 10 : 0),
+    0,
+    100,
+  );
+
+  const metrics: BenchMetrics = {
+    riseS,
+    overshootPct,
+    settleS,
+    steadyStateError,
+    saturationPct,
+    iae,
+    score,
+  };
+
+  const verdict = evaluateRun(opts.lesson, metrics);
   return {
-    id: `${Date.now()}-${Math.round(Math.random() * 10_000)}`,
-    name: opts.name,
-    params: {
-      kp: opts.kp,
-      ki: opts.ki,
-      kd: opts.kd,
-      setpoint: opts.setpoint,
-      durationS: opts.durationS,
-      disturbance: opts.disturbance,
-    },
-    metrics: { rmse, overshoot, settleS, maxOutPct },
+    id: `bench-${Date.now()}-${Math.round(Math.random() * 10_000)}`,
+    lesson: opts.lesson,
     samples,
+    metrics,
+    pass: verdict.pass,
+    notes: verdict.notes,
   };
 }
 
+function coachingNotes(lesson: LessonKey, m: BenchMetrics): string[] {
+  const notes: string[] = [];
+  if (lesson === 'kp') {
+    if (m.overshootPct > 35) notes.push('Reduce Kp slightly; you crossed into aggressive proportional behavior.');
+    if (m.saturationPct > 45) notes.push('Output is clipping; reduce Kp or raise outMax only if safe.');
+    if ((m.riseS ?? 99) > 1.7) notes.push('Response is slow; raise Kp in small increments.');
+  } else if (lesson === 'pd') {
+    if (m.overshootPct > 18) notes.push('Increase Kd gradually to add damping.');
+    if ((m.settleS ?? 99) > 3.2) notes.push('Tune Kd first, then rebalance Kp for settle performance.');
+    if (m.saturationPct > 40) notes.push('High control effort: reduce Kp before increasing Kd further.');
+  } else if (lesson === 'windup') {
+    if (Math.abs(m.steadyStateError) > 0.06) notes.push('Increase Ki slightly to remove residual offset.');
+    if (m.saturationPct > 45) notes.push('Reduce Ki or iMax; enable conditional integration to prevent windup.');
+    if ((m.settleS ?? 99) > 4.0) notes.push('Integral action may be too strong; reduce Ki and retest.');
+  } else if (lesson === 'filter') {
+    if (m.iae > 2.8) notes.push('Lower cutoff or reduce Kd if control reacts too strongly to noise.');
+    if ((m.riseS ?? 99) > 2.2) notes.push('Cutoff may be too low; raise cutoff slightly to reduce lag.');
+    if (m.overshootPct > 22) notes.push('Rebalance Kd/Kp after filter change; filter shifts phase response.');
+  } else {
+    if (m.score < 75) notes.push('Use A/B comparisons and change one family at a time before promotion.');
+    if ((m.settleS ?? 99) > 3.5) notes.push('Prioritize stability and settle over raw speed.');
+    if (m.saturationPct > 40) notes.push('Candidate is too aggressive for safe promotion.');
+  }
+  if (!notes.length) {
+    notes.push('Good run. Save this as candidate A and validate against a small perturbation in B.');
+  }
+  return notes.slice(0, 3);
+}
+
 export function IterationPlaygroundPage(props: Props) {
-  const { bridgeOnline, status, control, imuHistory, refreshBridge, setMsg } = props;
-  const [traceList, setTraceList] = useState<string[]>([]);
-  const [tracePath, setTracePath] = useState('app/bridge/tests/fixtures/trace_replay_nominal.csv');
-  const [traceBusy, setTraceBusy] = useState(false);
-  const [traceResult, setTraceResult] = useState<TraceReplayResult | null>(null);
+  const { bridgeOnline: _bridgeOnline, status: _status, control: _control, refreshBridge: _refreshBridge, setMsg } = props;
 
-  const [kpSpec, setKpSpec] = useState('31,32');
-  const [kiSpec, setKiSpec] = useState('0.05,0.06');
-  const [kdSpec, setKdSpec] = useState('1.0,1.2');
-  const [settleS, setSettleS] = useState(1);
-  const [observeS, setObserveS] = useState(2);
-  const [sweepBusy, setSweepBusy] = useState(false);
-  const [sweepResult, setSweepResult] = useState<ParamSweepResult | null>(null);
+  const [lessonIndex, setLessonIndex] = useState(0);
+  const [seed, setSeed] = useState(42);
 
-  const [mode, setMode] = useState<ModelMode>('live');
-  const [liveBusy, setLiveBusy] = useState(false);
+  const lesson = LESSONS[lessonIndex];
 
-  const [simKp, setSimKp] = useState(31);
-  const [simKi, setSimKi] = useState(0.05);
-  const [simKd, setSimKd] = useState(1.05);
-  const [simSetpoint, setSimSetpoint] = useState(0);
-  const [simDurationS, setSimDurationS] = useState(2.5);
-  const [simDisturbance, setSimDisturbance] = useState(4.0);
-  const [simRuns, setSimRuns] = useState<SimRun[]>([]);
-  const [simTrainingPaths, setSimTrainingPaths] = useState<string[]>([]);
-  const [surrogateBusy, setSurrogateBusy] = useState(false);
-  const [surrogateReport, setSurrogateReport] = useState<SurrogateSimResult | null>(null);
-  const [simActiveRunId, setSimActiveRunId] = useState<string | null>(null);
-  const [simPlaybackIndex, setSimPlaybackIndex] = useState(0);
-  const [simPlaying, setSimPlaying] = useState(false);
+  const [kp, setKp] = useState(lesson.defaults.kp);
+  const [ki, setKi] = useState(lesson.defaults.ki);
+  const [kd, setKd] = useState(lesson.defaults.kd);
+  const [setpoint, setSetpoint] = useState(lesson.defaults.setpoint);
+  const [durationS, setDurationS] = useState(lesson.defaults.durationS);
+  const [disturbance, setDisturbance] = useState(lesson.defaults.disturbance);
+  const [noiseAmp, setNoiseAmp] = useState(lesson.defaults.noiseAmp);
+  const [cutoffHz, setCutoffHz] = useState(lesson.defaults.cutoffHz);
+  const [iMax, setIMax] = useState(lesson.defaults.iMax);
+  const [outMax, setOutMax] = useState(lesson.defaults.outMax);
+  const [conditionalI, setConditionalI] = useState(lesson.defaults.conditionalI);
+
+  const [latestRun, setLatestRun] = useState<BenchRun | null>(null);
+  const [runA, setRunA] = useState<BenchRun | null>(null);
+  const [runB, setRunB] = useState<BenchRun | null>(null);
 
   useEffect(() => {
-    if (!bridgeOnline) return;
-    void (async () => {
-      try {
-        const traces = await toolingListTraces();
-        setTraceList(traces);
-        if (traces.length > 0 && !traces.includes(tracePath)) {
-          setTracePath(traces[0]);
-        }
-        if (traces.length > 0 && simTrainingPaths.length === 0) {
-          setSimTrainingPaths(traces.slice(0, Math.min(5, traces.length)));
-        }
-      } catch (e) {
-        setMsg(`trace list error: ${(e as Error).message}`, 'playground');
-      }
-    })();
-  }, [bridgeOnline, setMsg, simTrainingPaths.length, tracePath]);
+    setKp(lesson.defaults.kp);
+    setKi(lesson.defaults.ki);
+    setKd(lesson.defaults.kd);
+    setSetpoint(lesson.defaults.setpoint);
+    setDurationS(lesson.defaults.durationS);
+    setDisturbance(lesson.defaults.disturbance);
+    setNoiseAmp(lesson.defaults.noiseAmp);
+    setCutoffHz(lesson.defaults.cutoffHz);
+    setIMax(lesson.defaults.iMax);
+    setOutMax(lesson.defaults.outMax);
+    setConditionalI(lesson.defaults.conditionalI);
+    setLatestRun(null);
+    setRunA(null);
+    setRunB(null);
+  }, [lesson.key]);
 
-  const topSweep = useMemo(() => (sweepResult?.ranked_top?.[0] ?? null), [sweepResult]);
-  const pid = useMemo(() => ({
-    kp: n(status.kp, 0),
-    ki: n(status.ki, 0),
-    kd: n(status.kd, 0),
-  }), [status.kd, status.ki, status.kp]);
-  const outputLimit = useMemo(() => {
-    const parsed = Number.parseFloat(String(status.outMax ?? status.out_max ?? '180'));
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 180;
-  }, [status.outMax, status.out_max]);
-
-  const liveView = useMemo(() => ({
-    angle: n(status.ang, 0),
-    raw: n(status.raw, 0),
-    set: n(status.set, 0),
-    out: n(status.out, 0),
-    mode: String(status.mode ?? 'UNKNOWN').toUpperCase(),
-  }), [status.ang, status.mode, status.out, status.raw, status.set]);
-
-  const lastSim = simRuns[simRuns.length - 1] ?? null;
-  const activeSim = useMemo(
-    () => simRuns.find((r) => r.id === simActiveRunId) ?? lastSim,
-    [lastSim, simActiveRunId, simRuns],
-  );
-  const simSample = useMemo(
-    () => (activeSim?.samples[Math.min(simPlaybackIndex, Math.max(0, (activeSim?.samples.length ?? 1) - 1))] ?? null),
-    [activeSim, simPlaybackIndex],
-  );
-  const angle = mode === 'sim' ? (simSample?.ang ?? 0) : liveView.angle;
-  const rawAngle = mode === 'sim' ? angle : liveView.raw;
-  const setpoint = mode === 'sim' ? simSetpoint : liveView.set;
-  const output = mode === 'sim' ? (simSample?.out ?? 0) : liveView.out;
-  const modeLabel = mode === 'sim' ? 'SIMULATED' : liveView.mode;
-  const outputPct = clamp((Math.abs(output) / outputLimit) * 100, 0, 100);
+  const doRun = (name: string) => {
+    const out = runBench({
+      lesson: lesson.key,
+      seed,
+      kp,
+      ki,
+      kd,
+      setpoint,
+      durationS,
+      disturbance,
+      noiseAmp,
+      cutoffHz,
+      iMax,
+      outMax,
+      conditionalI,
+    });
+    setSeed((s) => s + 17);
+    setLatestRun(out);
+    setMsg(
+      `Lesson run ${name}: score=${out.metrics.score.toFixed(0)} overshoot=${out.metrics.overshootPct.toFixed(1)}% settle=${out.metrics.settleS?.toFixed(2) ?? 'n/a'}s`,
+      'playground.lesson',
+    );
+  };
 
   const series = useMemo(() => {
-    if (mode === 'sim' && activeSim) {
-      const kf = activeSim.samples.map((s) => s.ang);
-      const raw = activeSim.samples.map((s) => s.ang * 1.03);
-      const set = activeSim.samples.map((s) => s.set);
-      const out = activeSim.samples.map((s) => s.out);
-      const maxAbs = Math.max(8, ...kf.map((v) => Math.abs(v)), ...set.map((v) => Math.abs(v)));
-      const outAbs = Math.max(outputLimit, ...out.map((v) => Math.abs(v)));
-      return { kf, raw, set, out, angleMin: -maxAbs, angleMax: maxAbs, outMin: -outAbs, outMax: outAbs };
+    if (!latestRun || latestRun.samples.length < 2) {
+      const fallback = [0, 0];
+      return {
+        set: fallback,
+        y: fallback,
+        yMeas: fallback,
+        yFilt: fallback,
+        u: fallback,
+        yMin: -1,
+        yMax: 1,
+        uMin: -10,
+        uMax: 10,
+      };
     }
+    const setVals = latestRun.samples.map((s) => s.set);
+    const yVals = latestRun.samples.map((s) => s.y);
+    const yMeasVals = latestRun.samples.map((s) => s.yMeas);
+    const yFiltVals = latestRun.samples.map((s) => s.yFilt);
+    const uVals = latestRun.samples.map((s) => s.u);
 
-    const recent = imuHistory.slice(-64);
-    if (recent.length > 1) {
-      const kf = recent.map((s) => s.kf);
-      const raw = recent.map((s) => s.raw);
-      const out = recent.map((s) => s.out);
-      const set = recent.map(() => liveView.set);
-      const maxAbs = Math.max(8, ...kf.map((v) => Math.abs(v)), ...raw.map((v) => Math.abs(v)), ...set.map((v) => Math.abs(v)));
-      const outAbs = Math.max(outputLimit, ...out.map((v) => Math.abs(v)));
-      return { kf, raw, set, out, angleMin: -maxAbs, angleMax: maxAbs, outMin: -outAbs, outMax: outAbs };
-    }
+    const yAbs = Math.max(1, ...setVals.map((v) => Math.abs(v)), ...yVals.map((v) => Math.abs(v)), ...yMeasVals.map((v) => Math.abs(v)));
+    const uAbs = Math.max(1, ...uVals.map((v) => Math.abs(v)));
 
     return {
-      kf: [liveView.angle, liveView.angle],
-      raw: [liveView.raw, liveView.raw],
-      set: [liveView.set, liveView.set],
-      out: [liveView.out, liveView.out],
-      angleMin: -10,
-      angleMax: 10,
-      outMin: -outputLimit,
-      outMax: outputLimit,
+      set: setVals,
+      y: yVals,
+      yMeas: yMeasVals,
+      yFilt: yFiltVals,
+      u: uVals,
+      yMin: -yAbs * 1.15,
+      yMax: yAbs * 1.15,
+      uMin: -uAbs,
+      uMax: uAbs,
     };
-  }, [activeSim, imuHistory, liveView.angle, liveView.out, liveView.raw, liveView.set, mode, outputLimit]);
+  }, [latestRun]);
 
-  useEffect(() => {
-    if (mode !== 'sim' || !simPlaying || !activeSim || activeSim.samples.length <= 1) return;
-    const id = window.setInterval(() => {
-      setSimPlaybackIndex((prev) => {
-        const next = prev + 1;
-        if (next >= activeSim.samples.length) {
-          window.clearInterval(id);
-          setSimPlaying(false);
-          return activeSim.samples.length - 1;
-        }
-        return next;
-      });
-    }, 40);
-    return () => window.clearInterval(id);
-  }, [activeSim, mode, simPlaying]);
+  const responseSpark = useMemo(() => ({
+    set: sparkline(series.set, series.yMin, series.yMax),
+    y: sparkline(series.y, series.yMin, series.yMax),
+    yMeas: sparkline(series.yMeas, series.yMin, series.yMax),
+    yFilt: sparkline(series.yFilt, series.yMin, series.yMax),
+  }), [series]);
 
-  const angleSpark = useMemo(
-    () => ({
-      kf: sparkline(series.kf, series.angleMin, series.angleMax),
-      raw: sparkline(series.raw, series.angleMin, series.angleMax),
-      set: sparkline(series.set, series.angleMin, series.angleMax),
-    }),
-    [series],
-  );
-  const outSpark = useMemo(() => sparkline(series.out, series.outMin, series.outMax), [series]);
-  const confidenceBand = useMemo(() => {
-    const confidence = surrogateReport?.model?.confidence ?? 0;
-    const dist = surrogateReport?.model?.distance_from_known ?? 0;
-    const base = clamp((1 - confidence) * 8 + (dist * 4), 0.3, 9.0);
-    const angleBand = series.kf.map(() => base);
-    const outBand = series.out.map(() => clamp(base * 16, 6, 80));
+  const controlSpark = useMemo(() => sparkline(series.u, series.uMin, series.uMax), [series]);
+
+  const currentSample = latestRun?.samples[latestRun.samples.length - 1];
+  const angle = currentSample ? clamp(currentSample.y * 18, -28, 28) : 0;
+  const output = currentSample ? currentSample.u : 0;
+  const outputPct = clamp((Math.abs(output) / Math.max(1, outMax)) * 100, 0, 100);
+
+  const compare = useMemo(() => {
+    if (!runA || !runB) return null;
     return {
-      angleArea: sparkBandArea(series.kf, angleBand, series.angleMin, series.angleMax),
-      outArea: sparkBandArea(series.out, outBand, series.outMin, series.outMax),
-      base,
+      scoreDelta: runB.metrics.score - runA.metrics.score,
+      overshootDelta: runB.metrics.overshootPct - runA.metrics.overshootPct,
+      settleDelta: (runB.metrics.settleS ?? durationS) - (runA.metrics.settleS ?? durationS),
+      sseDelta: runB.metrics.steadyStateError - runA.metrics.steadyStateError,
+      satDelta: runB.metrics.saturationPct - runA.metrics.saturationPct,
     };
-  }, [series, surrogateReport?.model?.confidence, surrogateReport?.model?.distance_from_known]);
-  const gainEnvelope = surrogateReport?.model?.gain_ranges;
-  const inKnownEnvelope = useMemo(() => {
-    if (!gainEnvelope) return null;
-    return (
-      simKp >= gainEnvelope.kp.min && simKp <= gainEnvelope.kp.max
-      && simKi >= gainEnvelope.ki.min && simKi <= gainEnvelope.ki.max
-      && simKd >= gainEnvelope.kd.min && simKd <= gainEnvelope.kd.max
-    );
-  }, [gainEnvelope, simKd, simKi, simKp]);
-
-  const runTraceReplay = async () => {
-    setTraceBusy(true);
-    try {
-      const out = await toolingTraceReplay({
-        trace_path: tracePath,
-        cmd_rmse_max: 6,
-        cmd_abs_max: 20,
-      });
-      setTraceResult(out);
-      setMsg(`Trace replay ${out.result?.pass ? 'PASS' : 'FAIL'}`, 'playground.trace');
-    } catch (e) {
-      setMsg(`Trace replay error: ${(e as Error).message}`, 'playground.trace');
-    } finally {
-      setTraceBusy(false);
-    }
-  };
-
-  const runParamSweep = async () => {
-    setSweepBusy(true);
-    try {
-      const out = await toolingParamSweep({
-        kp_spec: kpSpec,
-        ki_spec: kiSpec,
-        kd_spec: kdSpec,
-        settle_s: settleS,
-        observe_s: observeS,
-        rollback_on_fail: true,
-        restore_baseline_at_end: true,
-        max_candidates: 60,
-      });
-      setSweepResult(out);
-      setMsg(`Sweep done: pass ${out.pass_count}/${out.candidate_count}`, 'playground.sweep');
-    } catch (e) {
-      setMsg(`Sweep error: ${(e as Error).message}`, 'playground.sweep');
-    } finally {
-      setSweepBusy(false);
-    }
-  };
-
-  const doLiveAction = async (kind: 'prepare' | 'confirm' | 'disarm' | 'estop') => {
-    if (!bridgeOnline) return;
-    setLiveBusy(true);
-    try {
-      if (kind === 'prepare') {
-        await armPrepare();
-        setMsg('Playground: arm prepared', 'playground.live');
-      } else if (kind === 'confirm') {
-        await armConfirm();
-        setMsg('Playground: arm confirmed', 'playground.live');
-      } else if (kind === 'disarm') {
-        await disarm();
-        setMsg('Playground: disarmed', 'playground.live');
-      } else {
-        if (control.estop_latched) {
-          await estopReset();
-          setMsg('Playground: E-Stop reset', 'playground.live');
-        } else {
-          await estopLatch();
-          setMsg('Playground: E-Stop latched', 'playground.live');
-        }
-      }
-      await refreshBridge();
-    } catch (e) {
-      setMsg(`Playground live action error: ${(e as Error).message}`, 'playground.live');
-    } finally {
-      setLiveBusy(false);
-    }
-  };
-
-  const runSimTest = (name: string) => {
-    const next = runSim({
-      name,
-      kp: simKp,
-      ki: simKi,
-      kd: simKd,
-      setpoint: simSetpoint,
-      durationS: simDurationS,
-      disturbance: simDisturbance,
-    });
-    setSimRuns((prev) => [...prev.slice(-1), next]);
-    setSimActiveRunId(next.id);
-    setSimPlaybackIndex(0);
-    setSimPlaying(true);
-    setMsg(`Sim ${name}: rmse=${next.metrics.rmse.toFixed(2)} overshoot=${next.metrics.overshoot.toFixed(2)}`, 'playground.sim');
-  };
-
-  const runSimPair = () => {
-    const runA = runSim({
-      name: 'A',
-      kp: simKp,
-      ki: simKi,
-      kd: simKd,
-      setpoint: simSetpoint,
-      durationS: simDurationS,
-      disturbance: Math.abs(simDisturbance),
-    });
-    const runB = runSim({
-      name: 'B',
-      kp: simKp,
-      ki: simKi,
-      kd: simKd,
-      setpoint: simSetpoint,
-      durationS: simDurationS,
-      disturbance: -Math.abs(simDisturbance),
-    });
-    setSimRuns([runA, runB]);
-    setSimActiveRunId(runB.id);
-    setSimPlaybackIndex(0);
-    setSimPlaying(true);
-    setMsg('Sim A/B complete: back-to-back pair captured', 'playground.sim');
-  };
-
-  const runSurrogateSim = async () => {
-    if (!simTrainingPaths.length) {
-      setMsg('Select at least one training trace log first.', 'playground.sim');
-      return;
-    }
-    setSurrogateBusy(true);
-    try {
-      const out = await toolingSurrogateSim({
-        trace_paths: simTrainingPaths,
-        kp: simKp,
-        ki: simKi,
-        kd: simKd,
-        setpoint: simSetpoint,
-        duration_s: simDurationS,
-      });
-      setSurrogateReport(out);
-      if (out.ok && out.simulation) {
-        const run: SimRun = {
-          id: `surrogate-${Date.now()}`,
-          name: 'Surrogate',
-          params: {
-            kp: simKp,
-            ki: simKi,
-            kd: simKd,
-            setpoint: simSetpoint,
-            durationS: simDurationS,
-            disturbance: simDisturbance,
-          },
-          metrics: {
-            rmse: out.simulation.metrics.rmse,
-            overshoot: out.simulation.metrics.overshoot,
-            settleS: out.simulation.metrics.settle_s,
-            maxOutPct: out.simulation.metrics.max_out_pct,
-          },
-          samples: out.simulation.samples.map((s) => ({ t: s.t_s, ang: s.ang, out: s.out, set: s.set })),
-        };
-        setSimRuns((prev) => [...prev.slice(-1), run]);
-        setSimActiveRunId(run.id);
-        setSimPlaybackIndex(0);
-        setSimPlaying(true);
-        setMsg(`Surrogate sim done (confidence ${(100 * (out.model?.confidence ?? 0)).toFixed(0)}%)`, 'playground.sim');
-      } else {
-        setMsg(`Surrogate sim failed: ${out.error ?? 'unknown_error'}`, 'playground.sim');
-      }
-    } catch (e) {
-      setMsg(`Surrogate sim error: ${(e as Error).message}`, 'playground.sim');
-    } finally {
-      setSurrogateBusy(false);
-    }
-  };
-
-  const simCompare = useMemo(() => {
-    if (simRuns.length < 2) return null;
-    const a = simRuns[simRuns.length - 2];
-    const b = simRuns[simRuns.length - 1];
-    return {
-      a,
-      b,
-      rmseDelta: b.metrics.rmse - a.metrics.rmse,
-      overshootDelta: b.metrics.overshoot - a.metrics.overshoot,
-      settleDelta: (b.metrics.settleS ?? simDurationS) - (a.metrics.settleS ?? simDurationS),
-      outDelta: b.metrics.maxOutPct - a.metrics.maxOutPct,
-    };
-  }, [simDurationS, simRuns]);
+  }, [durationS, runA, runB]);
 
   return (
     <div className="playground-grid">
@@ -519,265 +598,195 @@ export function IterationPlaygroundPage(props: Props) {
         <div className="tool-panel-head">
           <div>
             <h3>{strings.playground.title}</h3>
-            <span className="workflow-label">{strings.playground.subtitle}</span>
+            <span className="workflow-label">Guided PID learning bench with interactive robot preview</span>
           </div>
         </div>
+
         <div className="tool-panel-body playground-body">
-          <div className="playground-mode-toggle" role="tablist" aria-label="Playground model mode">
-            <button className={`btn-sm ${mode === 'live' ? 'active' : ''}`} onClick={() => setMode('live')}>LIVE BALANCE MODEL</button>
-            <button className={`btn-sm ${mode === 'sim' ? 'active' : ''}`} onClick={() => setMode('sim')}>SIM BOT SESSION</button>
-          </div>
-
-          <div className="playground-visual-grid">
-            <div className="playground-robot-card">
-              <div className="playground-card-head">
-                <span className="action-rig-title">Live Balance Model</span>
-                <span className={`badge ${Math.abs(angle) <= 6 ? 'ok' : Math.abs(angle) <= 12 ? 'warn' : 'bad'}`}>
-                  {modeLabel}
-                </span>
-              </div>
-              <div className="playground-robot-stage">
-                <div className="playground-stage-grid" />
-                <div className="playground-ground" />
-                <div className="playground-setpoint-mark" style={{ left: `${50 + clamp(setpoint * 2.2, -24, 24)}%` }} />
-                <div className="playground-motion-axis">
-                  <span className={`playground-motion-chip ${output > 1 ? 'fwd' : output < -1 ? 'rev' : 'hold'}`}>
-                    {output > 1 ? 'FWD ->' : output < -1 ? '<- REV' : 'HOLD'}
-                  </span>
-                </div>
-                <div
-                  className="playground-bot-wrap"
-                  style={{ transform: `translateX(calc(-50% + ${clamp((output / outputLimit) * 18, -18, 18)}px)) rotate(${clamp(angle, -28, 28)}deg)` }}
+          <div className="playground-lesson-shell">
+            <aside className="playground-lesson-rail">
+              {LESSONS.map((ls, idx) => (
+                <button
+                  key={ls.key}
+                  className={`playground-lesson-item ${idx === lessonIndex ? 'active' : ''}`}
+                  onClick={() => setLessonIndex(idx)}
                 >
-                  <div className="playground-bot-wheel" />
-                  <div className="playground-bot-body" />
-                  <div className="playground-bot-sensor" />
-                </div>
-              </div>
-              <div className="playground-stat-row">
-                <div className="playground-stat-tile">
-                  <span className="k">Angle</span>
-                  <strong>{angle.toFixed(2)} deg</strong>
-                </div>
-                <div className="playground-stat-tile">
-                  <span className="k">Setpoint</span>
-                  <strong>{setpoint.toFixed(2)} deg</strong>
-                </div>
-                <div className="playground-stat-tile">
-                  <span className="k">Output</span>
-                  <strong>{output.toFixed(1)} ({outputPct.toFixed(0)}%)</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="playground-gauge-card">
-              <div className="playground-card-head">
-                <span className="action-rig-title">Control Vector</span>
-              </div>
-              <div className="playground-gauge-list">
-                <div className="playground-gauge-item">
-                  <label>Output load</label>
-                  <div className="playground-gauge-track">
-                    <div className="playground-gauge-fill output" style={{ width: `${outputPct}%` }} />
-                  </div>
-                </div>
-                <div className="playground-gauge-item">
-                  <label>Kp {(mode === 'sim' ? simKp : pid.kp).toFixed(2)}</label>
-                  <div className="playground-gauge-track">
-                    <div className="playground-gauge-fill kp" style={{ width: `${clamp((((mode === 'sim' ? simKp : pid.kp) / 40) * 100), 0, 100)}%` }} />
-                  </div>
-                </div>
-                <div className="playground-gauge-item">
-                  <label>Ki {(mode === 'sim' ? simKi : pid.ki).toFixed(3)}</label>
-                  <div className="playground-gauge-track">
-                    <div className="playground-gauge-fill ki" style={{ width: `${clamp((((mode === 'sim' ? simKi : pid.ki) / 0.5) * 100), 0, 100)}%` }} />
-                  </div>
-                </div>
-                <div className="playground-gauge-item">
-                  <label>Kd {(mode === 'sim' ? simKd : pid.kd).toFixed(3)}</label>
-                  <div className="playground-gauge-track">
-                    <div className="playground-gauge-fill kd" style={{ width: `${clamp((((mode === 'sim' ? simKd : pid.kd) / 5) * 100), 0, 100)}%` }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="playground-scope-grid">
-            <div className="playground-scope-card">
-              <div className="playground-card-head">
-                <span className="action-rig-title">Angle Relationship</span>
-              </div>
-              <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Angle relationship chart">
-                {mode === 'sim' && surrogateReport?.ok && confidenceBand.angleArea && (
-                  <path className="scope-band angle" d={confidenceBand.angleArea} />
-                )}
-                <polyline className="scope-line set" points={angleSpark.set} />
-                <polyline className="scope-line raw" points={angleSpark.raw} />
-                <polyline className="scope-line kf" points={angleSpark.kf} />
-              </svg>
-            </div>
-            <div className="playground-scope-card">
-              <div className="playground-card-head">
-                <span className="action-rig-title">Control Output Trend</span>
-              </div>
-              <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Output trend chart">
-                {mode === 'sim' && surrogateReport?.ok && confidenceBand.outArea && (
-                  <path className="scope-band out" d={confidenceBand.outArea} />
-                )}
-                <polyline className="scope-line out" points={outSpark} />
-              </svg>
-            </div>
-          </div>
-
-          {mode === 'live' && (
-            <div className="action-rig">
-              <div className="action-rig-head">
-                <span className="action-rig-title">Live Control Mirror (Playground)</span>
-              </div>
-              <div className="row action-rig-row playground-live-controls">
-                <button className="btn-secondary btn-intent-safety" disabled={!bridgeOnline || control.estop_latched || liveBusy} onClick={() => void doLiveAction('prepare')}>Prepare Arm</button>
-                <button className="btn-primary btn-intent-safety" disabled={!bridgeOnline || !control.arm_prepared || control.estop_latched || liveBusy} onClick={() => void doLiveAction('confirm')}>Confirm Arm</button>
-                <button className="btn-secondary btn-intent-safety" disabled={!bridgeOnline || liveBusy} onClick={() => void doLiveAction('disarm')}>Disarm</button>
-                <button className={control.estop_latched ? 'btn-secondary btn-intent-safety' : 'btn-danger btn-intent-safety'} disabled={!bridgeOnline || liveBusy} onClick={() => void doLiveAction('estop')}>
-                  {control.estop_latched ? 'Reset E-Stop' : 'Latch E-Stop'}
+                  <span>{ls.title}</span>
                 </button>
-              </div>
-            </div>
-          )}
+              ))}
+            </aside>
 
-          {mode === 'sim' && (
-            <div className="action-rig">
-              <div className="action-rig-head">
-                <span className="action-rig-title">Sim Session Controls (Detached from hardware)</span>
-              </div>
-              <div className="playground-trace-picker">
-                <p className="playground-sim-help">Training logs (2-5 recommended):</p>
-                <div className="playground-trace-list">
-                  {traceList.slice(0, 12).map((p) => {
-                    const checked = simTrainingPaths.includes(p);
-                    return (
-                      <label key={p} className="playground-trace-item">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            setSimTrainingPaths((prev) => {
-                              if (e.target.checked) {
-                                if (prev.includes(p)) return prev;
-                                return [...prev, p].slice(0, 5);
-                              }
-                              return prev.filter((x) => x !== p);
-                            });
-                          }}
-                        />
-                        <span>{p}</span>
-                      </label>
-                    );
-                  })}
+            <div className="playground-lesson-main">
+              <div className="action-rig playground-lesson-card">
+                <div className="action-rig-head">
+                  <span className="action-rig-title">{lesson.title}</span>
+                  <span className={`badge ${latestRun?.pass ? 'ok' : 'warn'}`}>{latestRun ? (latestRun.pass ? 'PASS' : 'IN PROGRESS') : 'NOT RUN'}</span>
                 </div>
-              </div>
-              <div className="row playground-sweep-row">
-                <label className="playground-label">Kp<input type="number" step="0.1" value={simKp} onChange={(e) => setSimKp(Number(e.target.value) || 0)} /></label>
-                <label className="playground-label">Ki<input type="number" step="0.01" value={simKi} onChange={(e) => setSimKi(Number(e.target.value) || 0)} /></label>
-                <label className="playground-label">Kd<input type="number" step="0.01" value={simKd} onChange={(e) => setSimKd(Number(e.target.value) || 0)} /></label>
-                <label className="playground-label">Setpoint deg<input type="number" step="0.1" value={simSetpoint} onChange={(e) => setSimSetpoint(Number(e.target.value) || 0)} /></label>
-                <label className="playground-label">Duration s<input type="number" min={1} step="0.5" value={simDurationS} onChange={(e) => setSimDurationS(Math.max(1, Number(e.target.value) || 1))} /></label>
-                <label className="playground-label">Disturbance<input type="number" step="0.5" value={simDisturbance} onChange={(e) => setSimDisturbance(Number(e.target.value) || 0)} /></label>
-              </div>
-              <div className="row action-rig-row">
-                <button className="btn-secondary btn-sm" onClick={() => runSimTest('A')}>Run Sim Test</button>
-                <button className="btn-primary btn-sm" onClick={runSimPair}>Run 2x Back-to-Back</button>
-                <button className="btn-secondary btn-sm" onClick={() => void runSurrogateSim()} disabled={surrogateBusy || simTrainingPaths.length === 0}>
-                  {surrogateBusy ? 'Calibrating...' : 'Run Log-Calibrated Sim'}
-                </button>
-              </div>
-              {surrogateReport?.model && (
-                <div className="compat-box">
-                  <p><strong>Surrogate Confidence:</strong> {(surrogateReport.model.confidence * 100).toFixed(0)}%</p>
-                  <p><strong>Distance From Known Gains:</strong> {surrogateReport.model.distance_from_known.toFixed(2)}</p>
-                  <p><strong>Training Rows:</strong> {surrogateReport.model.sample_count} from {surrogateReport.model.log_count} logs</p>
-                  {gainEnvelope && (
-                    <p>
-                      <strong>Known Envelope:</strong> kp[{gainEnvelope.kp.min.toFixed(2)}, {gainEnvelope.kp.max.toFixed(2)}]
-                      {' '}ki[{gainEnvelope.ki.min.toFixed(3)}, {gainEnvelope.ki.max.toFixed(3)}]
-                      {' '}kd[{gainEnvelope.kd.min.toFixed(3)}, {gainEnvelope.kd.max.toFixed(3)}]
-                    </p>
-                  )}
-                  {inKnownEnvelope != null && (
-                    <p><strong>Envelope Status:</strong> {inKnownEnvelope ? 'inside_known_range' : 'outside_known_range'}</p>
-                  )}
-                  {surrogateReport.model.warning && (
-                    <p><strong>Warning:</strong> {surrogateReport.model.warning}</p>
-                  )}
-                </div>
-              )}
-              {simCompare && (
-                <div className="compat-box playground-compare-box">
-                  <p><strong>Latest Compare:</strong> {simCompare.a.name} {'->'} {simCompare.b.name}</p>
-                  <p><strong>RMSE Δ:</strong> {simCompare.rmseDelta >= 0 ? '+' : ''}{simCompare.rmseDelta.toFixed(3)}</p>
-                  <p><strong>Overshoot Δ:</strong> {simCompare.overshootDelta >= 0 ? '+' : ''}{simCompare.overshootDelta.toFixed(3)}</p>
-                  <p><strong>Settle Δ (s):</strong> {simCompare.settleDelta >= 0 ? '+' : ''}{simCompare.settleDelta.toFixed(3)}</p>
-                  <p><strong>Output Load Δ:</strong> {simCompare.outDelta >= 0 ? '+' : ''}{simCompare.outDelta.toFixed(1)}%</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="action-rig">
-            <div className="action-rig-head">
-              <span className="action-rig-title">{strings.playground.traceTitle}</span>
-            </div>
-            <div className="row">
-              <label className="playground-label">
-                Trace CSV
-                <select value={tracePath} onChange={(e) => setTracePath(e.target.value)}>
-                  {traceList.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                <p className="playground-lesson-objective"><strong>Goal:</strong> {lesson.objective}</p>
+                <p className="playground-lesson-why">{lesson.why}</p>
+                <div className="playground-lesson-refs">
+                  {lesson.sourceRefs.map((ref) => (
+                    <a key={ref.url} href={ref.url} target="_blank" rel="noreferrer">
+                      {ref.label}
+                    </a>
                   ))}
-                  {!traceList.length && (
-                    <option value={tracePath}>{tracePath}</option>
-                  )}
-                </select>
-              </label>
-              <button className="btn-secondary btn-sm" onClick={runTraceReplay} disabled={!bridgeOnline || traceBusy}>
-                {traceBusy ? 'Running...' : strings.playground.runTrace}
-              </button>
-            </div>
-            {traceResult && (
-              <div className="compat-box">
-                <p><strong>Result:</strong> {traceResult.result?.pass ? 'PASS' : 'FAIL'}</p>
-                <p><strong>RMSE command:</strong> {traceResult.result?.summary?.rmse_command?.toFixed?.(4) ?? 'n/a'}</p>
-                <p><strong>Max abs error:</strong> {traceResult.result?.summary?.max_abs_command_error?.toFixed?.(4) ?? 'n/a'}</p>
+                </div>
+                <div className="playground-linear-hints">
+                  {lesson.tips.map((tip) => <p key={tip}>{tip}</p>)}
+                </div>
+                <div className="playground-linear-hints">
+                  {lesson.passCriteria.map((rule) => <p key={rule}><strong>Pass:</strong> {rule}</p>)}
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="action-rig">
-            <div className="action-rig-head">
-              <span className="action-rig-title">{strings.playground.sweepTitle}</span>
-            </div>
-            <div className="row playground-sweep-row">
-              <label className="playground-label">Kp Spec<input value={kpSpec} onChange={(e) => setKpSpec(e.target.value)} /></label>
-              <label className="playground-label">Ki Spec<input value={kiSpec} onChange={(e) => setKiSpec(e.target.value)} /></label>
-              <label className="playground-label">Kd Spec<input value={kdSpec} onChange={(e) => setKdSpec(e.target.value)} /></label>
-              <label className="playground-label">Settle s<input type="number" step="0.5" min={0} value={settleS} onChange={(e) => setSettleS(Number(e.target.value) || 0)} /></label>
-              <label className="playground-label">Observe s<input type="number" step="0.5" min={0.5} value={observeS} onChange={(e) => setObserveS(Number(e.target.value) || 0.5)} /></label>
-              <button className="btn-primary btn-sm" onClick={runParamSweep} disabled={!bridgeOnline || sweepBusy}>
-                {sweepBusy ? 'Sweeping...' : strings.playground.runSweep}
-              </button>
-            </div>
-            {sweepResult && (
-              <div className="compat-box">
-                <p><strong>Summary:</strong> {sweepResult.best_candidate_summary ?? 'n/a'}</p>
-                <p><strong>Pass Count:</strong> {sweepResult.pass_count}/{sweepResult.candidate_count}</p>
-                {topSweep && (
-                  <p>
-                    <strong>Top Candidate:</strong> kp={String((topSweep as Record<string, unknown>).kp)} ki={String((topSweep as Record<string, unknown>).ki)} kd={String((topSweep as Record<string, unknown>).kd)}
-                  </p>
-                )}
+              <div className="playground-visual-grid">
+                <div className="playground-robot-card">
+                  <div className="playground-card-head">
+                    <span className="action-rig-title">Robot Preview</span>
+                    <span className="badge ok">SIM</span>
+                  </div>
+                  <div className="playground-robot-stage">
+                    <div className="playground-stage-grid" />
+                    <div className="playground-ground" />
+                    <div className="playground-setpoint-mark" style={{ left: `${50 + clamp(setpoint * 20, -24, 24)}%` }} />
+                    <div className="playground-motion-axis">
+                      <span className={`playground-motion-chip ${output > 1 ? 'fwd' : output < -1 ? 'rev' : 'hold'}`}>
+                        {output > 1 ? 'FWD ->' : output < -1 ? '<- REV' : 'HOLD'}
+                      </span>
+                    </div>
+                    <div
+                      className="playground-bot-wrap"
+                      style={{ transform: `translateX(calc(-50% + ${clamp((output / Math.max(1, outMax)) * 18, -18, 18)}px)) rotate(${angle}deg)` }}
+                    >
+                      <div className="playground-bot-wheel" />
+                      <div className="playground-bot-body" />
+                      <div className="playground-bot-sensor" />
+                    </div>
+                  </div>
+                  <div className="playground-stat-row">
+                    <div className="playground-stat-tile">
+                      <span className="k">Angle</span>
+                      <strong>{angle.toFixed(2)} deg</strong>
+                    </div>
+                    <div className="playground-stat-tile">
+                      <span className="k">Setpoint</span>
+                      <strong>{setpoint.toFixed(2)}</strong>
+                    </div>
+                    <div className="playground-stat-tile">
+                      <span className="k">Output</span>
+                      <strong>{output.toFixed(1)} ({outputPct.toFixed(0)}%)</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="playground-gauge-card">
+                  <div className="playground-card-head">
+                    <span className="action-rig-title">Control Vector</span>
+                  </div>
+                  <div className="playground-gauge-list">
+                    <div className="playground-gauge-item">
+                      <label>Output load</label>
+                      <div className="playground-gauge-track">
+                        <div className="playground-gauge-fill output" style={{ width: `${outputPct}%` }} />
+                      </div>
+                    </div>
+                    <div className="playground-gauge-item">
+                      <label>Kp {kp.toFixed(2)}</label>
+                      <div className="playground-gauge-track">
+                        <div className="playground-gauge-fill kp" style={{ width: `${clamp((kp / 40) * 100, 0, 100)}%` }} />
+                      </div>
+                    </div>
+                    <div className="playground-gauge-item">
+                      <label>Ki {ki.toFixed(3)}</label>
+                      <div className="playground-gauge-track">
+                        <div className="playground-gauge-fill ki" style={{ width: `${clamp((ki / 0.3) * 100, 0, 100)}%` }} />
+                      </div>
+                    </div>
+                    <div className="playground-gauge-item">
+                      <label>Kd {kd.toFixed(3)}</label>
+                      <div className="playground-gauge-track">
+                        <div className="playground-gauge-fill kd" style={{ width: `${clamp((kd / 4) * 100, 0, 100)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            )}
+
+              <div className="playground-scope-grid">
+                <div className="playground-scope-card">
+                  <div className="playground-card-head">
+                    <span className="action-rig-title">Step Response</span>
+                  </div>
+                  <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Step response chart">
+                    <polyline className="scope-line set" points={responseSpark.set} />
+                    <polyline className="scope-line raw" points={responseSpark.yMeas} />
+                    <polyline className="scope-line kf" points={responseSpark.yFilt} />
+                    <polyline className="scope-line out" points={responseSpark.y} />
+                  </svg>
+                </div>
+                <div className="playground-scope-card">
+                  <div className="playground-card-head">
+                    <span className="action-rig-title">Control Effort</span>
+                  </div>
+                  <svg className="playground-scope" viewBox="0 0 640 140" role="img" aria-label="Control effort chart">
+                    <polyline className="scope-line out" points={controlSpark} />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="action-rig playground-linear-bench">
+                <div className="action-rig-head">
+                  <span className="action-rig-title">Lesson Controls</span>
+                </div>
+                <div className="row playground-sweep-row">
+                  <label className="playground-label">Kp<input type="number" step="0.05" value={kp} disabled={!lesson.editable.kp} onChange={(e) => setKp(Number(e.target.value) || 0)} /></label>
+                  <label className="playground-label">Ki<input type="number" step="0.01" value={ki} disabled={!lesson.editable.ki} onChange={(e) => setKi(Number(e.target.value) || 0)} /></label>
+                  <label className="playground-label">Kd<input type="number" step="0.01" value={kd} disabled={!lesson.editable.kd} onChange={(e) => setKd(Number(e.target.value) || 0)} /></label>
+                  <label className="playground-label">Setpoint<input type="number" step="0.1" value={setpoint} onChange={(e) => setSetpoint(Number(e.target.value) || 0)} /></label>
+                  <label className="playground-label">Duration s<input type="number" min={2} step="0.5" value={durationS} onChange={(e) => setDurationS(Math.max(2, Number(e.target.value) || 2))} /></label>
+                  <label className="playground-label">Disturbance<input type="number" step="0.05" value={disturbance} onChange={(e) => setDisturbance(Number(e.target.value) || 0)} /></label>
+                  <label className="playground-label">Noise<input type="number" step="0.05" value={noiseAmp} disabled={!lesson.editable.noise} onChange={(e) => setNoiseAmp(Math.max(0, Number(e.target.value) || 0))} /></label>
+                  <label className="playground-label">Cutoff Hz<input type="number" step="0.1" value={cutoffHz} disabled={!lesson.editable.cutoff} onChange={(e) => setCutoffHz(Math.max(0, Number(e.target.value) || 0))} /></label>
+                  <label className="playground-label">I Max<input type="number" step="0.5" value={iMax} disabled={!lesson.editable.iMax} onChange={(e) => setIMax(Math.max(0, Number(e.target.value) || 0))} /></label>
+                  <label className="playground-label">Out Max<input type="number" step="1" value={outMax} disabled={!lesson.editable.outMax} onChange={(e) => setOutMax(Math.max(1, Number(e.target.value) || 1))} /></label>
+                  <label className="playground-label">Cond I
+                    <select value={conditionalI ? 'on' : 'off'} disabled={!lesson.editable.conditionalI} onChange={(e) => setConditionalI(e.target.value === 'on')}>
+                      <option value="off">Off</option>
+                      <option value="on">On</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="row action-rig-row">
+                  <button className="btn-secondary btn-sm" onClick={() => doRun('Run')}>Run Lesson</button>
+                  <button className="btn-secondary btn-sm" disabled={!latestRun} onClick={() => latestRun && setRunA(latestRun)}>Save A</button>
+                  <button className="btn-primary btn-sm" disabled={!latestRun} onClick={() => latestRun && setRunB(latestRun)}>Save B</button>
+                </div>
+              </div>
+
+              {latestRun && (
+                <div className="compat-box">
+                  <p><strong>Score:</strong> {latestRun.metrics.score.toFixed(0)} ({latestRun.pass ? 'PASS' : 'WORK NEEDED'})</p>
+                  <p><strong>Rise:</strong> {latestRun.metrics.riseS != null ? `${latestRun.metrics.riseS.toFixed(3)} s` : 'n/a'}</p>
+                  <p><strong>Overshoot:</strong> {latestRun.metrics.overshootPct.toFixed(2)}%</p>
+                  <p><strong>Settle:</strong> {latestRun.metrics.settleS != null ? `${latestRun.metrics.settleS.toFixed(3)} s` : 'n/a'}</p>
+                  <p><strong>SSE:</strong> {latestRun.metrics.steadyStateError.toFixed(4)}</p>
+                  <p><strong>Saturation:</strong> {latestRun.metrics.saturationPct.toFixed(1)}%</p>
+                  <p><strong>IAE:</strong> {latestRun.metrics.iae.toFixed(4)}</p>
+                  {latestRun.notes.map((note) => <p key={note}><strong>Note:</strong> {note}</p>)}
+                  {coachingNotes(lesson.key, latestRun.metrics).map((note) => <p key={note}><strong>Coach:</strong> {note}</p>)}
+                </div>
+              )}
+
+              {runA && runB && compare && (
+                <div className="compat-box playground-compare-box">
+                  <p><strong>A/B Compare:</strong> Score Δ {compare.scoreDelta >= 0 ? '+' : ''}{compare.scoreDelta.toFixed(1)}</p>
+                  <p><strong>Overshoot Δ:</strong> {compare.overshootDelta >= 0 ? '+' : ''}{compare.overshootDelta.toFixed(2)}%</p>
+                  <p><strong>Settle Δ:</strong> {compare.settleDelta >= 0 ? '+' : ''}{compare.settleDelta.toFixed(3)} s</p>
+                  <p><strong>SSE Δ:</strong> {compare.sseDelta >= 0 ? '+' : ''}{compare.sseDelta.toFixed(4)}</p>
+                  <p><strong>Saturation Δ:</strong> {compare.satDelta >= 0 ? '+' : ''}{compare.satDelta.toFixed(2)}%</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>

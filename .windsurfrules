@@ -64,3 +64,20 @@
 ## 8. LEGACY CODE HANDLING
 - If a touched file contains legacy patterns (class components, inline styles, brittle state), do not silently mimic them.
 - Ask: "I see legacy patterns here. Refactor to current standard first, or scope only the requested change?"
+
+## 9. MULTI-AGENT COLLABORATION (MANDATORY)
+- **Single Source of Truth Branch:** Product development baseline is `recover/uiux-restore-2026-02-19` unless user explicitly changes it.
+- **No Silent Branch Switching:** Never switch branches without explicit user confirmation in the active session.
+- **Session Start Gate:** Before coding, print:
+  - current branch + head SHA
+  - git status summary
+  - whether working tree is clean or dirty
+- **Handoff Required Every Session:** Update `docs/SESSION_HANDOFF.md` with:
+  - branch + SHA
+  - exact files changed
+  - tests run + exact results
+  - open risks/blockers
+  - next recommended task
+- **Scoped Commits Only:** Do not mix product code with runtime artifacts (`*.db`, logs, generated bundles, local runtime JSON) in the same commit.
+- **Regression Gate Before Handoff/Commit:** Run the project regression command(s) relevant to touched areas and record outputs in handoff notes.
+- **No Hidden Fallback Claims:** If a tool action fails (compile/upload/generate), report explicit failure cause and log path; never imply success.

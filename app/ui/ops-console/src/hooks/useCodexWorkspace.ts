@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useReducer } from 'react';
 import {
+  aiChat,
   aiChatWithTools,
   aiProfileActivate,
   aiProfiles,
@@ -266,11 +267,31 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
     dispatch({ type: 'set_ai_history', payload: optimisticHistory });
     dispatch({ type: 'set_ai_input', payload: '' });
     dispatch({ type: 'set_ai_busy', payload: true });
+    dispatch({ type: 'set_ai_busy_detail', payload: 'Sending tool-enabled request...' });
     try {
-      const r = await aiChatWithTools(message, {
+      dispatch({ type: 'set_ai_busy_detail', payload: 'Waiting for model response...' });
+      let r = await aiChatWithTools(message, {
         threadId: state.aiActiveThreadId ?? undefined,
         enableTools: true,
       });
+      let toolCalls: import('../api').ToolCallResult[] = r.tool_calls ?? [];
+      let iterations = r.iterations ?? 1;
+      dispatch({ type: 'set_ai_busy_detail', payload: `Response received (${toolCalls.length} tool call${toolCalls.length === 1 ? '' : 's'}).` });
+
+      // Keep chat functional even when bridge tool support is temporarily unavailable.
+      if (!r.reply && !r.history.length) {
+        dispatch({ type: 'set_ai_busy_detail', payload: 'Tool mode unavailable. Retrying with standard chat...' });
+        const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined);
+        r = {
+          ...fallback,
+          tool_calls: [],
+          iterations: 1,
+        };
+        toolCalls = [];
+        iterations = 1;
+      }
+
+      dispatch({ type: 'set_ai_busy_detail', payload: 'Applying assistant response to thread...' });
       const doneAt = Date.now();
       const timed = attachAssistantTiming(r.history, sentAt, doneAt, null);
       dispatch({ type: 'set_ai_history', payload: timed });
@@ -285,11 +306,30 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
           last_two_messages: lastTwo,
         });
       }
-      if (Array.isArray(r.tool_calls) && r.tool_calls.length > 0) {
-        onMessage(`Codex tools executed: ${r.tool_calls.length}`);
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        onMessage(`Codex tools executed: ${toolCalls.length}`);
+      } else if (iterations === 1) {
+        // no-op; keeps noisy status to minimum
       }
     } catch (e) {
       const errMsg = (e as Error).message || String(e);
+      dispatch({ type: 'set_ai_busy_detail', payload: `Request failed: ${errMsg}` });
+      if (errMsg.includes('tool_support_not_available')) {
+        try {
+          dispatch({ type: 'set_ai_busy_detail', payload: 'Tool support unavailable. Falling back to standard chat...' });
+          const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined);
+          const doneAt = Date.now();
+          const timed = attachAssistantTiming(fallback.history, sentAt, doneAt, null);
+          dispatch({ type: 'set_ai_history', payload: timed });
+          dispatch({ type: 'set_ai', payload: fallback.ai });
+          dispatch({ type: 'set_ai_threads', payload: fallback.threads });
+          dispatch({ type: 'set_ai_active_thread', payload: fallback.thread_id ?? fallback.ai.active_thread_id ?? state.aiActiveThreadId ?? null });
+          onMessage('Codex tool mode unavailable; sent via standard chat.');
+          return;
+        } catch {
+          // fall through to existing error handling below
+        }
+      }
       dispatch({ type: 'set_ai_history', payload: previousHistory });
       dispatch({ type: 'set_ai_input', payload: message });
       if (shouldLogAiTurn) {
@@ -310,6 +350,7 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       }
     } finally {
       dispatch({ type: 'set_ai_busy', payload: false });
+      dispatch({ type: 'set_ai_busy_detail', payload: null });
     }
   }, [onMessage, refreshAi, state.aiActiveThreadId, state.aiHistory, state.aiInput]);
 

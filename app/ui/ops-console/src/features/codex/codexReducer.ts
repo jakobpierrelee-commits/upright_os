@@ -15,6 +15,7 @@ export type CodexState = {
   aiProfileAllowAutoApplyInput: boolean;
   aiInput: string;
   aiBusy: boolean;
+  aiBusyDetail: string | null;
   authMode: AuthMode;
   authBusy: boolean;
   authEmail: string;
@@ -38,6 +39,7 @@ type CodexAction =
   | { type: 'set_ai_profile_allow_auto_apply_input'; payload: boolean }
   | { type: 'set_ai_input'; payload: string }
   | { type: 'set_ai_busy'; payload: boolean }
+  | { type: 'set_ai_busy_detail'; payload: string | null }
   | { type: 'set_auth_mode'; payload: AuthMode }
   | { type: 'set_auth_busy'; payload: boolean }
   | { type: 'set_auth_email'; payload: string }
@@ -61,6 +63,7 @@ export const initialCodexState: CodexState = {
   aiProfileAllowAutoApplyInput: true,
   aiInput: '',
   aiBusy: false,
+  aiBusyDetail: null,
   authMode: 'login',
   authBusy: false,
   authEmail: '',
@@ -97,6 +100,8 @@ export function codexReducer(state: CodexState, action: CodexAction): CodexState
       return { ...state, aiInput: action.payload };
     case 'set_ai_busy':
       return { ...state, aiBusy: action.payload };
+    case 'set_ai_busy_detail':
+      return { ...state, aiBusyDetail: action.payload };
     case 'set_auth_mode':
       return { ...state, authMode: action.payload };
     case 'set_auth_busy':

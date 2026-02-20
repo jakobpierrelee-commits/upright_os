@@ -370,6 +370,27 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "read_sketch",
+            "description": "Read the current Arduino sketch source (.ino). Use this before proposing code edits when user asks to inspect current firmware.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sketch_path": {
+                        "type": "string",
+                        "description": "Path to sketch folder or .ino file. If omitted, uses active sketch.",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum characters to return (default 12000, max 50000).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "generate_sketch",
             "description": "Generate a new firmware sketch based on detected hardware and requirements. Creates a new sketch directory, does not overwrite existing.",
             "parameters": {
@@ -740,7 +761,7 @@ class CodexToolExecutor:
         self.rag = rag
         self.firmware = firmware_module
         self.probe_funcs = probe_funcs or {}
-        self.repo_root = repo_root or Path(__file__).parent.parent.parent
+        self.repo_root = Path(repo_root) if repo_root is not None else Path(__file__).parent.parent.parent
         self.active_sketch_path = active_sketch_path
         self.active_robot_id = active_robot_id or "default"
         self.board_fqbn = board_fqbn or "arduino:avr:nano"
@@ -1110,6 +1131,52 @@ class CodexToolExecutor:
         except Exception as e:
             return ToolResult(ok=False, tool="edit_sketch_value", error=f"Edit failed: {e}")
 
+    def _tool_read_sketch(self, args: Dict[str, Any]) -> ToolResult:
+        """Read current sketch source for inspection/debugging."""
+        sketch_path = args.get("sketch_path", self.active_sketch_path)
+        max_chars = int(args.get("max_chars", 12000) or 12000)
+        max_chars = max(500, min(max_chars, 50000))
+
+        if not sketch_path:
+            return ToolResult(ok=False, tool="read_sketch", error="No sketch path configured")
+
+        try:
+            path = Path(sketch_path)
+            if not path.exists():
+                path = self.repo_root / str(sketch_path)
+            if not path.exists():
+                return ToolResult(ok=False, tool="read_sketch", error=f"Sketch path not found: {sketch_path}")
+
+            ino_path: Optional[Path] = None
+            if path.is_file():
+                if path.suffix.lower() != ".ino":
+                    return ToolResult(ok=False, tool="read_sketch", error=f"Expected .ino file, got: {path.name}")
+                ino_path = path
+            else:
+                ino_files = sorted(path.glob("*.ino"))
+                if not ino_files:
+                    return ToolResult(ok=False, tool="read_sketch", error=f"No .ino file found in {path}")
+                ino_path = ino_files[0]
+
+            content = ino_path.read_text(encoding="utf-8")
+            truncated = False
+            if len(content) > max_chars:
+                content = content[:max_chars]
+                truncated = True
+
+            return ToolResult(
+                ok=True,
+                tool="read_sketch",
+                data={
+                    "path": str(ino_path),
+                    "content": content,
+                    "chars": len(content),
+                    "truncated": truncated,
+                },
+            )
+        except Exception as e:
+            return ToolResult(ok=False, tool="read_sketch", error=f"Read failed: {e}")
+
     def _tool_generate_sketch(self, args: Dict[str, Any]) -> ToolResult:
         """Generate a new sketch from template."""
         name = args.get("name", "")
@@ -1143,7 +1210,7 @@ class CodexToolExecutor:
                     "board": {"fqbn": self.board_fqbn, "port": self.port or ""},
                 }
 
-                result = self.firmware.generate_unified(profile, safe_name)
+                result = self.firmware.generate_unified(profile=profile, sketch_name=safe_name)
 
                 return ToolResult(
                     ok=True,

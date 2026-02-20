@@ -53,6 +53,7 @@ def test_tool_definitions_format():
         "search_docs",
         "execute_command",
         "edit_sketch_value",
+        "read_sketch",
         "generate_sketch",
         "compile_firmware",
         "upload_firmware",
@@ -339,6 +340,80 @@ def test_generate_sketch_name_sanitization():
     print("✓ Generate sketch name validation passed")
 
 
+def test_generate_sketch_calls_generate_unified_with_keywords():
+    """Regression: generate_sketch must call keyword-only firmware.generate_unified."""
+
+    class MockFirmware:
+        def __init__(self) -> None:
+            self.called = False
+            self.last_profile = None
+            self.last_sketch_name = None
+
+        def generate_unified(self, *, profile, sketch_name=None):
+            self.called = True
+            self.last_profile = profile
+            self.last_sketch_name = sketch_name
+            return {
+                "sketch_folder": "/tmp/generated/demo_sketch",
+                "main_file": "/tmp/generated/demo_sketch/demo_sketch.ino",
+            }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fw = MockFirmware()
+        executor = CodexToolExecutor(
+            firmware_module=fw,
+            repo_root=Path(tmpdir),
+            board_fqbn="arduino:avr:nano",
+            port="/dev/ttyUSB0",
+        )
+        result = executor.execute("generate_sketch", {"name": "demo sketch"})
+
+        assert result.ok, f"Expected sketch generation success, got: {result.error}"
+        assert fw.called is True
+        assert fw.last_sketch_name == "demo_sketch"
+        assert isinstance(fw.last_profile, dict)
+        assert fw.last_profile["label"] == "demo sketch"
+        assert fw.last_profile["board"]["fqbn"] == "arduino:avr:nano"
+
+
+def test_generate_sketch_repo_root_string_is_handled():
+    """Regression: repo_root may be passed as string from server bootstrap."""
+
+    class MockFirmware:
+        def generate_unified(self, *, profile, sketch_name=None):
+            return {
+                "sketch_folder": "/tmp/generated/demo_sketch",
+                "main_file": "/tmp/generated/demo_sketch/demo_sketch.ino",
+            }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fw = MockFirmware()
+        # Intentionally pass repo_root as string, matching server create_codex_agent call.
+        executor = CodexToolExecutor(
+            firmware_module=fw,
+            repo_root=tmpdir,  # string path
+            board_fqbn="arduino:avr:nano",
+            port="/dev/ttyUSB0",
+        )
+        result = executor.execute("generate_sketch", {"name": "demo sketch"})
+        assert result.ok, f"Expected success with string repo_root, got: {result.error}"
+
+
+def test_read_sketch_reads_active_sketch_source():
+    """read_sketch should return .ino content from active sketch folder."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sketch_dir = Path(tmpdir) / "demo_sketch"
+        sketch_dir.mkdir()
+        ino = sketch_dir / "demo_sketch.ino"
+        ino.write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+
+        executor = CodexToolExecutor(repo_root=Path(tmpdir), active_sketch_path=str(sketch_dir))
+        result = executor.execute("read_sketch", {})
+        assert result.ok, f"Expected read success, got: {result.error}"
+        assert "void setup()" in result.data.get("content", "")
+        assert result.data.get("truncated") is False
+
+
 def test_tool_result_structure():
     """Test ToolResult dataclass structure."""
     result = ToolResult(
@@ -392,6 +467,7 @@ def run_all_tests():
         ("Search Docs Without RAG", test_search_docs_without_rag),
         ("Upload Confirmation Flow", test_upload_confirmation_flow),
         ("Generate Sketch Validation", test_generate_sketch_name_sanitization),
+        ("Read Sketch Source", test_read_sketch_reads_active_sketch_source),
         ("Tool Result Structure", test_tool_result_structure),
         ("Unknown Tool Handling", test_unknown_tool),
     ]
