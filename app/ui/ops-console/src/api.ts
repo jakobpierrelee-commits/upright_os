@@ -959,7 +959,7 @@ export async function aiChatWithTools(
       board: options?.board,
       port: options?.port,
     }),
-  }, 210000);
+  }, 330000);
   return {
     reply: d.reply,
     ai: d.ai,

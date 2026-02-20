@@ -26,9 +26,14 @@ try:
 except ImportError:
     certifi = None
 
-from codex_db import CodexDB, TelemetrySnapshot, Checkpoint, get_codex_db
-from codex_rag import CodexRAG, get_codex_rag
-from codex_tools import CodexToolExecutor, ToolResult, get_tool_definitions
+try:
+    from app.bridge.codex_db import CodexDB, TelemetrySnapshot, Checkpoint, get_codex_db
+    from app.bridge.codex_rag import CodexRAG, get_codex_rag
+    from app.bridge.codex_tools import CodexToolExecutor, ToolResult, get_tool_definitions
+except ImportError:
+    from codex_db import CodexDB, TelemetrySnapshot, Checkpoint, get_codex_db
+    from codex_rag import CodexRAG, get_codex_rag
+    from codex_tools import CodexToolExecutor, ToolResult, get_tool_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +41,11 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ITERATIONS = 5
 
 # OpenAI request timeout in seconds
-OPENAI_TIMEOUT_S = 45
+# Keep defaults generous for sketch-generation turns while allowing env overrides.
+OPENAI_TIMEOUT_S = int(os.environ.get("CODEX_OPENAI_TIMEOUT_S", "75"))
+SKETCH_START_TIMEOUT_S = int(os.environ.get("CODEX_SKETCH_START_TIMEOUT_S", "75"))
+SKETCH_TOTAL_TIMEOUT_S = int(os.environ.get("CODEX_SKETCH_TOTAL_TIMEOUT_S", "300"))
+OPENAI_IN_PROGRESS_TIMEOUT_S = int(os.environ.get("CODEX_OPENAI_IN_PROGRESS_TIMEOUT_S", "240"))
 MAX_HISTORY_MESSAGES = 16
 MAX_HISTORY_CHARS_PER_MESSAGE = 1200
 
@@ -259,17 +268,52 @@ class CodexAgent:
         # Track tool calls for response
         executed_tools: List[Dict[str, Any]] = []
         iterations = 0
+        request_started_at = time.time()
+        sketch_request = self._is_sketch_generation_request(user_msg)
+        sketch_generation_started_at: Optional[float] = None
 
         while iterations < MAX_TOOL_ITERATIONS:
+            now = time.time()
+            if sketch_request:
+                if sketch_generation_started_at is None and now - request_started_at >= SKETCH_START_TIMEOUT_S:
+                    raise RuntimeError(
+                        f"sketch_start_timeout: Sketch generation did not start within {SKETCH_START_TIMEOUT_S} seconds."
+                    )
+                if sketch_generation_started_at is not None and now - request_started_at >= SKETCH_TOTAL_TIMEOUT_S:
+                    raise RuntimeError(
+                        f"sketch_generation_timeout: Sketch generation exceeded {SKETCH_TOTAL_TIMEOUT_S} seconds."
+                    )
             iterations += 1
 
             # Call OpenAI API
-            response = self._call_openai(
-                messages=messages,
-                api_key=api_key,
-                model=model,
-                tools=tools,
-            )
+            call_timeout_s = OPENAI_TIMEOUT_S
+            if sketch_request:
+                if sketch_generation_started_at is None:
+                    remaining_to_start = max(1.0, SKETCH_START_TIMEOUT_S - (now - request_started_at))
+                    call_timeout_s = min(call_timeout_s, remaining_to_start)
+                else:
+                    remaining_total = max(1.0, SKETCH_TOTAL_TIMEOUT_S - (now - request_started_at))
+                    call_timeout_s = min(OPENAI_IN_PROGRESS_TIMEOUT_S, remaining_total)
+            try:
+                response = self._call_openai(
+                    messages=messages,
+                    api_key=api_key,
+                    model=model,
+                    tools=tools,
+                    timeout_s=call_timeout_s,
+                )
+            except RuntimeError as exc:
+                msg = str(exc)
+                if msg.startswith("openai_timeout:") and sketch_request:
+                    elapsed = time.time() - request_started_at
+                    budget = SKETCH_TOTAL_TIMEOUT_S if sketch_generation_started_at is not None else SKETCH_START_TIMEOUT_S
+                    if elapsed < budget:
+                        logger.warning(
+                            "OpenAI timeout during sketch request; retrying within budget "
+                            f"(elapsed={elapsed:.1f}s, budget={budget}s)."
+                        )
+                        continue
+                raise
 
             # Check for tool calls
             tool_calls = self._extract_tool_calls(response)
@@ -303,6 +347,8 @@ class CodexAgent:
                 logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
 
                 tool_start = time.time()
+                if sketch_request and tool_name == "generate_sketch" and sketch_generation_started_at is None:
+                    sketch_generation_started_at = tool_start
                 try:
                     result = tool_executor.execute(tool_name, tool_args)
                     if not result.ok:
@@ -378,6 +424,7 @@ class CodexAgent:
         api_key: str,
         model: str,
         tools: Optional[List[Dict[str, Any]]] = None,
+        timeout_s: float = OPENAI_TIMEOUT_S,
     ) -> Dict[str, Any]:
         """Make OpenAI API call."""
         base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -404,7 +451,7 @@ class CodexAgent:
         )
 
         try:
-            with urlrequest.urlopen(req, timeout=OPENAI_TIMEOUT_S, context=self._ssl_context) as r:
+            with urlrequest.urlopen(req, timeout=float(timeout_s), context=self._ssl_context) as r:
                 raw = r.read().decode("utf-8", errors="replace")
             return json.loads(raw)
         except urlerror.HTTPError as exc:
@@ -415,14 +462,23 @@ class CodexAgent:
                 pass
             raise RuntimeError(f"openai_http_error:{exc.code}:{body}") from exc
         except TimeoutError:
-            raise RuntimeError("openai_timeout: Request timed out after 45 seconds. Please try again with a simpler request.")
+            raise RuntimeError(f"openai_timeout: Request timed out after {int(round(float(timeout_s)))} seconds. Please try again with a simpler request.")
         except Exception as exc:
             emsg = str(exc)
             if "timed out" in emsg.lower() or "timeout" in emsg.lower():
-                raise RuntimeError("openai_timeout: Request timed out after 45 seconds. Please try again with a simpler request.")
+                raise RuntimeError(f"openai_timeout: Request timed out after {int(round(float(timeout_s)))} seconds. Please try again with a simpler request.")
             if "CERTIFICATE_VERIFY_FAILED" in emsg:
                 raise RuntimeError("openai_tls_cert_verify_failed") from exc
             raise RuntimeError(f"openai_request_failed:{exc}") from exc
+
+    @staticmethod
+    def _is_sketch_generation_request(message: str) -> bool:
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+        if "sketch" not in text:
+            return False
+        return any(term in text for term in ("generate", "build", "create", "scaffold"))
 
     def _extract_tool_calls(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract tool calls from OpenAI response."""
