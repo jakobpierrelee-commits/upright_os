@@ -232,6 +232,24 @@ export type TuningCapabilities = {
   status_keys?: string[];
 };
 
+export type ActionGate = {
+  ok: boolean;
+  reasons: string[];
+};
+
+export type ActionGates = {
+  arm_prepare?: ActionGate;
+  arm_confirm?: ActionGate;
+  arm?: ActionGate;
+  disarm?: ActionGate;
+  cal_zero?: ActionGate;
+  burst_arm?: ActionGate;
+  pid?: ActionGate;
+  motion?: ActionGate;
+  setpoint?: ActionGate;
+  limits?: ActionGate;
+};
+
 export type TuningRecommendation = {
   ok: boolean;
   score_pct: number;
@@ -543,9 +561,9 @@ export async function getHealth(): Promise<{ health: Health; control?: ControlSt
   return { health: d.health, control: d.control, telemetry_ws: d.telemetry_ws, telemetry_enabled: d.telemetry_enabled };
 }
 
-export async function getStatus(): Promise<{ status: Status; control?: ControlState }> {
-  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/status');
-  return { status: d.status, control: d.control };
+export async function getStatus(): Promise<{ status: Status; control?: ControlState; action_gates?: ActionGates }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState; action_gates?: ActionGates }>('/status');
+  return { status: d.status, control: d.control, action_gates: d.action_gates };
 }
 
 export async function getLines(n = 120): Promise<string[]> {
@@ -941,7 +959,7 @@ export async function aiChatWithTools(
       board: options?.board,
       port: options?.port,
     }),
-  }, 90000);
+  }, 210000);
   return {
     reply: d.reply,
     ai: d.ai,

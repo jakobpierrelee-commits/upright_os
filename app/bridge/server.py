@@ -3519,6 +3519,132 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _compute_action_gates(
+    *,
+    connected: bool,
+    status: Dict[str, Any],
+    control_snapshot: Dict[str, Any],
+    session_fresh: bool,
+) -> Dict[str, Dict[str, Any]]:
+    status_map = status if isinstance(status, dict) else {}
+    control_map = control_snapshot if isinstance(control_snapshot, dict) else {}
+    mode = str(status_map.get("mode", "")).upper()
+    estop = bool(control_map.get("estop_latched", False))
+    arm_prepared = bool(control_map.get("arm_prepared", False))
+    readiness = detect_contract_readiness(status_map)
+    v1_ok = bool(readiness.get("v1_ok", False))
+
+    def gate(reasons: list[str]) -> Dict[str, Any]:
+        return {"ok": len(reasons) == 0, "reasons": reasons}
+
+    gates: Dict[str, Dict[str, Any]] = {}
+
+    arm_prepare_reasons: list[str] = []
+    if not connected:
+        arm_prepare_reasons.append("serial_disconnected")
+    if not session_fresh:
+        arm_prepare_reasons.append("session_stale")
+    if estop:
+        arm_prepare_reasons.append("estop_latched")
+    if not v1_ok:
+        arm_prepare_reasons.append("telemetry_contract_incomplete")
+    if mode in {"ARMED", "BALANCING"}:
+        arm_prepare_reasons.append("already_armed")
+    gates["arm_prepare"] = gate(arm_prepare_reasons)
+
+    arm_confirm_reasons: list[str] = []
+    if not connected:
+        arm_confirm_reasons.append("serial_disconnected")
+    if not session_fresh:
+        arm_confirm_reasons.append("session_stale")
+    if estop:
+        arm_confirm_reasons.append("estop_latched")
+    if not arm_prepared:
+        arm_confirm_reasons.append("arm_not_prepared")
+    if mode in {"ARMED", "BALANCING"}:
+        arm_confirm_reasons.append("already_armed")
+    gates["arm_confirm"] = gate(arm_confirm_reasons)
+
+    arm_reasons: list[str] = []
+    if not connected:
+        arm_reasons.append("serial_disconnected")
+    if not session_fresh:
+        arm_reasons.append("session_stale")
+    if estop:
+        arm_reasons.append("estop_latched")
+    if mode in {"ARMED", "BALANCING"}:
+        arm_reasons.append("already_armed")
+    gates["arm"] = gate(arm_reasons)
+
+    disarm_reasons: list[str] = []
+    if not connected:
+        disarm_reasons.append("serial_disconnected")
+    gates["disarm"] = gate(disarm_reasons)
+
+    cal_zero_reasons: list[str] = []
+    if not connected:
+        cal_zero_reasons.append("serial_disconnected")
+    if estop:
+        cal_zero_reasons.append("estop_latched")
+    if mode == "BALANCING":
+        cal_zero_reasons.append("disarm_required")
+    gates["cal_zero"] = gate(cal_zero_reasons)
+
+    burst_arm_reasons: list[str] = []
+    if not connected:
+        burst_arm_reasons.append("serial_disconnected")
+    if estop:
+        burst_arm_reasons.append("estop_latched")
+    gates["burst_arm"] = gate(burst_arm_reasons)
+
+    tune_reasons: list[str] = []
+    if not connected:
+        tune_reasons.append("serial_disconnected")
+    if estop:
+        tune_reasons.append("estop_latched")
+    if not v1_ok:
+        tune_reasons.append("telemetry_contract_incomplete")
+    gates["pid"] = gate(list(tune_reasons))
+    gates["motion"] = gate(list(tune_reasons))
+    gates["setpoint"] = gate(list(tune_reasons))
+    gates["limits"] = gate(list(tune_reasons))
+
+    return gates
+
+
+def _resolve_action_gates(
+    gateway: NanoSerialGateway,
+    control: BridgeControlState,
+    *,
+    status_override: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    health = gateway.health()
+    connected = bool(health.get("connected", False))
+    status_src = status_override if isinstance(status_override, dict) else dict(health.get("last_status", {}))
+    control_snapshot = control.snapshot()
+    return _compute_action_gates(
+        connected=connected,
+        status=status_src,
+        control_snapshot=control_snapshot,
+        session_fresh=control.session_fresh(),
+    )
+
+
+def _require_action_allowed(
+    action: str,
+    gateway: NanoSerialGateway,
+    control: BridgeControlState,
+    *,
+    status_override: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    gates = _resolve_action_gates(gateway, control, status_override=status_override)
+    node = gates.get(action, {"ok": True, "reasons": []})
+    if not bool(node.get("ok", False)):
+        reasons = ",".join([str(r) for r in list(node.get("reasons", [])) if str(r)])
+        raise RuntimeError(f"action_blocked:{action}:{reasons}")
+    return gates
+
+
 def run_compat_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "ok": False,
@@ -4086,7 +4212,16 @@ def build_handler(
                     # Keep /status non-blocking: return cached status only.
                     # Serial worker drains spontaneous STATUS lines in background.
                     st = dict(gateway.health().get("last_status", {}))
-                    return _json(self, 200, {"ok": True, "status": st, "control": control.snapshot()})
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "status": st,
+                            "control": control.snapshot(),
+                            "action_gates": _resolve_action_gates(gateway, control, status_override=st),
+                        },
+                    )
                 if u.path == "/diag/serial":
                     return _json(
                         self,
@@ -4303,7 +4438,6 @@ def build_handler(
                     since_hours = float((q.get("since_hours", ["24"]) or ["24"])[0] or 24)
                     since_ts = time.time() - (since_hours * 3600) if since_hours > 0 else None
                     tool_filter = str((q.get("tool", [""]) or [""])[0]).strip() or None
-                    from codex_db import get_codex_db
                     db = get_codex_db()
                     try:
                         tool_metrics = db.get_tool_metrics(since_ts=since_ts, tool_filter=tool_filter)
@@ -4798,7 +4932,6 @@ def build_handler(
                     tool_filter = str(body.get("tool", "")).strip() or None
                     
                     # Get metrics from codex_db
-                    from codex_db import get_codex_db
                     db = get_codex_db()
                     
                     try:
@@ -5359,6 +5492,7 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "result": res, "control": control.snapshot()})
 
                 if u.path == "/burst/arm":
+                    _require_action_allowed("burst_arm", gateway, control)
                     delay_ms = int(body.get("delay_ms", 3000) or 3000)
                     lines = int(body.get("lines", 80) or 80)
                     freq_hz = float(body.get("freq_hz", 8.0) or 8.0)
@@ -5389,27 +5523,23 @@ def build_handler(
                     )
 
                 if u.path == "/arm/prepare":
-                    if not control.session_fresh():
-                        return _json(self, 428, {"ok": False, "error": "session_stale", "control": control.snapshot()})
+                    _require_action_allowed("arm_prepare", gateway, control)
                     return _json(self, 200, {"ok": True, "control": control.prepare_arm()})
 
                 if u.path == "/arm/confirm":
-                    if not control.session_fresh():
-                        return _json(self, 428, {"ok": False, "error": "session_stale", "control": control.snapshot()})
+                    _require_action_allowed("arm_confirm", gateway, control)
                     control.consume_arm_prepare()
                     gateway.command("ARM", timeout=1.0)
                     return _json(self, 200, {"ok": True, "status": gateway.get_status(), "control": control.snapshot()})
 
                 if u.path == "/arm":
-                    if not control.session_fresh():
-                        return _json(self, 428, {"ok": False, "error": "session_stale", "control": control.snapshot()})
-                    if control.snapshot()["estop_latched"]:
-                        return _json(self, 423, {"ok": False, "error": "estop_latched", "control": control.snapshot()})
+                    _require_action_allowed("arm", gateway, control)
                     gateway.command("ARM", timeout=1.0)
                     control.clear_arm_prepare()
                     return _json(self, 200, {"ok": True, "status": gateway.get_status(), "control": control.snapshot()})
 
                 if u.path == "/disarm":
+                    _require_action_allowed("disarm", gateway, control)
                     gateway.command("DISARM", timeout=1.0)
                     control.clear_arm_prepare()
                     return _json(self, 200, {"ok": True, "status": gateway.get_status(), "control": control.snapshot()})
@@ -5423,8 +5553,7 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "status": gateway.get_status(), "control": control.reset_estop()})
 
                 if u.path == "/cal_zero":
-                    if control.snapshot()["estop_latched"]:
-                        return _json(self, 423, {"ok": False, "error": "estop_latched", "control": control.snapshot()})
+                    _require_action_allowed("cal_zero", gateway, control)
                     res = gateway.command("CAL ZERO", expect_contains="OK CAL ZERO", timeout=4.0)
                     return _json(self, 200, {"ok": True, "result": res, "status": gateway.get_status(), "control": control.snapshot()})
 
@@ -5437,6 +5566,7 @@ def build_handler(
                     ki = float(body["ki"])
                     kd = float(body["kd"])
                     status_before = gateway.get_status()
+                    _require_action_allowed("pid", gateway, control, status_override=status_before)
                     current = {
                         "kp": _status_float(status_before, "kp", default=31.0),
                         "ki": _status_float(status_before, "ki", default=0.05),
@@ -5460,6 +5590,7 @@ def build_handler(
                     kv = float(body["kv"])
                     kx = float(body["kx"])
                     status_before = gateway.get_status()
+                    _require_action_allowed("motion", gateway, control, status_override=status_before)
                     current = {
                         "kv": _status_float(status_before, "kv", default=0.0),
                         "kx": _status_float(status_before, "kx", default=0.0),
@@ -5481,6 +5612,7 @@ def build_handler(
                 if u.path == "/setpoint":
                     deg = float(body["deg"])
                     status_before = gateway.get_status()
+                    _require_action_allowed("setpoint", gateway, control, status_override=status_before)
                     current = {"deg": _status_float(status_before, "set", default=0.0)}
                     target = {"deg": deg}
                     _guard_setpoint_apply(status_before, deg)
@@ -5501,6 +5633,7 @@ def build_handler(
                     tip_deg = float(body["tip_deg"])
                     i_max = float(body["i_max"])
                     status_before = gateway.get_status()
+                    _require_action_allowed("limits", gateway, control, status_override=status_before)
                     current = {
                         "out_max": _status_float(status_before, "outMax", "out_max", default=180.0),
                         "tip_deg": _status_float(status_before, "tipDeg", "tip_deg", default=35.0),
@@ -5549,6 +5682,23 @@ def build_handler(
                     return _json(self, 428, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg in {"estop_latched", "session_stale"}:
                     return _json(self, 423, {"ok": False, "error": msg, "control": control.snapshot()})
+                if msg.startswith("action_blocked:"):
+                    parts = msg.split(":", 2)
+                    action = parts[1] if len(parts) > 1 else "unknown"
+                    reasons_raw = parts[2] if len(parts) > 2 else ""
+                    reasons = [r for r in reasons_raw.split(",") if r]
+                    return _json(
+                        self,
+                        423,
+                        {
+                            "ok": False,
+                            "error": "action_blocked",
+                            "action": action,
+                            "reasons": reasons,
+                            "action_gates": _resolve_action_gates(gateway, control),
+                            "control": control.snapshot(),
+                        },
+                    )
                 if msg == "arm_not_prepared":
                     return _json(self, 409, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg == "commissioning_running":
@@ -5627,7 +5777,12 @@ def main() -> int:
     ap.add_argument("--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8787")))
     ap.add_argument("--telemetry-port", type=int, default=int(os.environ.get("APP_TELEMETRY_PORT", "8788")))
     ap.add_argument("--watchdog-timeout", type=float, default=float(os.environ.get("APP_WATCHDOG_TIMEOUT_S", "2.0")))
+    ap.add_argument("--supervised", action="store_true", help="Suppress direct-run warning (set by supervisor)")
     args = ap.parse_args()
+
+    if not args.supervised:
+        print("\n⚠️  Running bridge directly (no supervisor).")
+        print("   For auto-restart on failure, use: ./tools/start_bridge.sh\n")
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     gw = NanoSerialGateway(args.port, args.baud)

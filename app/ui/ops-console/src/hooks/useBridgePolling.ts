@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getHealth, getStatus, heartbeat } from '../api';
+import { getHealth, getStatus, heartbeat, type ActionGates } from '../api';
 import type { ControlState, Health, Status } from '../types';
 
 type ImuSample = {
@@ -16,6 +16,7 @@ type Params = {
   setHealth: (health: Health | null) => void;
   setBridgeOnline: (online: boolean) => void;
   setStatus: (status: Status) => void;
+  setActionGates: (gates: ActionGates | null) => void;
   setControl: (control: ControlState) => void;
   setImuHistory: (next: (prev: ImuSample[]) => ImuSample[]) => void;
   initDraftsFromStatus: (status: Status) => void;
@@ -30,6 +31,7 @@ export function useBridgePolling(params: Params) {
     setHealth,
     setBridgeOnline,
     setStatus,
+    setActionGates,
     setControl,
     setImuHistory,
     initDraftsFromStatus,
@@ -45,12 +47,22 @@ export function useBridgePolling(params: Params) {
     let mounted = true;
     let ws: WebSocket | null = null;
     let wsActive = false;
-    let fallbackId: ReturnType<typeof setInterval> | null = null;
-    let healthId: ReturnType<typeof setInterval> | null = null;
-    let hbId: ReturnType<typeof setInterval> | null = null;
+    let fallbackId: ReturnType<typeof setTimeout> | null = null;
+    let healthId: ReturnType<typeof setTimeout> | null = null;
+    let hbId: ReturnType<typeof setTimeout> | null = null;
     let lastErrorAt = 0;
     let healthFailures = 0;
     let lastHealthOkAt = 0;
+    let lastMode = '';
+
+    const healthIntervalMs = () => (document.hidden ? 10_000 : 3_000);
+    const heartbeatIntervalMs = () => {
+      const mode = String(lastMode || '').toUpperCase();
+      const activelyControlling = mode === 'BALANCING' || mode === 'ARMED';
+      if (activelyControlling) return document.hidden ? 2_500 : 1_000;
+      return document.hidden ? 6_000 : 1_800;
+    };
+    const fallbackIntervalMs = () => (document.hidden ? 3_000 : 900);
 
     const processStatus = (status: Status, control?: ControlState, bridgeTxSeconds?: number | null) => {
       const bridgeTxMs =
@@ -59,6 +71,7 @@ export function useBridgePolling(params: Params) {
           : null;
       setBridgeOnline(true);
       setStatus(status);
+      lastMode = String(status.mode ?? '');
       setImuHistory((prev) => {
         const next = [...prev, {
           t: Date.now(),
@@ -103,10 +116,37 @@ export function useBridgePolling(params: Params) {
         const s = await getStatus();
         if (!mounted) return;
         processStatus(s.status, s.control, Date.now() / 1000);
+        setActionGates(s.action_gates ?? null);
       } catch (e) {
         if (!mounted) return;
         reportError(e);
       }
+    };
+
+    const scheduleHealthTick = () => {
+      if (!mounted) return;
+      healthId = setTimeout(async () => {
+        await refreshHealth();
+        scheduleHealthTick();
+      }, healthIntervalMs());
+    };
+
+    const scheduleHeartbeatTick = () => {
+      if (!mounted) return;
+      hbId = setTimeout(async () => {
+        await heartbeatTick();
+        scheduleHeartbeatTick();
+      }, heartbeatIntervalMs());
+    };
+
+    const scheduleFallbackTick = () => {
+      if (!mounted) return;
+      fallbackId = setTimeout(async () => {
+        if (!wsActive) {
+          await tickStatusFallback();
+        }
+        scheduleFallbackTick();
+      }, fallbackIntervalMs());
     };
 
     const refreshHealth = async () => {
@@ -170,27 +210,23 @@ export function useBridgePolling(params: Params) {
     void refreshHealth();
     void heartbeatTick();
     void tickStatusFallback();
+    scheduleHealthTick();
+    scheduleHeartbeatTick();
+    scheduleFallbackTick();
 
-    healthId = setInterval(() => {
+    const onVisibilityChange = () => {
+      if (!mounted || document.hidden) return;
       void refreshHealth();
-    }, 1500);
-
-    hbId = setInterval(() => {
-      void heartbeatTick();
-    }, 800);
-
-    // Keep a low-frequency HTTP fallback path in case websocket is unavailable.
-    fallbackId = setInterval(() => {
-      if (!wsActive) {
-        void tickStatusFallback();
-      }
-    }, 450);
+      if (!wsActive) void tickStatusFallback();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       mounted = false;
-      if (fallbackId) clearInterval(fallbackId);
-      if (healthId) clearInterval(healthId);
-      if (hbId) clearInterval(hbId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (fallbackId) clearTimeout(fallbackId);
+      if (healthId) clearTimeout(healthId);
+      if (hbId) clearTimeout(hbId);
       if (ws) {
         try {
           ws.close();

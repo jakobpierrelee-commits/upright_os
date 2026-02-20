@@ -42,6 +42,7 @@ import {
   toolingTuningRecommend,
   type SerialDiag,
   type BurstStatus,
+  type ActionGates,
   type CompatReport,
   type ConnectProbeReport,
   type FirmwareDocsPack,
@@ -379,6 +380,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [bridgeOnline, setBridgeOnline] = useState(false);
   const [status, setStatus] = useState<Status>({});
+  const [actionGates, setActionGates] = useState<ActionGates | null>(null);
   const [control, setControl] = useState<ControlState>({ arm_prepared: false, estop_latched: false });
   const [lines, setLines] = useState<string[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
@@ -926,6 +928,7 @@ export default function App() {
     setHealth,
     setBridgeOnline,
     setStatus,
+    setActionGates,
     setControl,
     setImuHistory,
     initDraftsFromStatus,
@@ -990,11 +993,32 @@ export default function App() {
   }, [boardScan, loadSketch, refreshBoards, refreshBurstInfo, refreshSerialDiag, sketchContent]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      void refreshBurstInfo();
-    }, 800);
-    return () => window.clearInterval(id);
-  }, [refreshBurstInfo]);
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const burstHostState = String(burstInfo?.host_capture?.state ?? '').toLowerCase();
+    const burstLive = ['armed', 'capturing'].includes(burstHostState);
+
+    const nextDelayMs = () => {
+      if (document.hidden) return 12_000;
+      if (activeTab === 'tune' || burstLive) return 800;
+      return 4_000;
+    };
+
+    const tick = async () => {
+      if (!mounted) return;
+      await refreshBurstInfo();
+      if (!mounted) return;
+      timer = setTimeout(() => {
+        void tick();
+      }, nextDelayMs());
+    };
+
+    void tick();
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeTab, burstInfo?.host_capture?.state, refreshBurstInfo]);
 
   const syncFromBot = useCallback(() => {
     setPidDraft({ kp: n(status.kp, 31), ki: n(status.ki, 0.05), kd: n(status.kd, 1.05) });
@@ -1468,11 +1492,13 @@ export default function App() {
       if (h.control) setControl(h.control);
       setControl(hb);
       setStatus(s.status);
+      setActionGates(s.action_gates ?? null);
       if (s.control) setControl(s.control);
       await refreshBurstInfo();
       setMsg('Refreshed');
     } catch (e) {
       setBridgeOnline(false);
+      setActionGates(null);
       setMsg(`refresh error: ${(e as Error).message}`);
     }
   }, [refreshBurstInfo, setMsg, unlockAlertSource]);
@@ -1499,6 +1525,76 @@ export default function App() {
   }, [setMsg, setSketchContent, sketchContent]);
 
   const hudMetrics = useHudTelemetry(status, imuHistory, strings.hud, health?.last_status_age_ms ?? null);
+  const transportQuality = useMemo(() => {
+    const connected = Boolean(health?.connected) || bridgeOnline;
+    const telemetryAgeMs = (health?.last_status_age_ms ?? serialHealth?.last_status_age_ms ?? null);
+    const queueDepth = Number(serialHealth?.queue_depth ?? 0);
+    const metrics = serialHealth?.serial_metrics;
+    const timeouts = Number(metrics?.timeouts ?? 0);
+    const commandsErr = Number(metrics?.commands_err ?? 0);
+    const p95LatencyMs = metrics?.latency_p95_ms ?? null;
+    const sampleRateHz = hudMetrics.sampleRateHz;
+
+    const ageTone =
+      telemetryAgeMs == null ? 'unknown' : telemetryAgeMs < 180 ? 'good' : telemetryAgeMs < 600 ? 'warn' : 'bad';
+    const queueTone = queueDepth <= 2 ? 'good' : queueDepth <= 5 ? 'warn' : 'bad';
+    const rateTone = sampleRateHz >= 20 ? 'good' : sampleRateHz > 0 ? 'warn' : 'bad';
+    const timeoutTone = timeouts === 0 ? 'good' : timeouts <= 2 ? 'warn' : 'bad';
+    const errorTone = commandsErr === 0 ? 'good' : commandsErr <= 2 ? 'warn' : 'bad';
+    const latencyTone =
+      p95LatencyMs == null ? 'unknown' : p95LatencyMs < 80 ? 'good' : p95LatencyMs < 180 ? 'warn' : 'bad';
+
+    return {
+      connected,
+      telemetryAgeMs,
+      queueDepth,
+      sampleRateHz,
+      timeouts,
+      commandsErr,
+      p95LatencyMs,
+      tones: {
+        link: connected ? 'good' : 'bad',
+        age: ageTone,
+        queue: queueTone,
+        rate: rateTone,
+        timeout: timeoutTone,
+        error: errorTone,
+        latency: latencyTone,
+      },
+    };
+  }, [
+    bridgeOnline,
+    health?.connected,
+    health?.last_status_age_ms,
+    hudMetrics.sampleRateHz,
+    serialHealth?.last_status_age_ms,
+    serialHealth?.queue_depth,
+    serialHealth?.serial_metrics,
+  ]);
+
+  const gateReason = useCallback((action: keyof NonNullable<ActionGates>) => {
+    const node = actionGates?.[action];
+    if (!node || node.ok) return '';
+    return node.reasons.length ? node.reasons.join(', ') : 'blocked';
+  }, [actionGates]);
+
+  const gateReasonHuman = useCallback((action: keyof NonNullable<ActionGates>) => {
+    const raw = gateReason(action);
+    if (!raw) return '';
+    const labelMap: Record<string, string> = {
+      serial_disconnected: 'Bridge/serial is disconnected',
+      session_stale: 'Session is stale (refresh/heartbeat needed)',
+      estop_latched: 'E-Stop is latched',
+      telemetry_contract_incomplete: 'Telemetry contract fields are incomplete',
+      already_armed: 'Robot is already armed/balancing',
+      arm_not_prepared: 'Press Prepare Arm first',
+      disarm_required: 'Disarm first',
+    };
+    return raw
+      .split(',')
+      .map((token) => labelMap[token] ?? token)
+      .join(' | ');
+  }, [gateReason]);
 
   useEffect(() => {
     const connected = Boolean(health?.connected) || bridgeOnline;
@@ -1729,9 +1825,19 @@ export default function App() {
                         <label>Burst Delay ms<input type="number" min={0} step={100} value={burstDelayMs} onChange={(e) => setBurstDelayMs(Math.max(0, Number(e.target.value) || 0))} /></label>
                         <label>Burst Lines<input type="number" min={1} step={10} value={burstLines} onChange={(e) => setBurstLines(Math.max(1, Number(e.target.value) || 1))} /></label>
                         <label>Burst Freq Hz<input type="number" min={1} max={100} step={0.5} value={burstFreqHz} onChange={(e) => setBurstFreqHz(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} /></label>
-                        <button className="btn-secondary btn-sm btn-intent-discover" disabled={control.estop_latched} onClick={() => void armBurstCapture()}>Queue Burst CSV</button>
+                        <button
+                          className="btn-secondary btn-sm btn-intent-discover"
+                          disabled={control.estop_latched || (actionGates?.burst_arm?.ok === false)}
+                          title={gateReason('burst_arm')}
+                          onClick={() => void armBurstCapture()}
+                        >
+                          Queue Burst CSV
+                        </button>
                         <button className="btn-secondary btn-sm btn-intent-discover" onClick={() => void refreshBurstInfo()}>Burst Status</button>
                       </div>
+                      {actionGates?.burst_arm?.ok === false && (
+                        <p className="workflow-label">Blocked: {gateReasonHuman('burst_arm')}</p>
+                      )}
                       <div className="burst-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(burstProgressPct)}>
                         <span style={{ width: `${burstProgressPct}%` }} />
                       </div>
@@ -1750,13 +1856,13 @@ export default function App() {
                         <span className="action-rig-title">Arm</span>
                       </div>
                       <div className="row action-rig-row">
-                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={control.estop_latched || !compatOk} onClick={async () => {
+                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={control.estop_latched || !compatOk || (actionGates?.arm_prepare?.ok === false)} title={gateReason('arm_prepare')} onClick={async () => {
                           const c = await armPrepare();
                           setControl(c);
                           setArmAdvisory(null);
                           setMsg('Arm prepared. Press Confirm Arm to execute.');
                         }}>{strings.tune.prepareArm}</button>
-                        <button className="btn-primary btn-lg btn-intent-safety" disabled={!control.arm_prepared || control.estop_latched} onClick={async () => {
+                        <button className="btn-primary btn-lg btn-intent-safety" disabled={!control.arm_prepared || control.estop_latched || (actionGates?.arm_confirm?.ok === false)} title={gateReason('arm_confirm')} onClick={async () => {
                           try {
                             const r = await armConfirm();
                             setStatus(r.status);
@@ -1775,13 +1881,21 @@ export default function App() {
                             setMsg(`arm confirm error: ${(e as Error).message}`);
                           }
                         }}>{strings.tune.confirmArm}</button>
-                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" onClick={async () => {
+                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={actionGates?.disarm?.ok === false} title={gateReason('disarm')} onClick={async () => {
                           const r = await disarm();
                           setStatus(r.status);
                           if (r.control) setControl(r.control);
                           setMsg('Disarmed');
                         }}>{strings.tune.disarm}</button>
                       </div>
+                      {(actionGates?.arm_prepare?.ok === false || actionGates?.arm_confirm?.ok === false || actionGates?.disarm?.ok === false) && (
+                        <p className="workflow-label">
+                          Blocked:
+                          {actionGates?.arm_prepare?.ok === false ? ` Prepare(${gateReasonHuman('arm_prepare')})` : ''}
+                          {actionGates?.arm_confirm?.ok === false ? ` Confirm(${gateReasonHuman('arm_confirm')})` : ''}
+                          {actionGates?.disarm?.ok === false ? ` Disarm(${gateReasonHuman('disarm')})` : ''}
+                        </p>
+                      )}
                       {armAdvisory && (
                         <div className="compat-box action-rig-advisory">
                           <p><strong>Arm Advisory:</strong> {armAdvisory}</p>
@@ -1833,7 +1947,8 @@ export default function App() {
                         </button>
                         <button
                           className="btn-secondary btn-sm btn-intent-safety btn-cal-zero tune-cal-btn config-cal-zero-btn"
-                          disabled={control.estop_latched}
+                          disabled={control.estop_latched || (actionGates?.cal_zero?.ok === false)}
+                          title={gateReason('cal_zero')}
                           onClick={async () => {
                             const r = await calZero();
                             setStatus(r.status);
@@ -1844,6 +1959,9 @@ export default function App() {
                           {strings.tune.calZero}
                         </button>
                       </div>
+                      {actionGates?.cal_zero?.ok === false && (
+                        <p className="workflow-label">Blocked: {gateReasonHuman('cal_zero')}</p>
+                      )}
                     </div>
 
                     <div className="tune-param-rigs">
@@ -1857,7 +1975,8 @@ export default function App() {
                           <label className="tune-var-label">Ki<input className="tune-var-input" type="number" step="0.01" value={pid.ki} onChange={(e) => setPidDraft((p) => ({ ...p, ki: Number(e.target.value) }))} /></label>
                           <label className="tune-var-label">Kd<input className="tune-var-input" type="number" step="0.01" value={pid.kd} onChange={(e) => setPidDraft((p) => ({ ...p, kd: Number(e.target.value) }))} /></label>
                         </div>
-                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyPid()}>{strings.tune.applyPid}</button>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk || (actionGates?.pid?.ok === false)} title={gateReason('pid')} onClick={() => void applyPid()}>{strings.tune.applyPid}</button>
+                        {actionGates?.pid?.ok === false && <p className="workflow-label">Blocked: {gateReasonHuman('pid')}</p>}
                       </div>
 
                       <div className="action-rig tune-param-rig">
@@ -1869,7 +1988,8 @@ export default function App() {
                           <label className="tune-var-label">Kv<input className="tune-var-input" type="number" step="0.001" value={motion.kv} onChange={(e) => setMotionDraft((m) => ({ ...m, kv: Number(e.target.value) }))} /></label>
                           <label className="tune-var-label">Kx<input className="tune-var-input" type="number" step="0.0001" value={motion.kx} onChange={(e) => setMotionDraft((m) => ({ ...m, kx: Number(e.target.value) }))} /></label>
                         </div>
-                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyMotion()}>{strings.tune.applyMotion}</button>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk || (actionGates?.motion?.ok === false)} title={gateReason('motion')} onClick={() => void applyMotion()}>{strings.tune.applyMotion}</button>
+                        {actionGates?.motion?.ok === false && <p className="workflow-label">Blocked: {gateReasonHuman('motion')}</p>}
                       </div>
 
                       <div className="action-rig tune-param-rig">
@@ -1880,7 +2000,8 @@ export default function App() {
                         <div className="grid1 tune-vars-grid tune-vars-grid-single">
                           <label className="tune-var-label">{strings.tune.setpoint}<input className="tune-var-input" type="number" step="0.01" value={setpoint} onChange={(e) => setSetpointDraft(Number(e.target.value))} /></label>
                         </div>
-                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applySetpoint()}>{strings.tune.applySetpoint}</button>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk || (actionGates?.setpoint?.ok === false)} title={gateReason('setpoint')} onClick={() => void applySetpoint()}>{strings.tune.applySetpoint}</button>
+                        {actionGates?.setpoint?.ok === false && <p className="workflow-label">Blocked: {gateReasonHuman('setpoint')}</p>}
                       </div>
 
                       <div className="action-rig tune-param-rig">
@@ -1893,7 +2014,8 @@ export default function App() {
                           <label className="tune-var-label">Tip Deg<input className="tune-var-input" type="number" step="0.5" value={limits.tipDeg} onChange={(e) => setLimitsDraft((l) => ({ ...l, tipDeg: Number(e.target.value) }))} /></label>
                           <label className="tune-var-label">I Max<input className="tune-var-input" type="number" step="0.5" value={limits.iMax} onChange={(e) => setLimitsDraft((l) => ({ ...l, iMax: Number(e.target.value) }))} /></label>
                         </div>
-                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk} onClick={() => void applyLimits()}>Apply Limits</button>
+                        <button className="btn-primary btn-lg btn-intent-apply tune-param-apply" disabled={control.estop_latched || !compatOk || (actionGates?.limits?.ok === false)} title={gateReason('limits')} onClick={() => void applyLimits()}>Apply Limits</button>
+                        {actionGates?.limits?.ok === false && <p className="workflow-label">Blocked: {gateReasonHuman('limits')}</p>}
                       </div>
 
                       <div className="action-rig tune-param-rig">
@@ -1938,6 +2060,51 @@ export default function App() {
               </section>
 
               <aside className="tune-hud-rail" aria-label="Live feed HUD rail">
+                <section className="panel transport-quality-panel" aria-label="Transport quality">
+                  <div className="tool-panel-head">
+                    <h3>Transport Quality</h3>
+                    <span className="workflow-label">truth-path health and timing</span>
+                  </div>
+                  <div className="transport-quality-grid">
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">Bridge Link</span>
+                      <strong>{transportQuality.connected ? 'ONLINE' : 'OFFLINE'}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.link}`}>{transportQuality.tones.link.toUpperCase()}</span>
+                    </article>
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">Telemetry Age</span>
+                      <strong>{transportQuality.telemetryAgeMs != null ? `${transportQuality.telemetryAgeMs.toFixed(0)} ms` : 'n/a'}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.age}`}>{transportQuality.tones.age.toUpperCase()}</span>
+                    </article>
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">Feed Rate</span>
+                      <strong>{transportQuality.sampleRateHz > 0 ? `${transportQuality.sampleRateHz.toFixed(1)} Hz` : 'n/a'}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.rate}`}>{transportQuality.tones.rate.toUpperCase()}</span>
+                    </article>
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">Queue Depth</span>
+                      <strong>{transportQuality.queueDepth}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.queue}`}>{transportQuality.tones.queue.toUpperCase()}</span>
+                    </article>
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">P95 Latency</span>
+                      <strong>{transportQuality.p95LatencyMs != null ? `${transportQuality.p95LatencyMs.toFixed(0)} ms` : 'n/a'}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.latency}`}>{transportQuality.tones.latency.toUpperCase()}</span>
+                    </article>
+                    <article className="transport-quality-item">
+                      <span className="transport-quality-label">Errors / Timeouts</span>
+                      <strong>{transportQuality.commandsErr} / {transportQuality.timeouts}</strong>
+                      <span className={`hud-pill ${transportQuality.tones.error === 'bad' || transportQuality.tones.timeout === 'bad' ? 'bad' : transportQuality.tones.error === 'warn' || transportQuality.tones.timeout === 'warn' ? 'warn' : 'good'}`}>
+                        {transportQuality.tones.error === 'bad' || transportQuality.tones.timeout === 'bad'
+                          ? 'BAD'
+                          : transportQuality.tones.error === 'warn' || transportQuality.tones.timeout === 'warn'
+                            ? 'WARN'
+                            : 'GOOD'}
+                      </span>
+                    </article>
+                  </div>
+                </section>
+
                 <section className="panel input-hud-panel" aria-label="Live input HUDs">
                   <div className="tool-panel-head">
                     <h3>{strings.hud.title}</h3>

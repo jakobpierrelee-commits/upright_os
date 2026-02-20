@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from server import (  # noqa: E402
     TuningPreflightStore,
     _build_tuning_apply_signature,
+    _compute_action_gates,
     _detect_tuning_capabilities,
     _enforce_preflight_if_needed,
     _guard_limits_apply,
@@ -93,3 +94,49 @@ def test_enforce_preflight_requires_id_when_high_impact() -> None:
             current={"kp": 31.0, "ki": 0.05, "kd": 1.05},
             target={"kp": 33.0, "ki": 0.05, "kd": 1.05},
         )
+
+
+def test_compute_action_gates_blocks_when_telemetry_contract_missing() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={"mode": "SAFE_IDLE", "ang": "0.0"},
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+    )
+    assert gates["arm_prepare"]["ok"] is False
+    assert "telemetry_contract_incomplete" in gates["arm_prepare"]["reasons"]
+    assert gates["pid"]["ok"] is False
+    assert "telemetry_contract_incomplete" in gates["pid"]["reasons"]
+
+
+def test_compute_action_gates_allows_nominal_arm_prepare() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+    )
+    assert gates["arm_prepare"]["ok"] is True
+    assert gates["arm_prepare"]["reasons"] == []
+    assert gates["pid"]["ok"] is True
+
+
+def test_compute_action_gates_block_arm_confirm_until_prepared() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={"mode": "SAFE_IDLE", "ang": "0.0", "raw": "0.0", "gyro": "0.0", "out": "0.0", "kp": "31.0", "ki": "0.05", "kd": "1.05", "set": "0.0"},
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+    )
+    assert gates["arm_confirm"]["ok"] is False
+    assert "arm_not_prepared" in gates["arm_confirm"]["reasons"]
