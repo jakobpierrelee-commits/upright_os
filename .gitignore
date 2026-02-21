@@ -7,6 +7,13 @@ dist/
 build/
 *.log
 .venv/
+.playwright/
+.playwright-cli/
+playwright-report/
+test-results/
+app/ui/ops-console/e2e/.auth/
+app/ui/ops-console/playwright-report/
+app/ui/ops-console/test-results/
 
 *.tsbuildinfo
 

@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "guardrails": "./scripts/guardrails.sh",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:related": "vitest related --run",
+    "test:changed": "./scripts/vitest_changed.sh",
+    "e2e:visual": "playwright test e2e/setup-visual.spec.ts",
+    "e2e:visual:update": "playwright test e2e/setup-visual.spec.ts --update-snapshots"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -19,6 +23,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
     "@types/react": "^18.2.66",

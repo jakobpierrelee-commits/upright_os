@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^(app/bridge/|scripts/|tools/).+\.py$
+      - id: ruff-format
+        files: ^(app/bridge/|scripts/|tools/).+\.py$
+  - repo: local
+    hooks:
+      - id: prd-traceability-check
+        name: PRD traceability check
+        entry: python3 scripts/prd_traceability_check.py --quiet --prd docs/PRD_EMBEDDED_VECTORING.md
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
