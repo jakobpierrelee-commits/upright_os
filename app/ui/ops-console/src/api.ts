@@ -72,6 +72,18 @@ export type FirmwareBoards = {
   error?: string;
 };
 
+export type FirmwareSketchFolders = {
+  ok: boolean;
+  folders: string[];
+  default_folder?: string;
+};
+
+export type FirmwarePickedSketchFolder = {
+  ok: boolean;
+  path: string;
+  has_ino: boolean;
+};
+
 export type UnifiedFirmwareSchema = {
   version: string;
   required: {
@@ -362,6 +374,47 @@ export type ReadinessCheck = {
   detail: string;
 };
 
+export type SetupValidationStatus = 'pass' | 'warn' | 'fail' | 'error' | 'timeout' | 'unavailable';
+
+export type SetupCompatTestResult = {
+  status: SetupValidationStatus;
+  blocking_issues: string[];
+  warnings: string[];
+  recommended_fix_prompts: string[];
+  compat: CompatReport;
+  tested_at: number;
+};
+
+export type SetupSmokeCheckResult = {
+  status: SetupValidationStatus;
+  checks: Array<{
+    id: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  failure_summary: string;
+  tested_at: number;
+};
+
+export type SetupOverwatchCheckResult = {
+  status: SetupValidationStatus;
+  overwatch: OverwatchReport;
+  tested_at: number;
+};
+
+export type SetupValidationAttempt = {
+  attempt_id: string;
+  test_type: 'compat' | 'smoke' | string;
+  status: SetupValidationStatus | string;
+  created_at: number;
+  sketch_revision: string;
+  sketch_hash: string;
+  action_source: string;
+  profile_id: string;
+  profile_label: string;
+  result: Record<string, unknown>;
+};
+
 export type V2Readiness = {
   contract_version_detected: 'v1' | 'v2' | 'unknown';
   v1_ok: boolean;
@@ -572,14 +625,77 @@ export async function getLines(n = 120): Promise<string[]> {
 }
 
 
-export async function probeCompat(): Promise<CompatReport> {
-  const d = await req<{ ok: true; compat: CompatReport }>('/probe/compat');
+export async function probeCompat(profile?: string): Promise<CompatReport> {
+  const params = new URLSearchParams();
+  if (profile && profile.trim()) params.set('profile', profile.trim());
+  const qs = params.toString();
+  const d = await req<{ ok: true; compat: CompatReport }>(`/probe/compat${qs ? `?${qs}` : ''}`);
   return d.compat;
 }
 
 export async function probeConnect(): Promise<ConnectProbeReport> {
   const d = await req<{ ok: true; probe: ConnectProbeReport }>('/probe/connect');
   return d.probe;
+}
+
+type SetupAttemptContext = { sketchRevision?: string; profileId?: string; profileLabel?: string };
+
+export async function setupCompatTest(ctx: SetupAttemptContext = {}): Promise<{ compat: SetupCompatTestResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; compat_test: SetupCompatTestResult; attempt?: SetupValidationAttempt }>('/v1/setup/compat-test', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { compat: d.compat_test, attempt: d.attempt };
+}
+
+export async function setupSmokeCheck(ctx: SetupAttemptContext = {}): Promise<{ smoke: SetupSmokeCheckResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; smoke_check: SetupSmokeCheckResult; attempt?: SetupValidationAttempt }>('/v1/setup/smoke-check', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { smoke: d.smoke_check, attempt: d.attempt };
+}
+
+export async function setupAttemptHistory(
+  limit = 40,
+  cursor = '',
+  kind: 'all' | 'compat' | 'smoke' | 'overwatch' = 'all',
+): Promise<{ attempts: SetupValidationAttempt[]; nextCursor: string; hasMore: boolean }> {
+  const params = new URLSearchParams();
+  params.set('limit', String(Math.max(1, limit)));
+  if (cursor) params.set('cursor', cursor);
+  params.set('kind', kind);
+  const d = await req<{ ok: true; attempts: SetupValidationAttempt[]; next_cursor?: string; has_more?: boolean }>(
+    `/v1/setup/attempt-history?${params.toString()}`,
+  );
+  return {
+    attempts: Array.isArray(d.attempts) ? d.attempts : [],
+    nextCursor: String(d.next_cursor ?? ''),
+    hasMore: Boolean(d.has_more),
+  };
+}
+
+export async function setupOverwatchCheck(ctx: SetupAttemptContext = {}): Promise<{ overwatch: SetupOverwatchCheckResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; overwatch_check: SetupOverwatchCheckResult; attempt?: SetupValidationAttempt }>('/v1/setup/overwatch-check', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { overwatch: d.overwatch_check, attempt: d.attempt };
 }
 
 export async function profilesList(): Promise<RobotProfilesState> {
@@ -710,6 +826,19 @@ export async function firmwareWriteSketch(content: string, path?: string): Promi
 export async function firmwareBoards(): Promise<FirmwareBoards> {
   const d = await req<{ ok: true; boards: FirmwareBoards }>('/firmware/boards');
   return d.boards;
+}
+
+export async function firmwareSketchFolders(): Promise<FirmwareSketchFolders> {
+  const d = await req<{ ok: true; sketch_folders: FirmwareSketchFolders }>('/firmware/sketch-folders');
+  return d.sketch_folders;
+}
+
+export async function firmwarePickSketchFolder(): Promise<FirmwarePickedSketchFolder> {
+  const d = await req<{ ok: true; picked: FirmwarePickedSketchFolder }>('/firmware/sketch-folder/pick', {
+    method: 'POST',
+    body: '{}',
+  });
+  return d.picked;
 }
 
 export async function firmwareUnifiedSchema(): Promise<UnifiedFirmwareSchema> {
@@ -898,10 +1027,14 @@ export async function aiStatus(): Promise<{ ai: AiStatus; history: AiHistoryItem
   return { ai: d.ai, history: d.history, threads: d.threads ?? [] };
 }
 
-export async function aiChat(message: string, threadId?: string): Promise<{ reply: string; ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }> {
+export async function aiChat(
+  message: string,
+  threadId?: string,
+  hardwareContext?: Record<string, unknown>,
+): Promise<{ reply: string; ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }> {
   const d = await req<{ ok: true; reply: string; ai: AiStatus; history: AiHistoryItem[]; threads?: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }>('/ai/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, thread_id: threadId }),
+    body: JSON.stringify({ message, thread_id: threadId, hardware_context: hardwareContext }),
   }, 45000);
   return { reply: d.reply, ai: d.ai, history: d.history, threads: d.threads ?? [], thread_id: d.thread_id, apply: d.apply };
 }
@@ -937,6 +1070,7 @@ export async function aiChatWithTools(
     robotId?: string;
     board?: string;
     port?: string;
+    hardwareContext?: Record<string, unknown>;
   },
 ): Promise<AiChatToolsResponse> {
   const d = await req<{
@@ -958,6 +1092,7 @@ export async function aiChatWithTools(
       robot_id: options?.robotId,
       board: options?.board,
       port: options?.port,
+      hardware_context: options?.hardwareContext,
     }),
   }, 330000);
   return {
@@ -1011,6 +1146,7 @@ export async function aiConfirmUpload(
 export async function aiChatStream(
   message: string,
   threadId: string | undefined,
+  hardwareContext: Record<string, unknown> | undefined,
   handlers: {
     onStart?: () => void;
     onDelta?: (text: string) => void;
@@ -1027,7 +1163,7 @@ export async function aiChatStream(
           'Content-Type': 'application/json',
           ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
         },
-        body: JSON.stringify({ message, thread_id: threadId }),
+        body: JSON.stringify({ message, thread_id: threadId, hardware_context: hardwareContext }),
       });
       break;
     } catch (e) {
@@ -1184,8 +1320,21 @@ export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-mini'): Pr
   return d.openai;
 }
 
-export async function authOpenAiStatus(): Promise<{ configured: boolean; model: string | null }> {
-  const d = await req<{ ok: true; openai: { configured: boolean; model: string | null } }>('/auth/openai-key/status');
+export async function authOpenAiStatus(): Promise<{
+  configured: boolean;
+  model: string | null;
+  runtime_has_key?: boolean;
+  runtime_key_source?: 'user' | 'env' | null;
+}> {
+  const d = await req<{
+    ok: true;
+    openai: {
+      configured: boolean;
+      model: string | null;
+      runtime_has_key?: boolean;
+      runtime_key_source?: 'user' | 'env' | null;
+    };
+  }>('/auth/openai-key/status');
   return d.openai;
 }
 

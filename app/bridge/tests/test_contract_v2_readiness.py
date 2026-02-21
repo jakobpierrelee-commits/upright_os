@@ -7,7 +7,7 @@ Per PRD_CALIBRATION_ANTIDRIFT_V1.md acceptance criteria.
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,6 +17,7 @@ from server import detect_contract_readiness
 
 # Import constants directly from the module namespace
 import server
+
 V1_REQUIRED_FIELDS = server.V1_REQUIRED_FIELDS
 V1_GYRO_ALIASES = server.V1_GYRO_ALIASES
 V2_READINESS_FIELDS = server.V2_READINESS_FIELDS
@@ -26,6 +27,7 @@ V2_OPTIONAL_FIELDS = server.V2_OPTIONAL_FIELDS
 # ============================================================================
 # detect_contract_readiness Tests
 # ============================================================================
+
 
 class TestDetectContractReadiness:
     """Tests for the detect_contract_readiness function."""
@@ -115,7 +117,14 @@ class TestDetectContractReadiness:
 
         assert result["v1_ok"] is False
         # Check that the v1 check mentions gyro in its detail
-        v1_check = next((c for c in result["readiness_checks"] if c["check"] == "v1_required_fields"), None)
+        v1_check = next(
+            (
+                c
+                for c in result["readiness_checks"]
+                if c["check"] == "v1_required_fields"
+            ),
+            None,
+        )
         assert v1_check is not None
         assert v1_check["status"] == "fail"
         assert "gyro" in v1_check["detail"]
@@ -264,7 +273,7 @@ class TestDetectContractReadiness:
 
         cal_check = next(
             (c for c in result["readiness_checks"] if c["check"] == "calibration_data"),
-            None
+            None,
         )
         assert cal_check is not None
         assert cal_check["status"] == "pass"
@@ -289,7 +298,7 @@ class TestDetectContractReadiness:
 
         outer_check = next(
             (c for c in result["readiness_checks"] if c["check"] == "outer_loop_ready"),
-            None
+            None,
         )
         assert outer_check is not None
         assert outer_check["status"] == "pass"
@@ -298,6 +307,7 @@ class TestDetectContractReadiness:
 # ============================================================================
 # Backward Compatibility Tests
 # ============================================================================
+
 
 class TestBackwardCompatibility:
     """Tests to ensure v1 probe behavior is unchanged."""
@@ -334,6 +344,7 @@ class TestBackwardCompatibility:
 # Integration Tests with run_compat_probe / run_connect_probe
 # ============================================================================
 
+
 class TestProbeIntegration:
     """Integration tests for probe functions with v2 readiness."""
 
@@ -354,7 +365,19 @@ class TestProbeIntegration:
             "set": 0.0,
         }
         # Mock HELP command to return expected commands
-        mock_gateway.command.return_value = {"lines": ["GET", "ARM", "DISARM", "PID", "MOTION", "SETPOINT", "LIMITS", "CAL ZERO", "SAVECFG"]}
+        mock_gateway.command.return_value = {
+            "lines": [
+                "GET",
+                "ARM",
+                "DISARM",
+                "PID",
+                "MOTION",
+                "SETPOINT",
+                "LIMITS",
+                "CAL ZERO",
+                "SAVECFG",
+            ]
+        }
 
         result = run_compat_probe(mock_gateway)
 
@@ -369,12 +392,130 @@ class TestProbeIntegration:
         assert result["v1_ok"] is True
         assert result["v2_ready"] is False
 
+    def test_compat_probe_supports_lean_profile_override(self):
+        """run_compat_probe should enforce lean_v1 command contract when requested."""
+        from server import run_compat_probe
+
+        mock_gateway = MagicMock()
+        mock_gateway.get_status.return_value = {
+            "mode": "SAFE_IDLE",
+            "ang": 0.12,
+            "raw": 0.10,
+            "gyro": 0.01,
+            "out": 0.0,
+            "kp": 18.0,
+            "ki": 0.1,
+            "kd": 0.6,
+            "set": 0.0,
+        }
+        mock_gateway.command.return_value = {
+            "lines": [
+                "GET",
+                "HELP",
+                "ARM",
+                "DISARM",
+                "ESTOP",
+                "FAULTCLR",
+                "PID",
+                "SETPOINT",
+                "LIMITS",
+                "CAL ZERO",
+                "SAVECFG",
+            ]
+        }
+
+        result = run_compat_probe(mock_gateway, profile_override="lean_v1")
+
+        assert result["profile"] == "lean_v1"
+        assert result["missing_fields"] == []
+        assert result["blocking_missing_commands"] == []
+        assert result["ok"] is True
+
+    def test_compat_probe_lean_profile_flags_missing_estop(self):
+        """lean_v1 should fail if ESTOP is absent from HELP output."""
+        from server import run_compat_probe
+
+        mock_gateway = MagicMock()
+        mock_gateway.get_status.return_value = {
+            "mode": "SAFE_IDLE",
+            "ang": 0.12,
+            "raw": 0.10,
+            "gyro": 0.01,
+            "out": 0.0,
+            "kp": 18.0,
+            "ki": 0.1,
+            "kd": 0.6,
+            "set": 0.0,
+        }
+        mock_gateway.command.return_value = {
+            "lines": [
+                "GET",
+                "HELP",
+                "ARM",
+                "DISARM",
+                "FAULTCLR",
+                "PID",
+                "SETPOINT",
+                "LIMITS",
+                "CAL ZERO",
+            ]
+        }
+
+        result = run_compat_probe(mock_gateway, profile_override="lean_v1")
+
+        assert result["profile"] == "lean_v1"
+        assert "ESTOP" in result["missing_commands"]
+        assert "ESTOP" in result["blocking_missing_commands"]
+        assert result["ok"] is False
+
+    def test_compat_probe_lean_profile_flags_missing_savecfg(self):
+        """lean_v1 should fail if SAVECFG is absent from HELP output."""
+        from server import run_compat_probe
+
+        mock_gateway = MagicMock()
+        mock_gateway.get_status.return_value = {
+            "mode": "SAFE_IDLE",
+            "ang": 0.12,
+            "raw": 0.10,
+            "gyro": 0.01,
+            "out": 0.0,
+            "kp": 18.0,
+            "ki": 0.1,
+            "kd": 0.6,
+            "set": 0.0,
+        }
+        mock_gateway.command.return_value = {
+            "lines": [
+                "GET",
+                "HELP",
+                "ARM",
+                "DISARM",
+                "ESTOP",
+                "FAULTCLR",
+                "PID",
+                "SETPOINT",
+                "LIMITS",
+                "CAL ZERO",
+            ]
+        }
+
+        result = run_compat_probe(mock_gateway, profile_override="lean_v1")
+
+        assert result["profile"] == "lean_v1"
+        assert "SAVECFG" in result["missing_commands"]
+        assert "SAVECFG" in result["blocking_missing_commands"]
+        assert result["ok"] is False
+
     def test_connect_probe_includes_v2_fields(self):
         """run_connect_probe should include v2 readiness fields in output."""
         from server import run_connect_probe
 
         mock_gateway = MagicMock()
-        mock_gateway.health.return_value = {"connected": True, "port": "/dev/ttyUSB0", "baud": 115200}
+        mock_gateway.health.return_value = {
+            "connected": True,
+            "port": "/dev/ttyUSB0",
+            "baud": 115200,
+        }
         mock_gateway.get_status.return_value = {
             "mode": "BALANCING",
             "ang": 1.23,
@@ -403,7 +544,11 @@ class TestProbeIntegration:
         from server import run_connect_probe
 
         mock_gateway = MagicMock()
-        mock_gateway.health.return_value = {"connected": True, "port": "/dev/ttyUSB0", "baud": 115200}
+        mock_gateway.health.return_value = {
+            "connected": True,
+            "port": "/dev/ttyUSB0",
+            "baud": 115200,
+        }
         mock_gateway.get_status.return_value = {
             "mode": "BALANCING",
             "ang": 1.23,
@@ -427,7 +572,11 @@ class TestProbeIntegration:
         from server import run_connect_probe
 
         mock_gateway = MagicMock()
-        mock_gateway.health.return_value = {"connected": True, "port": "/dev/ttyUSB0", "baud": 115200}
+        mock_gateway.health.return_value = {
+            "connected": True,
+            "port": "/dev/ttyUSB0",
+            "baud": 115200,
+        }
         mock_gateway.get_status.return_value = {
             "mode": "BALANCING",
             "ang": 1.23,

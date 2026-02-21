@@ -1,0 +1,120 @@
+{
+  "version": "1.0",
+  "default_profile": "baseline_v1",
+  "required_fields": [
+    "mode",
+    "ang",
+    "raw",
+    "gyro|gyr|gx",
+    "out",
+    "kp",
+    "ki",
+    "kd",
+    "set"
+  ],
+  "profiles": {
+    "lean_v1": {
+      "required_commands": [
+        "GET",
+        "HELP",
+        "ARM",
+        "DISARM",
+        "ESTOP",
+        "FAULTCLR",
+        "PID",
+        "SETPOINT",
+        "LIMITS",
+        "CAL ZERO",
+        "SAVECFG"
+      ],
+      "optional_commands": [
+        "IDENT",
+        "LOGT",
+        "LOGCSV",
+        "BURSTCSV",
+        "CSVHDR"
+      ],
+      "warn_only_missing_commands": []
+    },
+    "baseline_v1": {
+      "required_commands": [
+        "GET",
+        "ARM",
+        "DISARM",
+        "PID",
+        "SETPOINT",
+        "LIMITS",
+        "CAL ZERO",
+        "SAVECFG",
+        "FAULTCLR"
+      ],
+      "optional_commands": [
+        "IDENT",
+        "MOTION",
+        "FILTER",
+        "KAL",
+        "LOGT",
+        "LOGCSV",
+        "BURSTCSV",
+        "CSVHDR"
+      ],
+      "warn_only_missing_commands": [
+        "MOTION"
+      ]
+    },
+    "profiled_runtime_v1": {
+      "required_commands": [
+        "GET",
+        "ARM",
+        "DISARM",
+        "PID",
+        "SETPOINT",
+        "LIMITS",
+        "CAL ZERO",
+        "SAVECFG",
+        "FAULTCLR"
+      ],
+      "optional_commands": [
+        "IDENT",
+        "MOTION",
+        "FILTER",
+        "KAL",
+        "LOGT",
+        "LOGCSV",
+        "BURSTCSV",
+        "CSVHDR",
+        "LOADCFG",
+        "DEFAULTCFG"
+      ],
+      "warn_only_missing_commands": [
+        "MOTION"
+      ]
+    },
+    "control_lab_v1": {
+      "required_commands": [
+        "GET",
+        "ARM",
+        "DISARM",
+        "PID",
+        "SETPOINT",
+        "LIMITS",
+        "MOTION",
+        "FILTER",
+        "KAL",
+        "CAL ZERO",
+        "SAVECFG",
+        "FAULTCLR"
+      ],
+      "optional_commands": [
+        "IDENT",
+        "LOGT",
+        "LOGCSV",
+        "BURSTCSV",
+        "CSVHDR",
+        "CC",
+        "TF"
+      ],
+      "warn_only_missing_commands": []
+    }
+  }
+}
