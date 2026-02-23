@@ -65,6 +65,34 @@ except ImportError:
         PreArmSafetyGate,
         run_prearm_hardware_check as _run_prearm_hardware_check_impl,
     )
+try:
+    from app.bridge.clean_firmware_ops import (
+        handle_clean_firmware_compile,
+        handle_clean_firmware_upload,
+        handle_clean_known_good_recovery,
+        handle_clean_upload_precheck,
+        resolve_clean_upload_inputs,
+    )
+except ImportError:
+    from clean_firmware_ops import (  # type: ignore
+        handle_clean_firmware_compile,
+        handle_clean_firmware_upload,
+        handle_clean_known_good_recovery,
+        handle_clean_upload_precheck,
+        resolve_clean_upload_inputs,
+    )
+try:
+    from app.bridge.clean_contracts import (
+        validate_clean_preflight_response,
+        validate_firmware_targets_response,
+        validate_prearm_precheck_response,
+    )
+except ImportError:
+    from clean_contracts import (  # type: ignore
+        validate_clean_preflight_response,
+        validate_firmware_targets_response,
+        validate_prearm_precheck_response,
+    )
 
 try:
     from app.bridge.codex_agent import CodexAgent, create_codex_agent
@@ -9405,9 +9433,9 @@ def build_handler(
                         self, 200, {"ok": True, "boards": firmware.list_boards()}
                     )
                 if u.path == "/firmware/targets":
-                    return _json(
-                        self, 200, {"ok": True, "targets": firmware.list_targets()}
-                    )
+                    payload = {"ok": True, "targets": firmware.list_targets()}
+                    validate_firmware_targets_response(payload)
+                    return _json(self, 200, payload)
                 if u.path == "/firmware/runtime-manifest":
                     q = parse_qs(u.query)
                     sketch = (
@@ -10202,171 +10230,37 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "attachment": attachment})
 
                 if u.path == "/agent/clean/firmware/compile":
-                    sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    fqbn = str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
-                    idempotency_key = (
-                        str(body.get("idempotency_key", "")).strip() or None
+                    inputs = resolve_clean_upload_inputs(
+                        body=body,
+                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
+                        default_fqbn=_clean_default_fqbn(),
                     )
-                    t0 = int(time.time() * 1000)
-                    try:
-                        st = firmware.compile(
-                            sketch=sketch,
-                            fqbn=fqbn,
-                            idempotency_key=idempotency_key,
-                        )
-                        tool_call = _clean_tool_call(
-                            name="firmware_compile",
-                            arguments={
-                                "sketch": sketch,
-                                "fqbn": fqbn,
-                                "idempotency_key": idempotency_key,
-                            },
-                            ok=True,
-                            data={
-                                "state": str(st.get("state", "")),
-                                "phase": str(st.get("phase", "")),
-                                "returncode": st.get("returncode"),
-                                "idempotent_reused": bool(
-                                    st.get("idempotent_reused", False)
-                                ),
-                            },
-                            started_ms=t0,
-                        )
-                    except Exception as exc:
-                        if str(exc) == "operation_in_progress":
-                            return _json(
-                                self,
-                                409,
-                                {
-                                    "ok": False,
-                                    "error": "operation_in_progress",
-                                    "firmware": firmware.status(),
-                                    "tool_call": _clean_tool_call(
-                                        name="firmware_compile",
-                                        arguments={
-                                            "sketch": sketch,
-                                            "fqbn": fqbn,
-                                            "idempotency_key": idempotency_key,
-                                        },
-                                        ok=False,
-                                        error="operation_in_progress",
-                                        started_ms=t0,
-                                    ),
-                                },
-                            )
-                        return _json(
-                            self,
-                            500,
-                            {
-                                "ok": False,
-                                "error": str(exc),
-                                "tool_call": _clean_tool_call(
-                                    name="firmware_compile",
-                                    arguments={
-                                        "sketch": sketch,
-                                        "fqbn": fqbn,
-                                        "idempotency_key": idempotency_key,
-                                    },
-                                    ok=False,
-                                    error=str(exc),
-                                    started_ms=t0,
-                                ),
-                            },
-                        )
-                    return _json(
-                        self, 200, {"ok": True, "firmware": st, "tool_call": tool_call}
+                    code, payload = handle_clean_firmware_compile(
+                        firmware=firmware,
+                        sketch=str(inputs.get("sketch") or ""),
+                        fqbn=str(inputs.get("fqbn") or ""),
+                        idempotency_key=inputs.get("idempotency_key"),
+                        tool_call_builder=_clean_tool_call,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/firmware/upload":
-                    sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    fqbn = str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
-                    idempotency_key = (
-                        str(body.get("idempotency_key", "")).strip() or None
+                    inputs = resolve_clean_upload_inputs(
+                        body=body,
+                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
+                        default_fqbn=_clean_default_fqbn(),
                     )
-                    port = (
-                        str(body.get("port", "")).strip()
-                        or str(os.environ.get("UPRIGHT_CLEAN_UPLOAD_PORT", "")).strip()
-                        or None
+                    code, payload = handle_clean_firmware_upload(
+                        firmware=firmware,
+                        gateway=gateway,
+                        prearm_safety=prearm_safety,
+                        sketch=str(inputs.get("sketch") or ""),
+                        fqbn=str(inputs.get("fqbn") or ""),
+                        port=inputs.get("port"),
+                        idempotency_key=inputs.get("idempotency_key"),
+                        tool_call_builder=_clean_tool_call,
                     )
-                    t0 = int(time.time() * 1000)
-                    try:
-                        st = firmware.upload_guarded(
-                            gateway=gateway,
-                            sketch=sketch,
-                            fqbn=fqbn,
-                            port=port,
-                            idempotency_key=idempotency_key,
-                        )
-                        prearm_safety.require("firmware_upload_guarded")
-                        tool_call = _clean_tool_call(
-                            name="firmware_upload_guarded",
-                            arguments={
-                                "sketch": sketch,
-                                "fqbn": fqbn,
-                                "port": port,
-                                "idempotency_key": idempotency_key,
-                            },
-                            ok=True,
-                            data={
-                                "state": str(st.get("state", "")),
-                                "phase": str(st.get("phase", "")),
-                                "returncode": st.get("returncode"),
-                                "idempotent_reused": bool(
-                                    st.get("idempotent_reused", False)
-                                ),
-                            },
-                            started_ms=t0,
-                        )
-                    except Exception as exc:
-                        if str(exc) == "operation_in_progress":
-                            return _json(
-                                self,
-                                409,
-                                {
-                                    "ok": False,
-                                    "error": "operation_in_progress",
-                                    "firmware": firmware.status(),
-                                    "tool_call": _clean_tool_call(
-                                        name="firmware_upload_guarded",
-                                        arguments={
-                                            "sketch": sketch,
-                                            "fqbn": fqbn,
-                                            "port": port,
-                                            "idempotency_key": idempotency_key,
-                                        },
-                                        ok=False,
-                                        error="operation_in_progress",
-                                        started_ms=t0,
-                                    ),
-                                },
-                            )
-                        return _json(
-                            self,
-                            500,
-                            {
-                                "ok": False,
-                                "error": str(exc),
-                                "tool_call": _clean_tool_call(
-                                    name="firmware_upload_guarded",
-                                    arguments={
-                                        "sketch": sketch,
-                                        "fqbn": fqbn,
-                                        "port": port,
-                                        "idempotency_key": idempotency_key,
-                                    },
-                                    ok=False,
-                                    error=str(exc),
-                                    started_ms=t0,
-                                ),
-                            },
-                        )
-                    return _json(
-                        self, 200, {"ok": True, "firmware": st, "tool_call": tool_call}
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/firmware/upload/precheck":
                     requested_port = str(body.get("port", "")).strip()
@@ -10376,14 +10270,15 @@ def build_handler(
                     requested_sketch = str(
                         body.get("sketch", "")
                     ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    payload = _clean_upload_precheck_payload(
-                        gateway=gateway,
-                        firmware=firmware,
+                    code, payload = handle_clean_upload_precheck(
+                        precheck_builder=lambda **kwargs: _clean_upload_precheck_payload(
+                            gateway=gateway, firmware=firmware, **kwargs
+                        ),
                         requested_port=requested_port,
                         requested_fqbn=requested_fqbn,
                         requested_sketch=requested_sketch,
                     )
-                    return _json(self, 200, payload)
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/recovery/known-good":
                     requested_port = str(body.get("port", "")).strip()
@@ -10393,136 +10288,22 @@ def build_handler(
                     requested_sketch = str(
                         body.get("sketch", "")
                     ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    t0 = int(time.time() * 1000)
-                    steps: list[Dict[str, Any]] = []
-
-                    # 1) Soft bridge recover (deterministic in-process alternative to process restart)
-                    try:
-                        gateway.close()
-                    except Exception:
-                        pass
-                    try:
-                        gateway.connect()
-                        ready = gateway.wait_ready(timeout=6.0)
-                        steps.append(
-                            {
-                                "id": "bridge_recover",
-                                "ok": True,
-                                "detail": f"bridge recovered: mode={ready.get('mode', 'UNKNOWN')}",
-                            }
-                        )
-                    except Exception as exc:
-                        steps.append(
-                            {
-                                "id": "bridge_recover",
-                                "ok": False,
-                                "detail": str(exc),
-                            }
-                        )
-
-                    # 2) Detect current board/ports
-                    boards = firmware.list_boards()
-                    detected_ports: list[str] = []
-                    for row in boards.get("ports") or []:
-                        if not isinstance(row, dict):
-                            continue
-                        addr = str(row.get("address") or "").strip()
-                        if addr:
-                            detected_ports.append(addr)
-                    recommended_port = str(boards.get("recommended_port") or "").strip()
-                    effective_port = requested_port or recommended_port
-                    steps.append(
-                        {
-                            "id": "detect",
-                            "ok": bool(boards.get("ok", False)),
-                            "detail": f"detected_ports={len(detected_ports)} selected_port={effective_port or 'none'}",
-                        }
-                    )
-
-                    # 3) Precheck with selected/effective port
-                    payload = _clean_upload_precheck_payload(
+                    code, payload = handle_clean_known_good_recovery(
                         gateway=gateway,
                         firmware=firmware,
-                        requested_port=effective_port,
+                        control=control,
+                        prearm_safety=prearm_safety,
+                        requested_port=requested_port,
                         requested_fqbn=requested_fqbn,
                         requested_sketch=requested_sketch,
+                        precheck_builder=lambda **kwargs: _clean_upload_precheck_payload(
+                            gateway=gateway, firmware=firmware, **kwargs
+                        ),
+                        normalize_status=_normalize_status_for_hud,
+                        resolve_action_gates=_resolve_action_gates,
+                        tool_call_builder=_clean_tool_call,
                     )
-                    steps.append(
-                        {
-                            "id": "precheck",
-                            "ok": bool(payload.get("ready", False)),
-                            "detail": (
-                                "ready"
-                                if bool(payload.get("ready", False))
-                                else ",".join(
-                                    [
-                                        str(x)
-                                        for x in list(
-                                            payload.get("hard_fail_reasons") or []
-                                        )
-                                    ]
-                                )
-                            ),
-                        }
-                    )
-
-                    # 4) Validate status/gates
-                    h = gateway.health()
-                    st_raw = dict(h.get("last_status", {}))
-                    normalized = _normalize_status_for_hud(st_raw)
-                    st = dict(normalized.get("status", st_raw))
-                    gates = _resolve_action_gates(
-                        gateway, control, prearm_gate=prearm_safety, status_override=st
-                    )
-                    arm_prepare_ok = bool(
-                        (gates.get("arm_prepare") or {}).get("ok", False)
-                    )
-                    status_ok = bool(h.get("connected", False)) and len(st) > 0
-                    steps.append(
-                        {
-                            "id": "status_validate",
-                            "ok": status_ok,
-                            "detail": f"connected={bool(h.get('connected', False))} status_keys={len(st)} arm_prepare_ok={arm_prepare_ok}",
-                        }
-                    )
-
-                    ok = all(bool(step.get("ok", False)) for step in steps)
-                    report = {
-                        "ok": ok,
-                        "steps": steps,
-                        "selected_port": effective_port,
-                        "detected_ports": detected_ports,
-                        "precheck": payload,
-                        "status": st,
-                        "action_gates": gates,
-                    }
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": ok,
-                            "recovery": report,
-                            "tool_call": _clean_tool_call(
-                                name="known_good_recovery",
-                                arguments={
-                                    "fqbn": requested_fqbn,
-                                    "port": effective_port,
-                                    "sketch": requested_sketch,
-                                },
-                                ok=ok,
-                                data={
-                                    "step_count": len(steps),
-                                    "passed_steps": sum(
-                                        1
-                                        for step in steps
-                                        if bool(step.get("ok", False))
-                                    ),
-                                },
-                                error="" if ok else "known_good_recovery_failed",
-                                started_ms=t0,
-                            ),
-                        },
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/thread/new":
                     mode = str(body.get("mode", "")).strip() or "app_dev"
@@ -10864,99 +10645,93 @@ def build_handler(
                         reason = "runtime_manifest_invalid:" + ", ".join(
                             list(manifest_gate.get("errors") or [])[:5]
                         )
-                        return _json(
-                            self,
-                            200,
-                            {
-                                "ok": False,
-                                "mode": mode,
-                                "failures": 1,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                },
-                                "results": [
-                                    {
-                                        "id": "manifest_gate",
-                                        "ok": False,
-                                        "dt_ms": 0,
-                                        "limit_ms": max_ms,
-                                        "expect_tools": False,
-                                        "tool_calls": [],
-                                        "error": reason,
-                                        "reply": "runtime manifest gate blocked preflight",
-                                    }
-                                ],
+                        payload = {
+                            "ok": False,
+                            "mode": mode,
+                            "failures": 1,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "gate": {
+                                "runtime_manifest": manifest_gate,
+                                "manifest_profile_compat": compat_gate,
+                                "active_profile_id": active_profile_id or None,
+                                "fail_closed": True,
                             },
-                        )
+                            "results": [
+                                {
+                                    "id": "manifest_gate",
+                                    "ok": False,
+                                    "dt_ms": 0,
+                                    "limit_ms": max_ms,
+                                    "expect_tools": False,
+                                    "tool_calls": [],
+                                    "error": reason,
+                                    "reply": "runtime manifest gate blocked preflight",
+                                }
+                            ],
+                        }
+                        validate_clean_preflight_response(payload)
+                        return _json(self, 200, payload)
                     if not bool(compat_gate.get("ok", False)):
                         reason = "runtime_manifest_profile_incompatible:" + ", ".join(
                             list(compat_gate.get("errors") or [])[:5]
                         )
-                        return _json(
-                            self,
-                            200,
-                            {
-                                "ok": False,
-                                "mode": mode,
-                                "failures": 1,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                },
-                                "results": [
-                                    {
-                                        "id": "manifest_profile_compat_gate",
-                                        "ok": False,
-                                        "dt_ms": 0,
-                                        "limit_ms": max_ms,
-                                        "expect_tools": False,
-                                        "tool_calls": [],
-                                        "error": reason,
-                                        "reply": "runtime manifest/profile compatibility gate blocked preflight",
-                                    }
-                                ],
+                        payload = {
+                            "ok": False,
+                            "mode": mode,
+                            "failures": 1,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "gate": {
+                                "runtime_manifest": manifest_gate,
+                                "manifest_profile_compat": compat_gate,
+                                "active_profile_id": active_profile_id or None,
+                                "fail_closed": True,
                             },
-                        )
+                            "results": [
+                                {
+                                    "id": "manifest_profile_compat_gate",
+                                    "ok": False,
+                                    "dt_ms": 0,
+                                    "limit_ms": max_ms,
+                                    "expect_tools": False,
+                                    "tool_calls": [],
+                                    "error": reason,
+                                    "reply": "runtime manifest/profile compatibility gate blocked preflight",
+                                }
+                            ],
+                        }
+                        validate_clean_preflight_response(payload)
+                        return _json(self, 200, payload)
                     if gate_only:
-                        return _json(
-                            self,
-                            200,
-                            {
-                                "ok": True,
-                                "mode": mode,
-                                "failures": 0,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                    "gate_only": True,
-                                },
-                                "results": [
-                                    {
-                                        "id": "manifest_gate",
-                                        "ok": True,
-                                        "dt_ms": 0,
-                                        "limit_ms": max_ms,
-                                        "expect_tools": False,
-                                        "tool_calls": [],
-                                        "error": "",
-                                        "reply": "runtime manifest gates passed",
-                                    }
-                                ],
+                        payload = {
+                            "ok": True,
+                            "mode": mode,
+                            "failures": 0,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "gate": {
+                                "runtime_manifest": manifest_gate,
+                                "manifest_profile_compat": compat_gate,
+                                "active_profile_id": active_profile_id or None,
+                                "fail_closed": True,
+                                "gate_only": True,
                             },
-                        )
+                            "results": [
+                                {
+                                    "id": "manifest_gate",
+                                    "ok": True,
+                                    "dt_ms": 0,
+                                    "limit_ms": max_ms,
+                                    "expect_tools": False,
+                                    "tool_calls": [],
+                                    "error": "",
+                                    "reply": "runtime manifest gates passed",
+                                }
+                            ],
+                        }
+                        validate_clean_preflight_response(payload)
+                        return _json(self, 200, payload)
                     clean_timeout_s = int(
                         os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
                     )
@@ -11042,18 +10817,16 @@ def build_handler(
                                 ],
                             }
                         )
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": failures == 0,
-                            "mode": mode,
-                            "failures": failures,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "results": results,
-                        },
-                    )
+                    payload = {
+                        "ok": failures == 0,
+                        "mode": mode,
+                        "failures": failures,
+                        "max_ms": max_ms,
+                        "max_ms_tools": max_ms_tools,
+                        "results": results,
+                    }
+                    validate_clean_preflight_response(payload)
+                    return _json(self, 200, payload)
 
                 if u.path == "/agent/clean/preflight/stream":
                     mode = str(body.get("mode", "")).strip() or "app_dev"
@@ -11147,21 +10920,30 @@ def build_handler(
                         send_evt(
                             "check_done", {"index": 1, "total": 1, "result": result}
                         )
+                        done_payload = {
+                            "ok": False,
+                            "mode": mode,
+                            "failures": 1,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "results": [result],
+                        }
+                        validate_clean_preflight_response(done_payload)
                         send_evt(
                             "done",
                             {
-                                "ok": False,
-                                "mode": mode,
-                                "failures": 1,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
+                                "ok": done_payload["ok"],
+                                "mode": done_payload["mode"],
+                                "failures": done_payload["failures"],
+                                "max_ms": done_payload["max_ms"],
+                                "max_ms_tools": done_payload["max_ms_tools"],
                                 "gate": {
                                     "runtime_manifest": manifest_gate,
                                     "manifest_profile_compat": compat_gate,
                                     "active_profile_id": active_profile_id or None,
                                     "fail_closed": True,
                                 },
-                                "results": [result],
+                                "results": done_payload["results"],
                             },
                         )
                         return
@@ -11183,21 +10965,30 @@ def build_handler(
                         send_evt(
                             "check_done", {"index": 1, "total": 1, "result": result}
                         )
+                        done_payload = {
+                            "ok": False,
+                            "mode": mode,
+                            "failures": 1,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "results": [result],
+                        }
+                        validate_clean_preflight_response(done_payload)
                         send_evt(
                             "done",
                             {
-                                "ok": False,
-                                "mode": mode,
-                                "failures": 1,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
+                                "ok": done_payload["ok"],
+                                "mode": done_payload["mode"],
+                                "failures": done_payload["failures"],
+                                "max_ms": done_payload["max_ms"],
+                                "max_ms_tools": done_payload["max_ms_tools"],
                                 "gate": {
                                     "runtime_manifest": manifest_gate,
                                     "manifest_profile_compat": compat_gate,
                                     "active_profile_id": active_profile_id or None,
                                     "fail_closed": True,
                                 },
-                                "results": [result],
+                                "results": done_payload["results"],
                             },
                         )
                         return
@@ -11216,14 +11007,23 @@ def build_handler(
                         send_evt(
                             "check_done", {"index": 1, "total": 1, "result": result}
                         )
+                        done_payload = {
+                            "ok": True,
+                            "mode": mode,
+                            "failures": 0,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "results": [result],
+                        }
+                        validate_clean_preflight_response(done_payload)
                         send_evt(
                             "done",
                             {
-                                "ok": True,
-                                "mode": mode,
-                                "failures": 0,
-                                "max_ms": max_ms,
-                                "max_ms_tools": max_ms_tools,
+                                "ok": done_payload["ok"],
+                                "mode": done_payload["mode"],
+                                "failures": done_payload["failures"],
+                                "max_ms": done_payload["max_ms"],
+                                "max_ms_tools": done_payload["max_ms_tools"],
                                 "gate": {
                                     "runtime_manifest": manifest_gate,
                                     "manifest_profile_compat": compat_gate,
@@ -11231,7 +11031,7 @@ def build_handler(
                                     "fail_closed": True,
                                     "gate_only": True,
                                 },
-                                "results": [result],
+                                "results": done_payload["results"],
                             },
                         )
                         return
@@ -11334,17 +11134,16 @@ def build_handler(
                             {"index": idx + 1, "total": total, "result": result},
                         )
 
-                    send_evt(
-                        "done",
-                        {
-                            "ok": failures == 0,
-                            "mode": mode,
-                            "failures": failures,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "results": results,
-                        },
-                    )
+                    done_payload = {
+                        "ok": failures == 0,
+                        "mode": mode,
+                        "failures": failures,
+                        "max_ms": max_ms,
+                        "max_ms_tools": max_ms_tools,
+                        "results": results,
+                    }
+                    validate_clean_preflight_response(done_payload)
+                    send_evt("done", done_payload)
                     return
 
                 if u.path == "/agent/mode":
@@ -13318,17 +13117,19 @@ def build_handler(
                         prearm = prearm_safety.mark_pass(report)
                     else:
                         prearm = prearm_safety.require("prearm_failed")
+                    payload = {
+                        "ok": bool(report.get("ok", False)),
+                        "prearm_check": report,
+                        "prearm_safety": prearm,
+                        "action_gates": _resolve_action_gates(
+                            gateway, control, prearm_gate=prearm_safety
+                        ),
+                    }
+                    validate_prearm_precheck_response(payload)
                     return _json(
                         self,
                         200 if bool(report.get("ok", False)) else 409,
-                        {
-                            "ok": bool(report.get("ok", False)),
-                            "prearm_check": report,
-                            "prearm_safety": prearm,
-                            "action_gates": _resolve_action_gates(
-                                gateway, control, prearm_gate=prearm_safety
-                            ),
-                        },
+                        payload,
                     )
 
                 if u.path == "/arm/confirm":

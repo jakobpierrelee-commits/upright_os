@@ -14,8 +14,17 @@ bash -n tools/lean/check_clean_lane.sh
 bash -n tools/lean/check_clean_parity.sh
 bash -n tools/lean/check_clean_exec_intent.sh
 bash -n tools/lean/check_manifest_fail_closed.sh
+bash -n tools/lean/check_clean_sse_contract.sh
 bash -n tools/lean/preflight_clean.sh
 bash -n tools/lean/update_scorecard.sh
+
+chmod +x tools/lean/check_clean_sse_contract.sh
+./tools/lean/check_clean_sse_contract.sh
+
+(
+  cd app/bridge
+  pytest -q tests/test_clean_contracts.py tests/test_clean_firmware_ops.py
+)
 
 (
   cd app/ui/ops-console

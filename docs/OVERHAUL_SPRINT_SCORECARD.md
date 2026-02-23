@@ -120,6 +120,14 @@ Run gates then update score line:
 ./tools/lean/update_scorecard.sh --run-gates
 ```
 
+## Morning Restore Checklist
+
+1. Restart bridge: `./tools/restart_bridge.sh`
+2. Start UI: `./tools/start_ops_console.sh`
+3. Verify clean API contract: `curl -fsS "http://127.0.0.1:8797/status?mode=app_dev" | jq '.clean_api'`
+4. Firmware lane smoke in UI: `Detect -> Compile -> Upload -> Preflight`
+5. Confirm preflight stream progress updates (`start/check_start/check_done/done`) and final summary.
+
 ---
 
 ## Current Risks (Short)
@@ -162,7 +170,7 @@ Status key:
 23. `[P1]` Add acceptance test pack for tuning recommendations (stable/oscillation/drift scenarios) to verify suggestion correctness and bounded safety deltas.
 24. `[P1]` Promote canonical Phase evidence contract in backend (`phase1_*`, `phase2_*`) and deprecate direct `v2_*` UI evidence references after migration validation.
 25. `[P1]` Add firmware progress UI during compile/upload (small status bar or popout with phase + elapsed time + latest log line) so operators see live forward motion.
-26. `[P0]` Isolate legacy API-era agent paths from clean Codex runtime: extract `server.py` domains (`arm/prearm`, `firmware_ops`, `codex_chat/routes`) into modules with parity tests so legacy behavior cannot degrade clean model execution quality.
+26. `[DONE]` Isolate legacy API-era agent paths from clean Codex runtime: extracted `arm/prearm` + `firmware_ops` slices into modules with parity/contract tests and CI checks; `codex_chat/routes` remains the next isolation slice.
 27. `[P1]` Add full cleanup matrix for high-risk files (not only Codex path): `server.py`, `codex_agent.py`, `codex_tools.py`, `serial_gateway.py`, `CleanApp.tsx`, and `styles.css/themes.css`; require owner, target module split, and pass/fail gates per file.
 28. `[P1]` Refactor UI composition boundaries: split `CleanApp.tsx` into domain panels/hooks (`telemetry`, `command rail`, `firmware`, `codex`) with no behavior change and parity tests/smoke checks.
 29. `[P1]` Refactor backend agent/tool boundaries: separate tool registry/execution (`codex_tools.py`) from orchestration/response logic (`codex_agent.py`) and enforce contract tests to prevent legacy coupling.
@@ -217,3 +225,6 @@ Status key:
 - `2026-02-23`: Added backward-compatible dual-MCU foundation to manifest/profile contracts: optional `mcu_topology` schema in hardware registry and runtime manifest validator support (`control_mcu` required when present, optional `io_mcu`/link/namespaces), enabling future control-MCU + RC-MCU rollout without immediate architecture changes.
 - `2026-02-23`: Completed first legacy-isolation extraction slice: moved pre-arm safety gate + hardware precheck execution into `app/bridge/arm_safety.py` and kept `server.py` wrapper/API behavior intact; parity tests remain green.
 - `2026-02-23`: Hardened pre-arm auto wheel probe reliability: enforce safe-state sequencing (`DISARM` + `ESTOP 1` before `MOTOR_TEST`), add escalating retry attempts for weak wheel pulses, and extend tests to cover retry success/failure behavior.
+- `2026-02-23`: Completed firmware-ops legacy-isolation slice: extracted clean firmware compile/upload/precheck/recovery route logic into `app/bridge/clean_firmware_ops.py` and rewired `server.py` handlers with no endpoint contract change.
+- `2026-02-23`: Added strict clean response contract validators in `app/bridge/clean_contracts.py` and enforced them for `/firmware/targets`, `/arm/precheck`, `/agent/clean/preflight`, and `/agent/clean/preflight/stream` done payloads.
+- `2026-02-23`: Added new contract tests (`app/bridge/tests/test_clean_contracts.py`, `app/bridge/tests/test_clean_firmware_ops.py`) plus CI guard `tools/lean/check_clean_sse_contract.sh` wired into `tools/lean/ci_clean_lane.sh`.
