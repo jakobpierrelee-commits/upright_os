@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   cleanChatStream,
+  cleanFailureDetailFromError,
+  cleanFailureKindFromError,
   cleanNewThread,
   cleanSelectThread,
   cleanStatus,
@@ -65,12 +67,10 @@ export function CodexPanelClean(
   }, [onGlobalStatus]);
 
   const classifyFailure = useCallback((errText: string): { kind: string; detail: string } => {
-    const t = String(errText || '').toLowerCase();
-    if (t.includes('timeout')) return { kind: 'timeout', detail: errText };
-    if (t.includes('usage') || t.includes('quota') || t.includes('purchase more credits')) return { kind: 'quota', detail: errText };
-    if (t.includes('failed to fetch') || t.includes('bridge') || t.includes('request_timeout')) return { kind: 'bridge_down', detail: errText };
-    if (t.includes('upload')) return { kind: 'upload_failed', detail: errText };
-    return { kind: 'tool_failed', detail: errText };
+    return {
+      kind: cleanFailureKindFromError(errText),
+      detail: cleanFailureDetailFromError('generic', errText),
+    };
   }, []);
 
   const pushOpLog = useCallback((text: string): void => {

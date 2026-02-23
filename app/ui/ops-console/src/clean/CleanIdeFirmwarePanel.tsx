@@ -9,6 +9,9 @@ import {
   cleanFirmwareUploadPrecheck,
   cleanKnownGoodRecovery,
   cleanPreflightStream,
+  cleanFailureDetailFromError,
+  cleanFailureKindFromError,
+  cleanIsNotFoundError,
   type CleanFirmwareBoards,
   type CleanFirmwareTargets,
   type CleanFirmwareStatus,
@@ -73,27 +76,7 @@ function createInitialFlowMap(): FirmwareFlowMap {
 }
 
 function plainFlowDetail(step: FirmwareFlowStepId, raw: string): string {
-  const t = String(raw || '').toLowerCase();
-  if (!t.trim()) return 'failed';
-  if (t.includes('selected_port_not_detected')) return "Selected port isn't connected";
-  if (t.includes('upload_port_missing')) return 'Choose a serial port first';
-  if (t.includes('runtime_manifest_invalid')) return 'Sketch manifest is invalid';
-  if (t.includes('bridge_api_outdated') || t.includes('not_found')) return 'Bridge is outdated; restart bridge';
-  if (t.includes('operation_in_progress')) return 'Another firmware operation is already running';
-  if (t.includes('request_timeout') || t.includes('timeout')) return 'Timed out waiting for bridge';
-  if (t.includes('stk500') || t.includes('not in sync') || t.includes('programmer is not responding')) return 'Bootloader sync failed';
-  if (t.includes('reconnect failed') || t.includes('no status response')) return "Bridge didn't reconnect after flash";
-  if (t.includes('resource busy') || t.includes('multiple access on port')) return 'Serial port is busy';
-  if (t.includes('permission denied')) return 'Serial access denied';
-  if (t.includes('failed to fetch') || t.includes('bridge_down')) return 'Bridge is unreachable';
-  if (t.includes('compile')) return 'Compile failed';
-  if (t.includes('upload')) return 'Upload failed';
-  if (t.includes('preflight')) return 'Preflight failed';
-  if (step === 'detect') return 'Port detection failed';
-  if (step === 'compile') return 'Compile failed';
-  if (step === 'upload') return 'Upload failed';
-  if (step === 'reconnect') return 'Reconnect check failed';
-  return 'Verify failed';
+  return cleanFailureDetailFromError(step, raw);
 }
 
 function fqbnFromSelection(
@@ -275,10 +258,6 @@ function buildTargetRunbookGuide(
   return null;
 }
 
-function isNotFoundErr(err: unknown): boolean {
-  return String(err || '').toLowerCase().includes('not_found');
-}
-
 export function CleanIdeFirmwarePanel(
   { mode, onGlobalStatus }: { mode: CleanMode; onGlobalStatus?: (evt: { level: IdeStatusLevel; summary: string; source: string; ts: number }) => void },
 ): JSX.Element {
@@ -374,12 +353,10 @@ export function CleanIdeFirmwarePanel(
   }, [onGlobalStatus]);
 
   const classifyFailure = useCallback((errText: string): { kind: string; detail: string } => {
-    const t = String(errText || '').toLowerCase();
-    if (t.includes('timeout')) return { kind: 'timeout', detail: errText };
-    if (t.includes('usage') || t.includes('quota') || t.includes('purchase more credits')) return { kind: 'quota', detail: errText };
-    if (t.includes('failed to fetch') || t.includes('bridge') || t.includes('request_timeout')) return { kind: 'bridge_down', detail: errText };
-    if (t.includes('upload')) return { kind: 'upload_failed', detail: errText };
-    return { kind: 'tool_failed', detail: errText };
+    return {
+      kind: cleanFailureKindFromError(errText),
+      detail: cleanFailureDetailFromError('generic', errText),
+    };
   }, []);
 
   const uploadGuide = useMemo(() => {
@@ -704,7 +681,7 @@ export function CleanIdeFirmwarePanel(
           return;
         }
       } catch (err) {
-        if (isNotFoundErr(err)) {
+        if (cleanIsNotFoundError(err)) {
           pushOpLog('precheck endpoint unavailable on current bridge; continuing upload');
         } else {
           throw err;
@@ -871,7 +848,7 @@ export function CleanIdeFirmwarePanel(
           setFailureBanner({ kind: 'upload_failed', detail: `precheck: ${reasons.join(', ') || 'blocked'}` });
         }
       } catch (err) {
-        if (isNotFoundErr(err)) {
+        if (cleanIsNotFoundError(err)) {
           preSummary = 'legacy_bridge_no_precheck';
           pushOpLog('recovery check: precheck endpoint unavailable on current bridge');
         } else {

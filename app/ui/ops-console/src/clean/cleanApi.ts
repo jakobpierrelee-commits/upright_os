@@ -3,6 +3,59 @@ import type { ControlState, Health, Status } from '../types';
 // Clean-lane hard lock: do not route clean runtime calls to legacy or remote bridge URLs.
 const BASE = 'http://127.0.0.1:8797';
 
+export type CleanFailureKind = 'timeout' | 'quota' | 'bridge_down' | 'upload_failed' | 'tool_failed';
+export type CleanFlowStepId = 'detect' | 'compile' | 'upload' | 'reconnect' | 'verify' | 'generic';
+
+function _errorText(err: unknown): string {
+  return String(err ?? '').trim();
+}
+
+export function cleanIsNotFoundError(err: unknown): boolean {
+  return _errorText(err).toLowerCase().includes('not_found');
+}
+
+export function cleanFailureKindFromError(err: unknown): CleanFailureKind {
+  const t = _errorText(err).toLowerCase();
+  if (t.includes('timeout') || t.includes('request_timeout')) return 'timeout';
+  if (t.includes('usage') || t.includes('quota') || t.includes('purchase more credits')) return 'quota';
+  if (
+    t.includes('failed to fetch')
+    || t.includes('bridge')
+    || t.includes('request_timeout')
+    || t.includes('bridge_api_outdated')
+    || t.includes('not_found')
+  ) {
+    return 'bridge_down';
+  }
+  if (t.includes('upload') || t.includes('stk500') || t.includes('programmer is not responding')) return 'upload_failed';
+  return 'tool_failed';
+}
+
+export function cleanFailureDetailFromError(step: CleanFlowStepId, err: unknown): string {
+  const t = _errorText(err).toLowerCase();
+  if (!t) return 'failed';
+  if (t.includes('selected_port_not_detected')) return "Selected port isn't connected";
+  if (t.includes('upload_port_missing')) return 'Choose a serial port first';
+  if (t.includes('runtime_manifest_invalid')) return 'Sketch manifest is invalid';
+  if (t.includes('bridge_api_outdated') || t.includes('not_found')) return 'Bridge is outdated; restart bridge';
+  if (t.includes('operation_in_progress')) return 'Another firmware operation is already running';
+  if (t.includes('request_timeout') || t.includes('timeout')) return 'Timed out waiting for bridge';
+  if (t.includes('stk500') || t.includes('not in sync') || t.includes('programmer is not responding')) return 'Bootloader sync failed';
+  if (t.includes('reconnect failed') || t.includes('no status response')) return "Bridge didn't reconnect after flash";
+  if (t.includes('resource busy') || t.includes('multiple access on port')) return 'Serial port is busy';
+  if (t.includes('permission denied')) return 'Serial access denied';
+  if (t.includes('failed to fetch') || t.includes('bridge_down')) return 'Bridge is unreachable';
+  if (t.includes('compile')) return 'Compile failed';
+  if (t.includes('upload')) return 'Upload failed';
+  if (t.includes('preflight')) return 'Preflight failed';
+  if (step === 'detect') return 'Port detection failed';
+  if (step === 'compile') return 'Compile failed';
+  if (step === 'upload') return 'Upload failed';
+  if (step === 'reconnect') return 'Reconnect check failed';
+  if (step === 'verify') return 'Verify failed';
+  return _errorText(err) || 'Operation failed';
+}
+
 async function req<T>(path: string, init?: RequestInit, timeoutMs = 60000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
