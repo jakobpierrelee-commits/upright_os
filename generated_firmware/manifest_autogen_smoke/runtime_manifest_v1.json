@@ -1,0 +1,67 @@
+{
+  "board": {
+    "bootloader": "default",
+    "family": "arduino_avr",
+    "fqbn": "arduino:avr:nano",
+    "id": "nano"
+  },
+  "commands": [
+    "GET",
+    "ARM",
+    "DISARM",
+    "PID",
+    "SETPOINT",
+    "LIMITS",
+    "CAL ZERO",
+    "SAVECFG"
+  ],
+  "generated_at": 1771784998,
+  "generated_by": "firmware_manager",
+  "interfaces": {
+    "actuator": {
+      "pins": {
+        "left_dir": -1,
+        "left_pwm": -1,
+        "right_dir": -1,
+        "right_pwm": -1
+      },
+      "protocol": "gpio_pwm",
+      "type": "dual_dc_hbridge_dir_pwm"
+    },
+    "encoders": {
+      "pins": {
+        "left_a": -1,
+        "left_b": -1,
+        "right_a": -1,
+        "right_b": -1
+      },
+      "protocol": "quadrature",
+      "type": "quadrature"
+    },
+    "imu": {
+      "pins": {
+        "scl": -1,
+        "sda": -1
+      },
+      "protocol": "i2c",
+      "type": "imu_generic"
+    }
+  },
+  "telemetry_fields": [
+    "mode",
+    "ang",
+    "raw",
+    "gyro",
+    "out",
+    "fault",
+    "estop",
+    "kp",
+    "ki",
+    "kd",
+    "set",
+    "encL",
+    "encR"
+  ],
+  "updated_at": 1771784998,
+  "version": "runtime_manifest_v1"
+}

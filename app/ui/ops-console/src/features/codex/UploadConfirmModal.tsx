@@ -79,7 +79,7 @@ export function UploadConfirmModal({ pending, onApprove, onReject }: Props) {
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Upload confirmation">
-      <div className="preflight-modal upload-confirm-modal">
+      <div className="preflight-modal upload-confirm-modal glass-surface glass-surface-strong">
         <div className="upload-confirm-header">
           <h3>⚠️ Firmware Upload Confirmation</h3>
           <p className="upload-confirm-warning">

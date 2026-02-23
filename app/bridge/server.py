@@ -12,6 +12,7 @@ import logging
 import os
 import pathlib
 import re
+import signal
 import shutil
 import sqlite3
 import subprocess
@@ -20,6 +21,9 @@ import ssl
 import sys
 import threading
 import time
+import traceback
+import uuid
+import faulthandler
 
 logger = logging.getLogger(__name__)
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -47,6 +51,20 @@ try:
     from app.bridge.serial_gateway import NanoSerialGateway
 except ImportError:
     from serial_gateway import NanoSerialGateway
+try:
+    from app.bridge.provider_router import ProviderRouter
+except ImportError:
+    from provider_router import ProviderRouter
+try:
+    from app.bridge.arm_safety import (
+        PreArmSafetyGate,
+        run_prearm_hardware_check as _run_prearm_hardware_check_impl,
+    )
+except ImportError:
+    from arm_safety import (  # type: ignore
+        PreArmSafetyGate,
+        run_prearm_hardware_check as _run_prearm_hardware_check_impl,
+    )
 
 try:
     from app.bridge.codex_agent import CodexAgent, create_codex_agent
@@ -308,7 +326,9 @@ class FirmwareManager:
     def __init__(self, repo_root: pathlib.Path, default_port: str) -> None:
         self.repo_root = repo_root
         self.default_port = default_port
-        self.default_sketch = repo_root / "tumbller_v06_nano_balance_v2"
+        self.default_sketch = (
+            repo_root / "app" / "bridge" / "firmware_templates" / "profiled_runtime_v1"
+        )
         self.default_fqbn = "arduino:avr:nano"
         self.arduino_cli = self._resolve_arduino_cli()
         self._lock = threading.Lock()
@@ -320,6 +340,10 @@ class FirmwareManager:
         self._returncode: Optional[int] = None
         self._log: list[str] = []
         self._last_cmd: list[str] = []
+        self._run_artifacts_dir = self.repo_root / ".runlogs" / "firmware_ops"
+        self._last_artifact: Optional[Dict[str, Any]] = None
+        self._active_operation: Optional[Dict[str, Any]] = None
+        self._last_completed_operation: Optional[Dict[str, Any]] = None
         self._unified_templates_dir = (
             repo_root / "app" / "bridge" / "firmware_templates" / "unified_v1"
         )
@@ -354,21 +378,196 @@ class FirmwareManager:
             self._log.append(line)
             self._log = self._log[-500:]
 
-    def _run_subprocess(self, cmd: list[str], *, phase: str) -> Dict[str, Any]:
+    def _status_unlocked(self) -> Dict[str, Any]:
+        return {
+            "state": self._state,
+            "phase": self._phase,
+            "running": self._running,
+            "started_at": self._started_at,
+            "finished_at": self._finished_at,
+            "returncode": self._returncode,
+            "last_cmd": self._last_cmd,
+            "log_tail": self._log[-120:],
+            "last_artifact": self._last_artifact,
+            "operation": {
+                "running": self._running,
+                "active": dict(self._active_operation)
+                if isinstance(self._active_operation, dict)
+                else None,
+                "last_completed": (
+                    dict(self._last_completed_operation)
+                    if isinstance(self._last_completed_operation, dict)
+                    else None
+                ),
+            },
+            "defaults": {
+                "sketch": str(self.default_sketch),
+                "fqbn": self.default_fqbn,
+                "port": self.default_port,
+            },
+        }
+
+    def _begin_operation(
+        self,
+        *,
+        phase: str,
+        cmd: list[str],
+        idempotency_key: Optional[str],
+    ) -> tuple[bool, Dict[str, Any], Optional[str]]:
         with self._lock:
             if self._running:
-                raise RuntimeError("firmware_running")
+                active = (
+                    self._active_operation
+                    if isinstance(self._active_operation, dict)
+                    else {}
+                )
+                active_key = str(active.get("idempotency_key") or "").strip()
+                active_phase = str(active.get("phase") or "")
+                active_cmd = list(active.get("cmd") or [])
+                key = str(idempotency_key or "").strip()
+                if (
+                    key
+                    and active_key
+                    and key == active_key
+                    and active_phase == phase
+                    and active_cmd == list(cmd)
+                ):
+                    snap = self._status_unlocked()
+                    snap["idempotent_reused"] = True
+                    return False, snap, str(active.get("op_id") or "")
+                raise RuntimeError("operation_in_progress")
+            started_at = time.time()
+            op_id = f"fwop_{uuid.uuid4().hex[:12]}"
             self._running = True
             self._state = "running"
             self._phase = phase
-            self._started_at = time.time()
+            self._started_at = started_at
             self._finished_at = None
             self._returncode = None
             self._log = []
-            self._last_cmd = cmd
+            self._last_cmd = list(cmd)
+            self._active_operation = {
+                "op_id": op_id,
+                "phase": phase,
+                "cmd": list(cmd),
+                "idempotency_key": str(idempotency_key or "").strip(),
+                "started_at": started_at,
+            }
+            return True, self._status_unlocked(), op_id
+
+    def _reconnect_gateway_after_flash(
+        self,
+        *,
+        gateway: NanoSerialGateway,
+        local_log: list[str],
+        attempts: int = 5,
+        ready_timeout_s: float = 3.0,
+        settle_s: float = 0.25,
+    ) -> tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+        n = max(1, int(attempts))
+        last_err: Optional[str] = None
+        for idx in range(1, n + 1):
+            if settle_s > 0:
+                time.sleep(min(1.0, settle_s + (idx - 1) * 0.15))
+            try:
+                gateway.close()
+            except Exception:
+                pass
+            try:
+                gateway.connect()
+                ready = gateway.wait_ready(timeout=max(0.5, float(ready_timeout_s)))
+                return True, ready, None
+            except Exception as exc:
+                last_err = str(exc)
+                line = f"warn: reconnect attempt {idx}/{n} failed: {last_err}"
+                local_log.append(line)
+                self._append_log(line)
+        return False, None, last_err
+
+    def _record_run_artifact(
+        self,
+        *,
+        phase: str,
+        cmd: list[str],
+        returncode: int,
+        state: str,
+        started_at: Optional[float],
+        finished_at: Optional[float],
+        log_lines: list[str],
+        op_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> None:
+        try:
+            self._run_artifacts_dir.mkdir(parents=True, exist_ok=True)
+            ts = float(finished_at or time.time())
+            stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
+            outcome = "pass" if str(state) == "passed" else "fail"
+            rid = f"{stamp}_{str(phase or 'run')}_{outcome}"
+            meta_path = self._run_artifacts_dir / f"{rid}.json"
+            log_path = self._run_artifacts_dir / f"{rid}.log"
+            payload = {
+                "run_id": rid,
+                "phase": str(phase or ""),
+                "state": str(state or ""),
+                "returncode": int(returncode),
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_s": (
+                    max(0.0, float(finished_at) - float(started_at))
+                    if (started_at is not None and finished_at is not None)
+                    else None
+                ),
+                "cmd": list(cmd),
+                "log_path": str(log_path),
+                "line_count": len(log_lines),
+                "op_id": str(op_id or ""),
+                "idempotency_key": str(idempotency_key or ""),
+            }
+            log_path.write_text(
+                "\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8"
+            )
+            meta_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            with self._lock:
+                self._last_artifact = dict(payload)
+        except Exception as exc:
+            self._append_log(f"warn: artifact write failed ({exc})")
+
+    def list_run_artifacts(self, *, limit: int = 20) -> Dict[str, Any]:
+        n = max(1, min(int(limit), 200))
+        root = self._run_artifacts_dir
+        if not root.exists():
+            return {"ok": True, "artifacts": []}
+        nodes: list[pathlib.Path] = sorted(root.glob("*.json"), reverse=True)
+        out: list[Dict[str, Any]] = []
+        for p in nodes[:n]:
+            try:
+                node = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(node, dict):
+                    out.append(node)
+            except Exception:
+                continue
+        return {"ok": True, "artifacts": out}
+
+    def _run_subprocess(
+        self,
+        cmd: list[str],
+        *,
+        phase: str,
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        started, snap, op_id = self._begin_operation(
+            phase=phase, cmd=cmd, idempotency_key=idempotency_key
+        )
+        if not started:
+            return snap
+        started_at = float(snap.get("started_at") or time.time())
+        idem_key = str(idempotency_key or "").strip()
 
         def worker() -> None:
             rc = -1
+            local_log: list[str] = []
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -380,16 +579,41 @@ class FirmwareManager:
                 )
                 assert proc.stdout is not None
                 for ln in proc.stdout:
-                    self._append_log(ln.rstrip())
+                    line = ln.rstrip()
+                    local_log.append(line)
+                    self._append_log(line)
                 rc = proc.wait()
             except Exception as exc:
-                self._append_log(f"ERROR: {exc}")
+                err_line = f"ERROR: {exc}"
+                local_log.append(err_line)
+                self._append_log(err_line)
             finally:
+                finished_at = time.time()
+                final_state = "passed" if rc == 0 else "failed"
                 self._set(
                     _running=False,
-                    _state="passed" if rc == 0 else "failed",
-                    _finished_at=time.time(),
+                    _state=final_state,
+                    _finished_at=finished_at,
                     _returncode=rc,
+                    _active_operation=None,
+                    _last_completed_operation={
+                        "op_id": str(op_id or ""),
+                        "phase": phase,
+                        "finished_at": finished_at,
+                        "state": final_state,
+                        "returncode": rc,
+                    },
+                )
+                self._record_run_artifact(
+                    phase=phase,
+                    cmd=cmd,
+                    returncode=rc,
+                    state=final_state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    log_lines=local_log,
+                    op_id=op_id,
+                    idempotency_key=idem_key,
                 )
 
         t = threading.Thread(target=worker, daemon=True)
@@ -398,21 +622,7 @@ class FirmwareManager:
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
-            return {
-                "state": self._state,
-                "phase": self._phase,
-                "running": self._running,
-                "started_at": self._started_at,
-                "finished_at": self._finished_at,
-                "returncode": self._returncode,
-                "last_cmd": self._last_cmd,
-                "log_tail": self._log[-120:],
-                "defaults": {
-                    "sketch": str(self.default_sketch),
-                    "fqbn": self.default_fqbn,
-                    "port": self.default_port,
-                },
-            }
+            return self._status_unlocked()
 
     def check(self) -> Dict[str, Any]:
         self.arduino_cli = self._resolve_arduino_cli()
@@ -445,13 +655,19 @@ class FirmwareManager:
             }
 
     def compile(
-        self, *, sketch: Optional[str] = None, fqbn: Optional[str] = None
+        self,
+        *,
+        sketch: Optional[str] = None,
+        fqbn: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         self.arduino_cli = self._resolve_arduino_cli()
         sketch_path = sketch or str(self.default_sketch)
         board = fqbn or self.default_fqbn
         cmd = [self.arduino_cli, "compile", "--fqbn", board, sketch_path]
-        return self._run_subprocess(cmd, phase="compile")
+        return self._run_subprocess(
+            cmd, phase="compile", idempotency_key=idempotency_key
+        )
 
     def upload(
         self,
@@ -459,6 +675,7 @@ class FirmwareManager:
         sketch: Optional[str] = None,
         fqbn: Optional[str] = None,
         port: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         self.arduino_cli = self._resolve_arduino_cli()
         sketch_path = sketch or str(self.default_sketch)
@@ -473,7 +690,9 @@ class FirmwareManager:
             board,
             sketch_path,
         ]
-        return self._run_subprocess(cmd, phase="upload")
+        return self._run_subprocess(
+            cmd, phase="upload", idempotency_key=idempotency_key
+        )
 
     def upload_guarded(
         self,
@@ -482,6 +701,7 @@ class FirmwareManager:
         sketch: Optional[str] = None,
         fqbn: Optional[str] = None,
         port: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         self.arduino_cli = self._resolve_arduino_cli()
         sketch_path = sketch or str(self.default_sketch)
@@ -497,33 +717,36 @@ class FirmwareManager:
             sketch_path,
         ]
 
-        with self._lock:
-            if self._running:
-                raise RuntimeError("firmware_running")
-            self._running = True
-            self._state = "running"
-            self._phase = "upload_guarded"
-            self._started_at = time.time()
-            self._finished_at = None
-            self._returncode = None
-            self._log = []
-            self._last_cmd = cmd
+        started, snap, op_id = self._begin_operation(
+            phase="upload_guarded", cmd=cmd, idempotency_key=idempotency_key
+        )
+        if not started:
+            return snap
+        started_at = float(snap.get("started_at") or time.time())
+        idem_key = str(idempotency_key or "").strip()
 
         def worker() -> None:
             rc = -1
             reconnect_ok = False
+            local_log: list[str] = []
             try:
-                self._append_log(
-                    "guarded flash: disarm -> close serial -> upload -> reconnect"
-                )
+                s0 = "guarded flash: disarm -> close serial -> upload -> reconnect"
+                local_log.append(s0)
+                self._append_log(s0)
                 try:
                     gateway.command("DISARM", timeout=1.0)
-                    self._append_log("disarm command sent")
+                    s1 = "disarm command sent"
+                    local_log.append(s1)
+                    self._append_log(s1)
                 except Exception as exc:
-                    self._append_log(f"warn: disarm failed ({exc})")
+                    s1e = f"warn: disarm failed ({exc})"
+                    local_log.append(s1e)
+                    self._append_log(s1e)
 
                 gateway.close()
-                self._append_log("serial bridge closed for flashing")
+                s2 = "serial bridge closed for flashing"
+                local_log.append(s2)
+                self._append_log(s2)
 
                 proc = subprocess.Popen(
                     cmd,
@@ -535,28 +758,84 @@ class FirmwareManager:
                 )
                 assert proc.stdout is not None
                 for ln in proc.stdout:
-                    self._append_log(ln.rstrip())
+                    line = ln.rstrip()
+                    local_log.append(line)
+                    self._append_log(line)
                 rc = proc.wait()
-                self._append_log(f"upload return code={rc}")
+                s3 = f"upload return code={rc}"
+                local_log.append(s3)
+                self._append_log(s3)
             except Exception as exc:
-                self._append_log(f"ERROR: guarded upload failed: {exc}")
+                s4 = f"ERROR: guarded upload failed: {exc}"
+                local_log.append(s4)
+                self._append_log(s4)
             finally:
-                try:
-                    gateway.connect()
-                    ready = gateway.wait_ready(timeout=10.0)
-                    reconnect_ok = True
-                    self._append_log(
-                        f"bridge reconnected: mode={ready.get('mode', 'UNKNOWN')}"
+                if rc == 0:
+                    reconnect_ok, ready, reconnect_err = (
+                        self._reconnect_gateway_after_flash(
+                            gateway=gateway,
+                            local_log=local_log,
+                            attempts=6,
+                            ready_timeout_s=3.0,
+                            settle_s=0.2,
+                        )
                     )
-                except Exception as exc:
-                    self._append_log(f"ERROR: reconnect failed: {exc}")
+                    if reconnect_ok and isinstance(ready, dict):
+                        s5 = f"bridge reconnected: mode={ready.get('mode', 'UNKNOWN')}"
+                        local_log.append(s5)
+                        self._append_log(s5)
+                    else:
+                        s5e = f"ERROR: reconnect failed: {reconnect_err or 'unknown'}"
+                        local_log.append(s5e)
+                        self._append_log(s5e)
+                else:
+                    # Upload already failed (usually bootloader sync/port issue). Reconnect best-effort only.
+                    reconnect_ok, _ready, reconnect_err = (
+                        self._reconnect_gateway_after_flash(
+                            gateway=gateway,
+                            local_log=local_log,
+                            attempts=3,
+                            ready_timeout_s=1.5,
+                            settle_s=0.1,
+                        )
+                    )
+                    if reconnect_ok:
+                        s6 = "bridge reconnect attempted after failed upload (status validation skipped)"
+                        local_log.append(s6)
+                        self._append_log(s6)
+                    else:
+                        s6e = f"warn: bridge reconnect after failed upload: {reconnect_err or 'unknown'}"
+                        local_log.append(s6e)
+                        self._append_log(s6e)
 
                 final_pass = rc == 0 and reconnect_ok
+                final_state = "passed" if final_pass else "failed"
+                final_rc = 0 if final_pass else (rc if rc != 0 else -2)
+                finished_at = time.time()
                 self._set(
                     _running=False,
-                    _state="passed" if final_pass else "failed",
-                    _finished_at=time.time(),
-                    _returncode=0 if final_pass else (rc if rc != 0 else -2),
+                    _state=final_state,
+                    _finished_at=finished_at,
+                    _returncode=final_rc,
+                    _active_operation=None,
+                    _last_completed_operation={
+                        "op_id": str(op_id or ""),
+                        "phase": "upload_guarded",
+                        "finished_at": finished_at,
+                        "state": final_state,
+                        "returncode": final_rc,
+                    },
+                )
+                self._record_run_artifact(
+                    phase="upload_guarded",
+                    cmd=cmd,
+                    returncode=final_rc,
+                    state=final_state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    log_lines=local_log,
+                    op_id=op_id,
+                    idempotency_key=idem_key,
                 )
 
         t = threading.Thread(target=worker, daemon=True)
@@ -661,7 +940,17 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         target = pathlib.Path(path) if path else self._default_sketch_file()
         target.parent.mkdir(parents=True, exist_ok=True)
         bytes_written = self._write_text_atomic(target, content)
-        return {"path": str(target), "bytes": bytes_written}
+        manifest = self.ensure_runtime_manifest(
+            sketch=str(target.parent),
+            fqbn=self.default_fqbn,
+            profile=None,
+            force_update=False,
+        )
+        return {
+            "path": str(target),
+            "bytes": bytes_written,
+            "runtime_manifest": manifest,
+        }
 
     def write_sketch_with_backup(
         self, *, content: str, path: Optional[str] = None, source: str = "assistant"
@@ -678,10 +967,17 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         if target.exists() and target.is_file():
             shutil.copy2(target, backup_path)
         bytes_written = self._write_text_atomic(target, content)
+        manifest = self.ensure_runtime_manifest(
+            sketch=str(target.parent),
+            fqbn=self.default_fqbn,
+            profile=None,
+            force_update=False,
+        )
         return {
             "path": str(target),
             "bytes": bytes_written,
             "backup_path": str(backup_path) if backup_path.exists() else None,
+            "runtime_manifest": manifest,
         }
 
     def list_boards(self) -> Dict[str, Any]:
@@ -732,6 +1028,376 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                 "recommended_fqbn": self.default_fqbn,
                 "recommended_port": self.default_port,
             }
+
+    def list_targets(self) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "version": 1,
+            "families": [
+                {"id": "arduino_avr", "label": "Arduino AVR"},
+                {"id": "esp32", "label": "ESP32"},
+                {"id": "rp2040", "label": "RP2040"},
+                {"id": "teensy", "label": "Teensy"},
+            ],
+            "boards": [
+                {
+                    "id": "nano",
+                    "family": "arduino_avr",
+                    "label": "Arduino Nano",
+                    "fqbn_base": "arduino:avr:nano",
+                    "default_bootloader": "new",
+                    "bootloaders": [
+                        {"id": "new", "label": "New", "fqbn_suffix": ""},
+                        {
+                            "id": "old",
+                            "label": "Old (ATmega328P)",
+                            "fqbn_suffix": ":cpu=atmega328old",
+                        },
+                    ],
+                },
+                {
+                    "id": "uno",
+                    "family": "arduino_avr",
+                    "label": "Arduino Uno",
+                    "fqbn_base": "arduino:avr:uno",
+                    "default_bootloader": "default",
+                    "bootloaders": [
+                        {"id": "default", "label": "Default", "fqbn_suffix": ""}
+                    ],
+                },
+                {
+                    "id": "esp32_devkit",
+                    "family": "esp32",
+                    "label": "ESP32 Dev Module",
+                    "fqbn_base": "esp32:esp32:esp32",
+                    "default_bootloader": "default",
+                    "bootloaders": [
+                        {"id": "default", "label": "Default", "fqbn_suffix": ""}
+                    ],
+                },
+                {
+                    "id": "rp2040_pico",
+                    "family": "rp2040",
+                    "label": "Raspberry Pi Pico",
+                    "fqbn_base": "rp2040:rp2040:rpipico",
+                    "default_bootloader": "default",
+                    "bootloaders": [
+                        {"id": "default", "label": "Default", "fqbn_suffix": ""}
+                    ],
+                },
+                {
+                    "id": "teensy40",
+                    "family": "teensy",
+                    "label": "Teensy 4.0",
+                    "fqbn_base": "teensy:avr:teensy40",
+                    "default_bootloader": "default",
+                    "bootloaders": [
+                        {"id": "default", "label": "Default", "fqbn_suffix": ""}
+                    ],
+                },
+                {
+                    "id": "teensy41",
+                    "family": "teensy",
+                    "label": "Teensy 4.1",
+                    "fqbn_base": "teensy:avr:teensy41",
+                    "default_bootloader": "default",
+                    "bootloaders": [
+                        {"id": "default", "label": "Default", "fqbn_suffix": ""}
+                    ],
+                },
+            ],
+        }
+
+    def _resolve_sketch_folder(self, sketch: Optional[str] = None) -> pathlib.Path:
+        raw = str(sketch or self.default_sketch).strip()
+        p = pathlib.Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (self.repo_root / p).resolve()
+        if p.suffix.lower() == ".ino":
+            return p.parent
+        return p
+
+    def runtime_manifest_path(self, sketch: Optional[str] = None) -> pathlib.Path:
+        return self._resolve_sketch_folder(sketch=sketch) / "runtime_manifest_v1.json"
+
+    def read_runtime_manifest(self, sketch: Optional[str] = None) -> Dict[str, Any]:
+        path = self.runtime_manifest_path(sketch=sketch)
+        if not path.exists() or not path.is_file():
+            raise RuntimeError(f"runtime_manifest_missing:{path}")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"runtime_manifest_invalid_json:{exc}") from exc
+        if not isinstance(raw, dict):
+            raise RuntimeError("runtime_manifest_not_object")
+        return {"path": str(path), "manifest": raw}
+
+    def validate_runtime_manifest(
+        self,
+        *,
+        sketch: Optional[str] = None,
+        manifest: Optional[Dict[str, Any]] = None,
+        require_exists: bool = True,
+    ) -> Dict[str, Any]:
+        path = self.runtime_manifest_path(sketch=sketch)
+        source = "inline"
+        node: Any = manifest
+        if node is None:
+            source = "file"
+            if not path.exists() or not path.is_file():
+                return {
+                    "ok": False if require_exists else True,
+                    "manifest_path": str(path),
+                    "source": source,
+                    "errors": ["runtime_manifest_missing"] if require_exists else [],
+                    "warnings": [],
+                    "manifest": None,
+                }
+            try:
+                node = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "manifest_path": str(path),
+                    "source": source,
+                    "errors": [f"runtime_manifest_invalid_json:{exc}"],
+                    "warnings": [],
+                    "manifest": None,
+                }
+
+        check = _validate_runtime_manifest_v1(node, self.list_targets())
+        return {
+            "ok": bool(check.get("ok", False)),
+            "manifest_path": str(path),
+            "source": source,
+            "errors": list(check.get("errors") or []),
+            "warnings": list(check.get("warnings") or []),
+            "manifest": node if isinstance(node, dict) else None,
+            "checked_at": time.time(),
+        }
+
+    def write_runtime_manifest(
+        self,
+        *,
+        sketch: Optional[str] = None,
+        manifest: Dict[str, Any],
+        validate: bool = True,
+    ) -> Dict[str, Any]:
+        if validate:
+            check = self.validate_runtime_manifest(
+                sketch=sketch, manifest=manifest, require_exists=False
+            )
+            if not bool(check.get("ok", False)):
+                raise RuntimeError(
+                    "runtime_manifest_invalid:" + "; ".join(check.get("errors", []))
+                )
+        path = self.runtime_manifest_path(sketch=sketch)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(manifest)
+        payload["updated_at"] = int(time.time())
+        payload["version"] = "runtime_manifest_v1"
+        text = json.dumps(payload, indent=2, sort_keys=True)
+        path.write_text(text + "\n", encoding="utf-8")
+        return {"path": str(path), "bytes": len((text + "\n").encode("utf-8"))}
+
+    def _match_target_for_fqbn(self, fqbn: str) -> Dict[str, Any]:
+        raw = str(fqbn or "").strip()
+        targets = self.list_targets()
+        for row in list(targets.get("boards") or []):
+            if not isinstance(row, dict):
+                continue
+            base = str(row.get("fqbn_base", "")).strip()
+            if not base:
+                continue
+            if raw == base or raw.startswith(f"{base}:"):
+                out = dict(row)
+                out["fqbn"] = raw
+                return out
+        fallback = next(
+            (
+                r
+                for r in list(targets.get("boards") or [])
+                if isinstance(r, dict) and str(r.get("id", "")) == "nano"
+            ),
+            None,
+        )
+        if isinstance(fallback, dict):
+            out = dict(fallback)
+            out["fqbn"] = raw or str(fallback.get("fqbn_base", "arduino:avr:nano"))
+            return out
+        return {
+            "id": "nano",
+            "family": "arduino_avr",
+            "fqbn_base": "arduino:avr:nano",
+            "fqbn": raw or "arduino:avr:nano",
+        }
+
+    @staticmethod
+    def _int_pin(node: Any, key: str, default: int = -1) -> int:
+        if not isinstance(node, dict):
+            return int(default)
+        try:
+            return int(node.get(key, default))
+        except Exception:
+            return int(default)
+
+    def _build_runtime_manifest_from_profile(
+        self, *, fqbn: str, profile: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        target = self._match_target_for_fqbn(fqbn)
+        pins = profile.get("pins", {}) if isinstance(profile, dict) else {}
+        board = profile.get("board", {}) if isinstance(profile, dict) else {}
+        hardware = profile.get("hardware", {}) if isinstance(profile, dict) else {}
+        imu_protocol = str(hardware.get("imu_protocol", "i2c") or "i2c").strip().lower()
+        encoder_protocol = (
+            str(hardware.get("encoder_protocol", "quadrature") or "quadrature")
+            .strip()
+            .lower()
+        )
+        actuator_type = str(
+            (profile or {})
+            .get("hardware", {})
+            .get("motor_driver", "dual_dc_hbridge_dir_pwm")
+        )
+        actuator_protocol = (
+            str(
+                hardware.get(
+                    "actuator_protocol",
+                    "gpio_dir_pwm"
+                    if "dir_pwm" in actuator_type.lower()
+                    else "gpio_pwm",
+                )
+                or "gpio_pwm"
+            )
+            .strip()
+            .lower()
+        )
+        manifest = {
+            "version": "runtime_manifest_v1",
+            "board": {
+                "id": str(target.get("id", "nano")),
+                "family": str(target.get("family", "arduino_avr")),
+                "fqbn": str(board.get("fqbn", "")).strip()
+                or str(target.get("fqbn", fqbn)),
+                "bootloader": str(board.get("bootloader", "")).strip() or "default",
+            },
+            "interfaces": {
+                "imu": {
+                    "type": str(
+                        (profile or {})
+                        .get("hardware", {})
+                        .get("imu_type", "imu_generic")
+                    ),
+                    "protocol": imu_protocol,
+                    "pins": {
+                        "sda": self._int_pin(pins, "imu_sda", -1),
+                        "scl": self._int_pin(pins, "imu_scl", -1),
+                        "miso": self._int_pin(pins, "imu_miso", -1),
+                        "mosi": self._int_pin(pins, "imu_mosi", -1),
+                        "sck": self._int_pin(pins, "imu_sck", -1),
+                        "cs": self._int_pin(pins, "imu_cs", -1),
+                        "rx": self._int_pin(pins, "imu_rx", -1),
+                        "tx": self._int_pin(pins, "imu_tx", -1),
+                    },
+                },
+                "encoders": {
+                    "type": "quadrature",
+                    "protocol": encoder_protocol,
+                    "pins": {
+                        "left_a": self._int_pin(pins, "enc_l_a", -1),
+                        "left_b": self._int_pin(pins, "enc_l_b", -1),
+                        "right_a": self._int_pin(pins, "enc_r_a", -1),
+                        "right_b": self._int_pin(pins, "enc_r_b", -1),
+                        "pulse": self._int_pin(pins, "enc_pulse", -1),
+                        "miso": self._int_pin(pins, "enc_miso", -1),
+                        "mosi": self._int_pin(pins, "enc_mosi", -1),
+                        "sck": self._int_pin(pins, "enc_sck", -1),
+                        "cs": self._int_pin(pins, "enc_cs", -1),
+                    },
+                },
+                "actuator": {
+                    "type": actuator_type,
+                    "protocol": actuator_protocol,
+                    "pins": {
+                        "left_pwm": self._int_pin(pins, "motor_l_pwm", -1),
+                        "left_dir": self._int_pin(pins, "motor_l_dir", -1),
+                        "right_pwm": self._int_pin(pins, "motor_r_pwm", -1),
+                        "right_dir": self._int_pin(pins, "motor_r_dir", -1),
+                        "can_tx": self._int_pin(pins, "motor_can_tx", -1),
+                        "can_rx": self._int_pin(pins, "motor_can_rx", -1),
+                    },
+                },
+            },
+            "telemetry_fields": [
+                "mode",
+                "ang",
+                "raw",
+                "gyro",
+                "out",
+                "fault",
+                "estop",
+                "kp",
+                "ki",
+                "kd",
+                "set",
+                "encL",
+                "encR",
+            ],
+            "commands": [
+                "GET",
+                "ARM",
+                "DISARM",
+                "PID",
+                "SETPOINT",
+                "LIMITS",
+                "CAL ZERO",
+                "SAVECFG",
+            ],
+            "generated_by": "firmware_manager",
+            "generated_at": int(time.time()),
+        }
+        topology = (
+            profile.get("mcu_topology")
+            if isinstance(profile, dict)
+            and isinstance(profile.get("mcu_topology"), dict)
+            else None
+        )
+        if isinstance(topology, dict) and topology:
+            manifest["mcu_topology"] = dict(topology)
+        return manifest
+
+    def ensure_runtime_manifest(
+        self,
+        *,
+        sketch: Optional[str] = None,
+        fqbn: Optional[str] = None,
+        profile: Optional[Dict[str, Any]] = None,
+        force_update: bool = False,
+    ) -> Dict[str, Any]:
+        effective_fqbn = str(fqbn or self.default_fqbn).strip() or self.default_fqbn
+        current = self.validate_runtime_manifest(
+            sketch=sketch, require_exists=not force_update
+        )
+        if (not force_update) and bool(current.get("ok", False)):
+            return {
+                "ok": True,
+                "action": "kept",
+                "manifest_path": str(current.get("manifest_path", "")),
+                "validation": current,
+            }
+        manifest = self._build_runtime_manifest_from_profile(
+            fqbn=effective_fqbn, profile=profile
+        )
+        written = self.write_runtime_manifest(
+            sketch=sketch, manifest=manifest, validate=True
+        )
+        post = self.validate_runtime_manifest(sketch=sketch, require_exists=True)
+        return {
+            "ok": bool(post.get("ok", False)),
+            "action": "updated" if force_update else "created",
+            "manifest_path": str(written.get("path", "")),
+            "validation": post,
+        }
 
     def list_sketch_folders(self) -> Dict[str, Any]:
         roots = [
@@ -859,7 +1525,30 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                     "led",
                 ],
             },
-            "optional_pins": ["enc_l_a", "enc_l_b", "enc_r_a", "enc_r_b"],
+            "optional_hardware": [
+                "imu_protocol",
+                "encoder_protocol",
+                "actuator_protocol",
+            ],
+            "optional_pins": [
+                "enc_l_a",
+                "enc_l_b",
+                "enc_r_a",
+                "enc_r_b",
+                "imu_miso",
+                "imu_mosi",
+                "imu_sck",
+                "imu_cs",
+                "imu_rx",
+                "imu_tx",
+                "enc_pulse",
+                "enc_miso",
+                "enc_mosi",
+                "enc_sck",
+                "enc_cs",
+                "motor_can_tx",
+                "motor_can_rx",
+            ],
             "notes": [
                 "Pin values must be integers. Use -1 for optional pins that are not present.",
                 "Board detection can infer FQBN/port, but wiring pins must come from user profile.",
@@ -903,6 +1592,23 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         motor_driver = str(hardware.get("motor_driver", "")).strip()
         if not motor_driver:
             errors.append("profile.hardware.motor_driver is required")
+        imu_protocol = str(hardware.get("imu_protocol", "i2c") or "i2c").strip().lower()
+        encoder_protocol = (
+            str(hardware.get("encoder_protocol", "quadrature") or "quadrature")
+            .strip()
+            .lower()
+        )
+        actuator_protocol = (
+            str(
+                hardware.get(
+                    "actuator_protocol",
+                    "gpio_dir_pwm" if "dir_pwm" in motor_driver.lower() else "gpio_pwm",
+                )
+                or "gpio_pwm"
+            )
+            .strip()
+            .lower()
+        )
 
         required_pin_keys = [
             "motor_l_pwm",
@@ -914,7 +1620,25 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             "gate_enable",
             "led",
         ]
-        optional_pin_keys = ["enc_l_a", "enc_l_b", "enc_r_a", "enc_r_b"]
+        optional_pin_keys = [
+            "enc_l_a",
+            "enc_l_b",
+            "enc_r_a",
+            "enc_r_b",
+            "imu_miso",
+            "imu_mosi",
+            "imu_sck",
+            "imu_cs",
+            "imu_rx",
+            "imu_tx",
+            "enc_pulse",
+            "enc_miso",
+            "enc_mosi",
+            "enc_sck",
+            "enc_cs",
+            "motor_can_tx",
+            "motor_can_rx",
+        ]
         parsed_pins: Dict[str, int] = {}
         for key in required_pin_keys + optional_pin_keys:
             raw = pins.get(key, -1 if key in optional_pin_keys else None)
@@ -937,6 +1661,9 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             "hardware": {
                 "imu_type": imu_type,
                 "motor_driver": motor_driver,
+                "imu_protocol": imu_protocol,
+                "encoder_protocol": encoder_protocol,
+                "actuator_protocol": actuator_protocol,
             },
             "pins": parsed_pins,
             "generated_at": int(time.time()),
@@ -1010,6 +1737,19 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                 json.dumps(norm, indent=2, sort_keys=True), encoding="utf-8"
             )
             rendered_files.append(str(profile_path))
+            manifest_status = self.ensure_runtime_manifest(
+                sketch=str(out_dir),
+                fqbn=str(norm.get("board", {}).get("fqbn", self.default_fqbn)),
+                profile=norm,
+                force_update=True,
+            )
+            manifest_path = str(
+                manifest_status.get(
+                    "manifest_path", self.runtime_manifest_path(sketch=str(out_dir))
+                )
+            )
+            if manifest_path:
+                rendered_files.append(manifest_path)
         except Exception:
             shutil.rmtree(out_dir, ignore_errors=True)
             raise
@@ -1023,6 +1763,7 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             "archive": archive,
             "files": rendered_files,
             "profile": norm,
+            "runtime_manifest": manifest_status,
         }
 
     def generate_docs_pack(
@@ -1342,8 +2083,9 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
 
 class AIManager:
     def __init__(self, repo_root: pathlib.Path) -> None:
+        self.repo_root = repo_root
         self.default_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-        self.default_model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+        self.default_model = os.environ.get("OPENAI_MODEL", "gpt-5-codex")
         self.base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.ssl_context = self._build_ssl_context()
         self.state_path = repo_root / "app" / "bridge" / "ai_threads.json"
@@ -1796,6 +2538,225 @@ class AIManager:
         tid = self._append(session_key, "user", user_msg, thread_id=thread_id)
         self._append(session_key, "assistant", answer, thread_id=tid)
         return {"answer": answer, "raw_id": raw_id, "thread_id": tid}
+
+    def chat_codex_cli(
+        self,
+        *,
+        message: str,
+        context: Dict[str, Any],
+        session_key: str,
+        model: str,
+        thread_id: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        timeout_s_override: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        user_msg = message.strip()
+        if not user_msg:
+            raise RuntimeError("empty_message")
+
+        selected_model = str(model or "gpt-5-codex").strip() or "gpt-5-codex"
+        prompt = system_prompt or (
+            "You are Codex for UpRight.os. Be concise, practical, and evidence-driven."
+        )
+        context_blob = json.dumps(context, ensure_ascii=True, separators=(",", ":"))
+        composed = (
+            f"{prompt}\n\n"
+            f"live_context={context_blob}\n\n"
+            f"user_request={user_msg}"
+        )
+
+        out_path = (
+            pathlib.Path("/tmp") / f"upright-codex-last-{secrets.token_urlsafe(10)}.txt"
+        )
+        cmd = [
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "-C",
+            str(self.repo_root),
+            "-s",
+            "danger-full-access",
+            "-c",
+            "shell_environment_policy.inherit=all",
+            "-m",
+            selected_model,
+            "--output-last-message",
+            str(out_path),
+            composed,
+        ]
+        timeout_s = (
+            int(timeout_s_override)
+            if isinstance(timeout_s_override, int) and timeout_s_override > 0
+            else int(os.environ.get("UPRIGHT_CODEX_EXEC_TIMEOUT_S", "180"))
+        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(30, timeout_s),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"codex_cli_timeout:{int(max(30, timeout_s))}s") from exc
+        except Exception as exc:
+            raise RuntimeError(f"codex_cli_failed:{exc}") from exc
+
+        answer = ""
+        try:
+            if out_path.exists():
+                answer = out_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            answer = ""
+        finally:
+            try:
+                out_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        if proc.returncode != 0:
+            stderr_tail = (proc.stderr or proc.stdout or "").strip()[-480:]
+            raise RuntimeError(f"codex_cli_error:{stderr_tail or proc.returncode}")
+
+        answer = answer or "(no output)"
+        tid = self._append(session_key, "user", user_msg, thread_id=thread_id)
+        self._append(session_key, "assistant", answer, thread_id=tid)
+        return {"answer": answer, "thread_id": tid, "provider": "codex_cli"}
+
+    def chat_codex_cli_stream(
+        self,
+        *,
+        message: str,
+        context: Dict[str, Any],
+        session_key: str,
+        model: str,
+        on_delta: Callable[[str], None],
+        on_progress: Optional[Callable[[str], None]] = None,
+        thread_id: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        timeout_s_override: Optional[int] = None,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, Any]:
+        user_msg = message.strip()
+        if not user_msg:
+            raise RuntimeError("empty_message")
+
+        selected_model = str(model or "gpt-5-codex").strip() or "gpt-5-codex"
+        prompt = system_prompt or (
+            "You are Codex for UpRight.os. Be concise, practical, and evidence-driven."
+        )
+        context_blob = json.dumps(context, ensure_ascii=True, separators=(",", ":"))
+        composed = (
+            f"{prompt}\n\n"
+            f"live_context={context_blob}\n\n"
+            f"user_request={user_msg}"
+        )
+
+        out_path = (
+            pathlib.Path("/tmp") / f"upright-codex-last-{secrets.token_urlsafe(10)}.txt"
+        )
+        cmd = [
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "-C",
+            str(self.repo_root),
+            "-s",
+            "danger-full-access",
+            "-c",
+            "shell_environment_policy.inherit=all",
+            "-m",
+            selected_model,
+            "--output-last-message",
+            str(out_path),
+            composed,
+        ]
+        timeout_s = (
+            int(timeout_s_override)
+            if isinstance(timeout_s_override, int) and timeout_s_override > 0
+            else int(os.environ.get("UPRIGHT_CODEX_EXEC_TIMEOUT_S", "180"))
+        )
+        max_wait_s = max(30, int(timeout_s))
+        start = time.time()
+        proc: Optional[subprocess.Popen[str]] = None
+        captured_lines: list[str] = []
+        capture_answer = False
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    raise RuntimeError("codex_cli_cancelled")
+                if (time.time() - start) > max_wait_s:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    raise RuntimeError(f"codex_cli_timeout:{max_wait_s}s")
+                if proc.stdout is None:
+                    break
+                line = proc.stdout.readline()
+                if line == "" and proc.poll() is not None:
+                    break
+                if not line:
+                    time.sleep(0.02)
+                    continue
+                raw = line.rstrip("\r\n")
+                low = raw.strip().lower()
+                if on_progress and raw.strip():
+                    on_progress(raw)
+                if low == "codex":
+                    capture_answer = True
+                    continue
+                if capture_answer:
+                    if low.startswith("tokens used"):
+                        capture_answer = False
+                        continue
+                    if raw.strip():
+                        captured_lines.append(raw)
+                        on_delta(raw + "\n")
+
+            rc = int(proc.wait(timeout=2))
+            if rc != 0:
+                stderr_tail = "\n".join(captured_lines[-8:]).strip()[-480:]
+                raise RuntimeError(f"codex_cli_error:{stderr_tail or rc}")
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"codex_cli_timeout:{max_wait_s}s") from exc
+        except Exception:
+            raise
+        finally:
+            try:
+                if proc and proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
+
+        answer = "\n".join(captured_lines).strip()
+        try:
+            if out_path.exists():
+                file_answer = out_path.read_text(encoding="utf-8").strip()
+                if file_answer:
+                    answer = file_answer
+        except Exception:
+            pass
+        finally:
+            try:
+                out_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        answer = answer or "(no output)"
+        tid = self._append(session_key, "user", user_msg, thread_id=thread_id)
+        self._append(session_key, "assistant", answer, thread_id=tid)
+        return {"answer": answer, "thread_id": tid, "provider": "codex_cli"}
 
 
 class MissionMemoryStore:
@@ -2265,6 +3226,109 @@ def _format_apply_note(apply_result: Dict[str, Any]) -> str:
     if sid:
         return f"Applied now: {sections}.{kd_note}{extra_note} Revert point saved ({sid}).".strip()
     return f"Applied now: {sections}.{kd_note}{extra_note}".strip()
+
+
+def _safe_upload_filename(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return f"upload_{int(time.time())}.bin"
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", pathlib.Path(raw).name).strip("._")
+    if not cleaned:
+        cleaned = f"upload_{int(time.time())}.bin"
+    return cleaned[:120]
+
+
+def _attachment_kind(mime: str, name: str) -> str:
+    m = str(mime or "").strip().lower()
+    n = str(name or "").strip().lower()
+    if m.startswith("image/"):
+        return "image"
+    if "csv" in m or n.endswith(".csv"):
+        return "csv"
+    if (
+        m.startswith("text/")
+        or "json" in m
+        or "yaml" in m
+        or "toml" in m
+        or n.endswith((".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".log"))
+    ):
+        return "text"
+    return "binary"
+
+
+def _agent_upload_from_body(
+    repo_root: pathlib.Path, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    name = _safe_upload_filename(str(body.get("name", "")))
+    mime = (
+        str(body.get("mime", "application/octet-stream")).strip()
+        or "application/octet-stream"
+    )
+    payload_b64 = str(body.get("content_base64", "")).strip()
+    if not payload_b64:
+        raise RuntimeError("missing_content_base64")
+    try:
+        raw = base64.b64decode(payload_b64, validate=True)
+    except Exception as exc:
+        raise RuntimeError(f"invalid_base64:{exc}") from exc
+    if not raw:
+        raise RuntimeError("empty_file")
+    if len(raw) > (5 * 1024 * 1024):
+        raise RuntimeError("file_too_large_max_5mb")
+
+    up_dir = repo_root / "app" / "bridge" / "agent_uploads"
+    up_dir.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    token = secrets.token_hex(4)
+    final_name = f"{stamp}_{token}_{name}"
+    target = up_dir / final_name
+    target.write_bytes(raw)
+
+    kind = _attachment_kind(mime, name)
+    text_excerpt = ""
+    if kind in {"text", "csv"}:
+        try:
+            text_excerpt = raw.decode("utf-8", errors="replace")[:16000]
+        except Exception:
+            text_excerpt = ""
+
+    return {
+        "id": f"att_{stamp}_{token}",
+        "name": name,
+        "mime": mime,
+        "kind": kind,
+        "size": len(raw),
+        "path": str(target),
+        "text_excerpt": text_excerpt,
+    }
+
+
+def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[Dict[str, Any]] = []
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        name = _safe_upload_filename(str(item.get("name", "")))
+        mime = str(item.get("mime", "")).strip() or "application/octet-stream"
+        kind = str(item.get("kind", "")).strip().lower() or _attachment_kind(mime, name)
+        path = str(item.get("path", "")).strip()
+        text_excerpt = str(item.get("text_excerpt", ""))[:16000]
+        size = int(item.get("size", 0) or 0)
+        if not name or (not path and not text_excerpt):
+            continue
+        out.append(
+            {
+                "name": name,
+                "mime": mime,
+                "kind": kind,
+                "path": path,
+                "size": size,
+                "text_excerpt": text_excerpt,
+            }
+        )
+    return out
 
 
 class ConfigHistoryManager:
@@ -3056,6 +4120,62 @@ class AssistantKnowledgeManager:
             return dict(payload)
 
 
+class AgentMissionManager:
+    def __init__(self, repo_root: pathlib.Path) -> None:
+        self.path = repo_root / "app" / "bridge" / "agent_mode.json"
+        self._lock = threading.Lock()
+        self._allowed_modes = ("app_dev", "robot_dev", "ops_debug")
+
+    def _default(self) -> Dict[str, Any]:
+        now = time.time()
+        return {
+            "mode": "robot_dev",
+            "updated_at": now,
+            "allowed_modes": list(self._allowed_modes),
+        }
+
+    def status(self) -> Dict[str, Any]:
+        with self._lock:
+            if not self.path.exists():
+                payload = self._default()
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text(
+                    json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+                )
+                return payload
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict):
+                    return self._default()
+                mode = str(raw.get("mode", "robot_dev")).strip()
+                if mode not in self._allowed_modes:
+                    mode = "robot_dev"
+                updated_at = float(raw.get("updated_at", time.time()) or time.time())
+                return {
+                    "mode": mode,
+                    "updated_at": updated_at,
+                    "allowed_modes": list(self._allowed_modes),
+                }
+            except Exception:
+                return self._default()
+
+    def set_mode(self, mode: str) -> Dict[str, Any]:
+        normalized = str(mode).strip()
+        if normalized not in self._allowed_modes:
+            raise RuntimeError("invalid_mode")
+        payload = {
+            "mode": normalized,
+            "updated_at": time.time(),
+            "allowed_modes": list(self._allowed_modes),
+        }
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
+        return payload
+
+
 # Cache for .codexrules content to avoid repeated file reads
 _codexrules_cache: Dict[str, Any] = {"content": None, "mtime": 0.0}
 
@@ -3167,6 +4287,258 @@ def _resolve_system_prompt(
     return "\n\n".join(
         x for x in [codexrules, custom, action_block, response_contract] if x
     ).strip()
+
+
+def _agent_mode_system_prompt(mode: str) -> str:
+    base = (
+        "You are the UpRight.os build-and-robot agent. "
+        "Be concise, evidence-driven, and execution-first. "
+        "Never claim execution unless present in provided tool/status evidence. "
+        "Do not claim sandbox/read-only/environment limits unless a tool call in this turn failed with that exact error. "
+        "Response format contract: always use markdown with these sections in order: "
+        "## Summary, ## Findings, ## Evidence, ## Actions. "
+        "Under Findings, use short bullets only. "
+        "Under Evidence, include file references as inline code with optional :line. "
+        "Under Actions, include numbered steps with concrete commands when possible. "
+        "Avoid dense paragraphs longer than 3 lines. "
+        "Do not emit raw citation tokens like [cite], □cite□, or JSON blobs."
+    )
+    if mode == "app_dev":
+        return (
+            f"{base} "
+            "Primary mission: app and bridge development. "
+            "Prioritize code changes, tests, compile/typecheck status, and concrete next edits. "
+            "When giving suggestions, tie them to files, commands, and expected verification output. "
+            "Use execute_shell proactively to inspect, build, test, and verify changes in this repository."
+        )
+    if mode == "ops_debug":
+        return (
+            f"{base} "
+            "Primary mission: incident triage and ops troubleshooting. "
+            "Prioritize root-cause from telemetry/logs, smallest safe recovery action, and verification checks."
+        )
+    return (
+        f"{base} "
+        "Primary mission: robot bring-up, firmware/test loops, tuning, and safe controls. "
+        "Prioritize command/status contract, safety gates, and next best experiment."
+    )
+
+
+def _agent_model_allowed(model: str) -> bool:
+    m = str(model or "").strip().lower()
+    if not m:
+        return False
+    # Hard gate: agent runtime must use Codex-class models only.
+    # This intentionally rejects non-Codex defaults.
+    return "codex" in m
+
+
+def _agent_mode_default_model(mode: str) -> str:
+    mode_norm = str(mode or "").strip().lower()
+    if mode_norm in {"app_dev", "robot_dev", "ops_debug"}:
+        return "gpt-5-codex"
+    return "gpt-5-codex"
+
+
+def _agent_resolve_model(mode: str, resolved_model: str, *, prefer_codex: bool) -> str:
+    candidate = str(resolved_model or "").strip()
+    if prefer_codex:
+        if _agent_model_allowed(candidate):
+            return candidate
+        return _agent_mode_default_model(mode)
+    if candidate:
+        return candidate
+    return _agent_mode_default_model(mode)
+
+
+def _agent_choose_executor(
+    *,
+    mode: str,
+    enable_tools: bool,
+    has_api_key: bool,
+    codex_logged_in: bool,
+    codex_agent_available: bool,
+) -> Dict[str, Any]:
+    mode_norm = str(mode or "").strip().lower()
+    wants_tools = bool(enable_tools)
+    policy = (
+        os.environ.get("UPRIGHT_AGENT_EXECUTOR_POLICY", "codex_cli_only")
+        .strip()
+        .lower()
+    )
+    can_tools = bool(wants_tools and has_api_key and codex_agent_available)
+    if can_tools:
+        return {
+            "executor": "openai_tools",
+            "degraded": False,
+            "degraded_reason": "",
+            "can_execute": True,
+        }
+
+    if codex_logged_in:
+        return {
+            "executor": "codex_cli_exec",
+            "degraded": wants_tools,
+            "degraded_reason": (
+                "tool_execution_unavailable_no_api_key" if wants_tools else ""
+            ),
+            "can_execute": True,
+        }
+
+    # Optional fallback policy; default is codex_cli_only to avoid runtime flapping
+    # between providers and to keep behavior aligned with local Codex login UX.
+    if has_api_key and policy in {"allow_openai_chat_fallback", "legacy"}:
+        return {
+            "executor": "openai_chat",
+            "degraded": wants_tools,
+            "degraded_reason": "tool_execution_unavailable_agent_backend"
+            if wants_tools
+            else "",
+            "can_execute": True,
+        }
+
+    # Hard block App Dev when neither tool-capable key nor codex login exists.
+    if mode_norm == "app_dev":
+        return {
+            "executor": "blocked",
+            "degraded": True,
+            "degraded_reason": "app_dev_requires_codex_login_or_api_key",
+            "can_execute": False,
+        }
+    return {
+        "executor": "blocked",
+        "degraded": True,
+        "degraded_reason": "codex_login_required",
+        "can_execute": False,
+    }
+
+
+def _install_runtime_diagnostics() -> None:
+    # Emit signal/uncaught-thread diagnostics to stderr so launcher logs show
+    # why the bridge exited unexpectedly.
+    try:
+        faulthandler.enable(all_threads=True)
+    except Exception:
+        pass
+
+    def _signal_handler(signum: int, frame: Any) -> None:
+        try:
+            signame = signal.Signals(signum).name
+        except Exception:
+            signame = str(signum)
+        print(
+            f"bridge terminating via signal: {signame} ({signum})",
+            file=sys.stderr,
+            flush=True,
+        )
+        if signum == signal.SIGINT:
+            signal.default_int_handler(signum, frame)
+        raise SystemExit(128 + int(signum))
+
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        try:
+            signal.signal(sig, _signal_handler)
+        except Exception:
+            continue
+
+    def _thread_excepthook(args: threading.ExceptHookArgs) -> None:
+        print(
+            f"uncaught thread exception in {getattr(args, 'thread', None)}:"
+            f" {getattr(args, 'exc_type', None)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
+        except Exception:
+            pass
+
+    try:
+        threading.excepthook = _thread_excepthook
+    except Exception:
+        pass
+
+
+_codex_login_cache_lock = threading.Lock()
+_codex_login_cache: Dict[str, Any] = {
+    "checked_at_monotonic": 0.0,
+    "status": {"available": False, "logged_in": False, "detail": "not_checked"},
+    "last_good_at_monotonic": 0.0,
+}
+
+
+def _codex_cli_login_status() -> Dict[str, Any]:
+    now = time.monotonic()
+    with _codex_login_cache_lock:
+        checked_at = float(_codex_login_cache.get("checked_at_monotonic", 0.0) or 0.0)
+        cached = _codex_login_cache.get("status")
+        if isinstance(cached, dict) and (now - checked_at) < 20.0:
+            return dict(cached)
+
+    prior_status: Dict[str, Any] = {}
+    prior_good_at = 0.0
+    with _codex_login_cache_lock:
+        if isinstance(_codex_login_cache.get("status"), dict):
+            prior_status = dict(_codex_login_cache["status"])
+        prior_good_at = float(
+            _codex_login_cache.get("last_good_at_monotonic", 0.0) or 0.0
+        )
+
+    status: Dict[str, Any]
+    try:
+        proc = subprocess.run(
+            ["codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+    except FileNotFoundError:
+        status = {
+            "available": False,
+            "logged_in": False,
+            "detail": "codex_not_installed",
+        }
+    except Exception as exc:
+        status = {
+            "available": True,
+            "logged_in": False,
+            "detail": f"codex_status_error:{exc}",
+        }
+    else:
+        txt = f"{proc.stdout}\n{proc.stderr}".strip()
+        logged_in = proc.returncode == 0 and "logged in" in txt.lower()
+        status = {
+            "available": True,
+            "logged_in": bool(logged_in),
+            "detail": txt[:240],
+        }
+
+    detail_norm = str(status.get("detail", "")).strip().lower()
+    explicitly_logged_out = ("not logged in" in detail_norm) or (
+        "login required" in detail_norm
+    )
+    transient_probe_failure = detail_norm.startswith("codex_status_error:")
+    if (
+        not bool(status.get("logged_in"))
+        and not explicitly_logged_out
+        and transient_probe_failure
+        and bool(prior_status.get("logged_in"))
+        and (prior_good_at > 0.0)
+    ):
+        status = {
+            "available": True,
+            "logged_in": True,
+            "detail": f"stale_login_cache:{str(status.get('detail', 'status_probe_failed'))[:180]}",
+            "stale": True,
+        }
+
+    with _codex_login_cache_lock:
+        _codex_login_cache["checked_at_monotonic"] = now
+        _codex_login_cache["status"] = dict(status)
+        if bool(status.get("logged_in")):
+            _codex_login_cache["last_good_at_monotonic"] = now
+
+    return dict(status)
 
 
 def _extract_mission_facts(history: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -3371,6 +4743,271 @@ def _normalize_reply_for_prompt(user_msg: str, reply: str) -> str:
     return out
 
 
+def _clean_default_sketch_path(
+    repo_root: pathlib.Path, firmware: "FirmwareManager"
+) -> str:
+    env_override = str(os.environ.get("UPRIGHT_CLEAN_SKETCH", "")).strip()
+    if env_override:
+        return env_override
+    # Clean lane must not inherit legacy firmware defaults from FirmwareManager.
+    return str(
+        repo_root / "app" / "bridge" / "firmware_templates" / "profiled_runtime_v1"
+    )
+
+
+def _clean_default_fqbn() -> str:
+    return str(
+        os.environ.get(
+            "UPRIGHT_CLEAN_COMPILE_FQBN", "arduino:avr:nano:cpu=atmega328old"
+        )
+    )
+
+
+def _clean_upload_target_meta(
+    *, fqbn: str, firmware: "FirmwareManager"
+) -> Dict[str, Any]:
+    targets = firmware.list_targets()
+    board_id = _board_id_for_fqbn(fqbn, targets) or "unknown"
+    family = _family_for_fqbn(fqbn, targets) or "unknown"
+    board_label = board_id
+    for row in list(targets.get("boards") or []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("id", "")).strip() != board_id:
+            continue
+        board_label = str(row.get("label", "")).strip() or board_id
+        break
+    return {
+        "fqbn": str(fqbn).strip(),
+        "board_id": board_id,
+        "board_family": family,
+        "board_label": board_label,
+    }
+
+
+def _clean_upload_target_runbook(target: Dict[str, Any]) -> Dict[str, Any]:
+    family = str(target.get("board_family", "")).strip().lower()
+    board_id = str(target.get("board_id", "")).strip().lower()
+    fqbn = str(target.get("fqbn", "")).strip().lower()
+
+    upload_sequence_steps = [
+        {
+            "id": "confirm_port",
+            "label": "Confirm selected serial port matches the active board.",
+            "action_key": "detect_port",
+        },
+        {
+            "id": "compile_first",
+            "label": "Compile first.",
+            "action_key": "compile",
+        },
+        {
+            "id": "upload_guarded",
+            "label": "Run guarded upload.",
+            "action_key": "upload",
+        },
+        {
+            "id": "verify_after_upload",
+            "label": "Refresh status and verify telemetry is live.",
+            "action_key": "refresh_status",
+        },
+    ]
+    family_boot = "Use board-specific boot/reset sequence before retry."
+    if family == "arduino_avr":
+        if board_id == "nano":
+            if "atmega328old" in fqbn:
+                family_boot = "Nano (Old bootloader selected): if sync fails, try New bootloader and retry within 2s of reset."
+            else:
+                family_boot = "Nano (New bootloader selected): if sync fails, try Old bootloader and retry within 2s of reset."
+        else:
+            family_boot = "AVR board: press reset once and retry upload immediately."
+    elif family == "esp32":
+        family_boot = "ESP32: hold BOOT, tap EN/RESET once, then retry upload."
+    elif family == "rp2040":
+        family_boot = "RP2040: hold BOOTSEL while plugging in (or reset to UF2 mode), then retry upload."
+    elif family == "teensy":
+        family_boot = "Teensy: press Program button once, then retry upload."
+
+    recovery_steps = {
+        "firmware_busy": [
+            {
+                "id": "firmware_busy_refresh",
+                "label": "Refresh status and ensure runner is idle.",
+                "action_key": "refresh_status",
+            },
+            {
+                "id": "firmware_busy_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "upload_port_missing": [
+            {
+                "id": "port_missing_detect",
+                "label": "Run Detect / Re-Detect Port.",
+                "action_key": "detect_port",
+            },
+            {
+                "id": "port_missing_select",
+                "label": "Select the active serial port.",
+                "action_key": "select_port",
+            },
+            {
+                "id": "port_missing_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "selected_port_not_detected": [
+            {
+                "id": "port_not_detected_redetect",
+                "label": "Run Re-Detect Port.",
+                "action_key": "detect_port",
+            },
+            {
+                "id": "port_not_detected_select",
+                "label": "Select the detected board port.",
+                "action_key": "select_port",
+            },
+            {
+                "id": "port_not_detected_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "bridge_disconnected": [
+            {
+                "id": "bridge_disconnected_copy",
+                "label": "Copy restart command.",
+                "action_key": "copy_restart_cmd",
+            },
+            {
+                "id": "bridge_disconnected_check",
+                "label": "Run recovery check after restart.",
+                "action_key": "check",
+            },
+            {
+                "id": "bridge_disconnected_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "runtime_manifest_invalid": [
+            {
+                "id": "manifest_invalid_check",
+                "label": "Run recovery check and read manifest validation errors.",
+                "action_key": "check",
+            },
+            {
+                "id": "manifest_invalid_retry",
+                "label": "After fixing manifest, retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "bootloader_sync": [
+            {
+                "id": "bootloader_sync_switch",
+                "label": family_boot,
+                "action_key": "set_bootloader",
+            },
+            {
+                "id": "bootloader_sync_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+    }
+    recovery = {
+        k: [str(step.get("label", "")).strip() for step in v if isinstance(step, dict)]
+        for k, v in recovery_steps.items()
+    }
+    return {
+        "target": target,
+        "upload_sequence": [
+            str(step.get("label", "")).strip()
+            for step in upload_sequence_steps
+            if isinstance(step, dict)
+        ],
+        "upload_sequence_steps": upload_sequence_steps,
+        "recovery": recovery,
+        "recovery_steps": recovery_steps,
+    }
+
+
+def _clean_upload_precheck_payload(
+    *,
+    gateway: NanoSerialGateway,
+    firmware: FirmwareManager,
+    requested_port: str,
+    requested_fqbn: str,
+    requested_sketch: str,
+) -> Dict[str, Any]:
+    effective_port = (
+        requested_port or str(os.environ.get("UPRIGHT_CLEAN_UPLOAD_PORT", "")).strip()
+    )
+    firmware_st = firmware.status()
+    boards = firmware.list_boards()
+    detected_ports: list[str] = []
+    for row in boards.get("ports") or []:
+        if not isinstance(row, dict):
+            continue
+        addr = str(row.get("address") or "").strip()
+        if addr:
+            detected_ports.append(addr)
+    detected_set = set(detected_ports)
+    health = gateway.health()
+
+    reasons: list[str] = []
+    if bool(firmware_st.get("running", False)):
+        reasons.append("firmware_busy")
+    if not effective_port:
+        reasons.append("upload_port_missing")
+    if (
+        effective_port
+        and bool(boards.get("ok", False))
+        and len(detected_set) > 0
+        and effective_port not in detected_set
+    ):
+        reasons.append("selected_port_not_detected")
+    if not bool(health.get("connected", False)):
+        # Informational for upload flows; guarded upload can still attempt recovery.
+        reasons.append("bridge_disconnected")
+    manifest_gate = firmware.validate_runtime_manifest(
+        sketch=requested_sketch,
+        require_exists=True,
+    )
+    if not bool(manifest_gate.get("ok", False)):
+        reasons.append("runtime_manifest_invalid")
+    runbook = _clean_upload_target_runbook(
+        _clean_upload_target_meta(fqbn=requested_fqbn, firmware=firmware)
+    )
+    hard_fail_reasons = [
+        r
+        for r in reasons
+        if r
+        in (
+            "firmware_busy",
+            "upload_port_missing",
+            "selected_port_not_detected",
+            "runtime_manifest_invalid",
+        )
+    ]
+    return {
+        "ok": True,
+        "ready": len(hard_fail_reasons) == 0,
+        "error": "upload_precheck_failed" if hard_fail_reasons else "",
+        "reasons": reasons,
+        "hard_fail_reasons": hard_fail_reasons,
+        "port": effective_port,
+        "sketch": requested_sketch,
+        "detected_ports": detected_ports,
+        "boards_ok": bool(boards.get("ok", False)),
+        "bridge_connected": bool(health.get("connected", False)),
+        "manifest_validation": manifest_gate,
+        "target_runbook": runbook,
+    }
+
+
 def _summarize_tool_failures(tool_calls: Any) -> str:
     """Return a concise deterministic failure summary from tool call results."""
     if not isinstance(tool_calls, list):
@@ -3527,6 +5164,877 @@ def _format_hardware_context_notice(hardware_context: Any, update_info: Any) -> 
     if changed_txt:
         return f"Hardware context updated ({board_label}). Changed fields: {changed_txt}. I will adapt guidance to the new parts map."
     return f"Hardware context updated ({board_label}). I will adapt guidance to the new parts map."
+
+
+def _pin_range_for_family(family: str) -> tuple[int, int]:
+    fam = str(family or "").strip().lower()
+    if fam == "esp32":
+        return (0, 39)
+    if fam == "rp2040":
+        return (0, 29)
+    if fam == "teensy":
+        return (0, 54)
+    return (0, 21)  # arduino_avr default
+
+
+def _family_capabilities() -> Dict[str, Dict[str, Any]]:
+    return {
+        "arduino_avr": {
+            "default_telemetry_hz": 200,
+            "imu_protocols": ["i2c"],
+            "encoder_protocols": ["quadrature", "hall"],
+            "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm"],
+            "actuator_classes": ["dual_dc_hbridge_pwm", "dual_dc_hbridge_dir_pwm"],
+        },
+        "esp32": {
+            "default_telemetry_hz": 250,
+            "imu_protocols": ["i2c", "spi"],
+            "encoder_protocols": ["quadrature", "hall", "spi"],
+            "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm", "can"],
+            "actuator_classes": [
+                "dual_dc_hbridge_pwm",
+                "dual_dc_hbridge_dir_pwm",
+                "bldc_foc",
+            ],
+        },
+        "rp2040": {
+            "default_telemetry_hz": 250,
+            "imu_protocols": ["i2c", "spi"],
+            "encoder_protocols": ["quadrature", "hall", "spi"],
+            "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm"],
+            "actuator_classes": ["dual_dc_hbridge_pwm", "dual_dc_hbridge_dir_pwm"],
+        },
+        "teensy": {
+            "default_telemetry_hz": 400,
+            "imu_protocols": ["i2c", "spi", "uart"],
+            "encoder_protocols": ["quadrature", "hall", "spi"],
+            "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm", "can"],
+            "actuator_classes": [
+                "dual_dc_hbridge_pwm",
+                "dual_dc_hbridge_dir_pwm",
+                "bldc_foc",
+            ],
+        },
+    }
+
+
+def _protocol_schema() -> Dict[str, Dict[str, Dict[str, Any]]]:
+    return {
+        "imu": {
+            "i2c": {"required_pins": ["sda", "scl"]},
+            "spi": {"required_pins": ["miso", "mosi", "sck", "cs"]},
+            "uart": {"required_pins": ["rx", "tx"]},
+        },
+        "encoders": {
+            "quadrature": {
+                "required_any_pin_groups": [
+                    ["left_a", "left_b"],
+                    ["right_a", "right_b"],
+                ]
+            },
+            "hall": {"required_any_pins": ["left_a", "right_a", "pulse"]},
+            "spi": {"required_pins": ["miso", "mosi", "sck", "cs"]},
+        },
+        "actuator": {
+            "gpio_pwm": {"required_pins": ["left_pwm", "right_pwm"]},
+            "gpio_dir_pwm": {
+                "required_pins": ["left_pwm", "right_pwm", "left_dir", "right_dir"]
+            },
+            "can": {"required_pins": ["can_tx", "can_rx"]},
+        },
+    }
+
+
+def _has_valid_pin(pins: Dict[str, Any], key: str) -> bool:
+    if key not in pins:
+        return False
+    try:
+        return int(pins[key]) >= 0
+    except Exception:
+        return False
+
+
+def _validate_protocol_pins(
+    *,
+    node_name: str,
+    protocol: str,
+    pins: Dict[str, Any],
+    spec: Dict[str, Any],
+    errors: list[str],
+) -> None:
+    required = [
+        str(x).strip() for x in list(spec.get("required_pins") or []) if str(x).strip()
+    ]
+    for key in required:
+        if not _has_valid_pin(pins, key):
+            errors.append(
+                f"interfaces.{node_name}.protocol_pin_missing:{protocol}.{key}"
+            )
+    any_pins = [
+        str(x).strip()
+        for x in list(spec.get("required_any_pins") or [])
+        if str(x).strip()
+    ]
+    if any_pins and not any(_has_valid_pin(pins, k) for k in any_pins):
+        errors.append(
+            f"interfaces.{node_name}.protocol_pin_missing_any:{protocol}:{'|'.join(any_pins)}"
+        )
+    any_groups = list(spec.get("required_any_pin_groups") or [])
+    if any_groups:
+        group_ok = False
+        rendered: list[str] = []
+        for raw_group in any_groups:
+            group = [str(x).strip() for x in list(raw_group or []) if str(x).strip()]
+            if not group:
+                continue
+            rendered.append("&".join(group))
+            if all(_has_valid_pin(pins, k) for k in group):
+                group_ok = True
+        if not group_ok and rendered:
+            errors.append(
+                f"interfaces.{node_name}.protocol_pin_group_missing:{protocol}:{'|'.join(rendered)}"
+            )
+
+
+def _validate_runtime_manifest_v1(
+    manifest: Any, targets: Dict[str, Any]
+) -> Dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(manifest, dict):
+        return {
+            "ok": False,
+            "errors": ["manifest_not_object"],
+            "warnings": [],
+        }
+
+    version = str(manifest.get("version", "")).strip()
+    if version != "runtime_manifest_v1":
+        errors.append("version_invalid")
+
+    board = manifest.get("board")
+    if not isinstance(board, dict):
+        errors.append("board_missing")
+        board = {}
+    interfaces = manifest.get("interfaces")
+    if not isinstance(interfaces, dict):
+        errors.append("interfaces_missing")
+        interfaces = {}
+
+    telemetry_fields = manifest.get("telemetry_fields")
+    if not isinstance(telemetry_fields, list):
+        errors.append("telemetry_fields_missing")
+        telemetry_fields = []
+    commands = manifest.get("commands")
+    if not isinstance(commands, list):
+        errors.append("commands_missing")
+        commands = []
+    mcu_topology = manifest.get("mcu_topology")
+    if mcu_topology is not None and not isinstance(mcu_topology, dict):
+        errors.append("mcu_topology_invalid")
+        mcu_topology = {}
+
+    board_id = str(board.get("id", "")).strip()
+    board_family = str(board.get("family", "")).strip()
+    board_fqbn = str(board.get("fqbn", "")).strip()
+    if not board_id:
+        errors.append("board.id_required")
+    if not board_family:
+        errors.append("board.family_required")
+    if not board_fqbn:
+        errors.append("board.fqbn_required")
+
+    target_rows = list(targets.get("boards") or []) if isinstance(targets, dict) else []
+    target_by_id = {
+        str(row.get("id", "")).strip(): row
+        for row in target_rows
+        if isinstance(row, dict) and str(row.get("id", "")).strip()
+    }
+    target_board = target_by_id.get(board_id)
+    if board_id and target_board is None:
+        errors.append(f"board.id_unknown:{board_id}")
+    if target_board is not None:
+        target_family = str(target_board.get("family", "")).strip()
+        if board_family and target_family and board_family != target_family:
+            errors.append(
+                f"board.family_mismatch:manifest={board_family},registry={target_family}"
+            )
+        base = str(target_board.get("fqbn_base", "")).strip()
+        bootloaders = list(target_board.get("bootloaders") or [])
+        valid_fqbns = {base}
+        for b in bootloaders:
+            if not isinstance(b, dict):
+                continue
+            valid_fqbns.add(f"{base}{str(b.get('fqbn_suffix', '')).strip()}")
+        if board_fqbn and board_fqbn not in valid_fqbns:
+            errors.append("board.fqbn_not_allowed_for_board_id")
+    family_caps = _family_capabilities().get(
+        str((target_board or {}).get("family", "")).strip() or board_family,
+        {},
+    )
+
+    required_cmds = {"GET", "ARM", "DISARM", "PID", "SETPOINT"}
+    cmd_set = {str(c).strip().upper() for c in commands if str(c).strip()}
+    missing_cmds = sorted(list(required_cmds - cmd_set))
+    for c in missing_cmds:
+        errors.append(f"commands.missing:{c}")
+
+    tf = [str(x).strip() for x in telemetry_fields if str(x).strip()]
+    tf_set = set(tf)
+    for fld in ["mode", "ang", "raw", "out", "fault", "estop"]:
+        if fld not in tf_set:
+            errors.append(f"telemetry_fields.missing:{fld}")
+    if not any(k in tf_set for k in ("gyro", "gyr", "gx")):
+        errors.append("telemetry_fields.missing:gyro|gyr|gx")
+
+    imu = interfaces.get("imu")
+    enc = interfaces.get("encoders")
+    act = interfaces.get("actuator")
+    if not isinstance(imu, dict):
+        errors.append("interfaces.imu_missing")
+        imu = {}
+    if not isinstance(enc, dict):
+        errors.append("interfaces.encoders_missing")
+        enc = {}
+    if not isinstance(act, dict):
+        errors.append("interfaces.actuator_missing")
+        act = {}
+
+    imu_protocol = str(imu.get("protocol", "i2c") or "i2c").strip().lower()
+    enc_protocol = (
+        str(enc.get("protocol", "quadrature") or "quadrature").strip().lower()
+    )
+    raw_act_protocol = str(act.get("protocol", "") or "").strip().lower()
+    act_type = str(act.get("type", "") or "").strip().lower()
+    act_protocol = raw_act_protocol or (
+        "gpio_dir_pwm" if "dir_pwm" in act_type else "gpio_pwm"
+    )
+
+    protocol_schema = _protocol_schema()
+    if imu_protocol not in protocol_schema["imu"]:
+        errors.append(f"interfaces.imu.protocol_invalid:{imu_protocol}")
+    if enc_protocol not in protocol_schema["encoders"]:
+        errors.append(f"interfaces.encoders.protocol_invalid:{enc_protocol}")
+    if act_protocol not in protocol_schema["actuator"]:
+        errors.append(f"interfaces.actuator.protocol_invalid:{act_protocol}")
+
+    imu_allowed = set(
+        str(x).strip().lower() for x in list(family_caps.get("imu_protocols") or [])
+    )
+    enc_allowed = set(
+        str(x).strip().lower() for x in list(family_caps.get("encoder_protocols") or [])
+    )
+    act_allowed = set(
+        str(x).strip().lower()
+        for x in list(family_caps.get("actuator_protocols") or [])
+    )
+    if imu_allowed and imu_protocol and imu_protocol not in imu_allowed:
+        errors.append(
+            f"interfaces.imu.protocol_not_supported_for_family:{board_family}:{imu_protocol}"
+        )
+    if enc_allowed and enc_protocol and enc_protocol not in enc_allowed:
+        errors.append(
+            f"interfaces.encoders.protocol_not_supported_for_family:{board_family}:{enc_protocol}"
+        )
+    if act_allowed and act_protocol and act_protocol not in act_allowed:
+        errors.append(
+            f"interfaces.actuator.protocol_not_supported_for_family:{board_family}:{act_protocol}"
+        )
+
+    used_pins: Dict[int, str] = {}
+    lo, hi = _pin_range_for_family(board_family or "arduino_avr")
+    for node_name, node in [("imu", imu), ("encoders", enc), ("actuator", act)]:
+        pins = node.get("pins") if isinstance(node, dict) else {}
+        if not isinstance(pins, dict):
+            errors.append(f"interfaces.{node_name}.pins_missing")
+            continue
+        for key, raw in pins.items():
+            try:
+                pin = int(raw)
+            except Exception:
+                errors.append(f"interfaces.{node_name}.pins.{key}_not_int")
+                continue
+            if pin < 0:
+                continue
+            if pin < lo or pin > hi:
+                errors.append(
+                    f"interfaces.{node_name}.pins.{key}_out_of_range:{pin} (expected {lo}-{hi})"
+                )
+            prev = used_pins.get(pin)
+            if prev:
+                errors.append(f"pin_conflict:{pin}:{prev} vs {node_name}.{key}")
+            else:
+                used_pins[pin] = f"{node_name}.{key}"
+
+    imu_pins = imu.get("pins") if isinstance(imu.get("pins"), dict) else {}
+    enc_pins = enc.get("pins") if isinstance(enc.get("pins"), dict) else {}
+    act_pins = act.get("pins") if isinstance(act.get("pins"), dict) else {}
+    if imu_protocol in protocol_schema["imu"]:
+        _validate_protocol_pins(
+            node_name="imu",
+            protocol=imu_protocol,
+            pins=imu_pins,
+            spec=protocol_schema["imu"][imu_protocol],
+            errors=errors,
+        )
+    if enc_protocol in protocol_schema["encoders"]:
+        _validate_protocol_pins(
+            node_name="encoders",
+            protocol=enc_protocol,
+            pins=enc_pins,
+            spec=protocol_schema["encoders"][enc_protocol],
+            errors=errors,
+        )
+    if act_protocol in protocol_schema["actuator"]:
+        _validate_protocol_pins(
+            node_name="actuator",
+            protocol=act_protocol,
+            pins=act_pins,
+            spec=protocol_schema["actuator"][act_protocol],
+            errors=errors,
+        )
+
+    if not board_id or not board_family or not board_fqbn:
+        warnings.append("board_identity_incomplete")
+    if "LIMITS" not in cmd_set:
+        warnings.append("commands.optional_missing:LIMITS")
+    if "MOTION" not in cmd_set:
+        warnings.append("commands.optional_missing:MOTION")
+
+    if isinstance(mcu_topology, dict) and mcu_topology:
+        control_mcu = mcu_topology.get("control_mcu")
+        if not isinstance(control_mcu, dict):
+            errors.append("mcu_topology.control_mcu_missing")
+            control_mcu = {}
+        control_id = str((control_mcu or {}).get("id", "")).strip()
+        control_role = str((control_mcu or {}).get("role", "")).strip().lower()
+        if not control_id:
+            errors.append("mcu_topology.control_mcu.id_required")
+        if control_role and control_role != "control":
+            errors.append("mcu_topology.control_mcu.role_invalid")
+        control_fqbn = str((control_mcu or {}).get("fqbn", "")).strip()
+        if control_fqbn and board_fqbn and control_fqbn != board_fqbn:
+            warnings.append("mcu_topology.control_mcu.fqbn_differs_from_board")
+
+        io_mcu = mcu_topology.get("io_mcu")
+        if io_mcu is not None and not isinstance(io_mcu, dict):
+            errors.append("mcu_topology.io_mcu_invalid")
+        if isinstance(io_mcu, dict):
+            io_id = str(io_mcu.get("id", "")).strip()
+            io_role = str(io_mcu.get("role", "")).strip().lower()
+            if not io_id:
+                errors.append("mcu_topology.io_mcu.id_required")
+            if io_role and io_role != "io":
+                errors.append("mcu_topology.io_mcu.role_invalid")
+            if control_id and io_id and control_id == io_id:
+                errors.append("mcu_topology.io_mcu.id_conflicts_with_control")
+
+        link = mcu_topology.get("link")
+        if link is not None and not isinstance(link, dict):
+            errors.append("mcu_topology.link_invalid")
+        if isinstance(link, dict):
+            transport = str(link.get("transport", "")).strip().lower()
+            if transport and transport not in {"uart", "spi", "i2c", "can", "none"}:
+                errors.append("mcu_topology.link.transport_invalid")
+
+        command_namespaces = mcu_topology.get("command_namespaces")
+        if command_namespaces is not None and not isinstance(command_namespaces, dict):
+            errors.append("mcu_topology.command_namespaces_invalid")
+        if isinstance(command_namespaces, dict):
+            rc_ns = str(command_namespaces.get("remote_control", "")).strip()
+            if rc_ns and not rc_ns.endswith("_"):
+                warnings.append(
+                    "mcu_topology.command_namespaces.remote_control_suffix_recommended"
+                )
+
+    return {
+        "ok": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def _manifest_required_field_present(token: str, available: set[str]) -> bool:
+    raw = str(token or "").strip()
+    if not raw:
+        return False
+    options = [part.strip() for part in raw.split("|") if part.strip()]
+    if not options:
+        return False
+    return any(opt in available for opt in options)
+
+
+def _family_for_fqbn(fqbn: str, targets: Dict[str, Any]) -> str:
+    raw = str(fqbn or "").strip()
+    for row in list(targets.get("boards") or []):
+        if not isinstance(row, dict):
+            continue
+        base = str(row.get("fqbn_base", "")).strip()
+        if not base:
+            continue
+        if raw == base or raw.startswith(f"{base}:"):
+            return str(row.get("family", "")).strip()
+    return ""
+
+
+def _board_id_for_fqbn(fqbn: str, targets: Dict[str, Any]) -> str:
+    raw = str(fqbn or "").strip()
+    for row in list(targets.get("boards") or []):
+        if not isinstance(row, dict):
+            continue
+        base = str(row.get("fqbn_base", "")).strip()
+        if not base:
+            continue
+        if raw == base or raw.startswith(f"{base}:"):
+            return str(row.get("id", "")).strip()
+    return ""
+
+
+def _runtime_manifest_profile_compatibility(
+    *,
+    manifest_validation: Dict[str, Any],
+    active_profile: Optional[Dict[str, Any]],
+    targets: Dict[str, Any],
+) -> Dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    checks: Dict[str, Any] = {}
+
+    if not bool(manifest_validation.get("ok", False)):
+        errors.append("runtime_manifest_invalid")
+        return {"ok": False, "errors": errors, "warnings": warnings, "checks": checks}
+
+    manifest = manifest_validation.get("manifest")
+    if not isinstance(manifest, dict):
+        errors.append("runtime_manifest_missing")
+        return {"ok": False, "errors": errors, "warnings": warnings, "checks": checks}
+
+    if not isinstance(active_profile, dict):
+        warnings.append("active_profile_missing")
+        return {"ok": True, "errors": errors, "warnings": warnings, "checks": checks}
+
+    profile_board = (
+        active_profile.get("board")
+        if isinstance(active_profile.get("board"), dict)
+        else {}
+    )
+    profile_probe = (
+        active_profile.get("probe")
+        if isinstance(active_profile.get("probe"), dict)
+        else {}
+    )
+    profile_compat = (
+        profile_probe.get("compat")
+        if isinstance(profile_probe.get("compat"), dict)
+        else {}
+    )
+
+    manifest_board = (
+        manifest.get("board") if isinstance(manifest.get("board"), dict) else {}
+    )
+    manifest_interfaces = (
+        manifest.get("interfaces")
+        if isinstance(manifest.get("interfaces"), dict)
+        else {}
+    )
+    manifest_commands = {
+        str(x).strip().upper()
+        for x in list(manifest.get("commands") or [])
+        if str(x).strip()
+    }
+    manifest_fields = {
+        str(x).strip()
+        for x in list(manifest.get("telemetry_fields") or [])
+        if str(x).strip()
+    }
+
+    profile_fqbn = str(profile_board.get("fqbn", "")).strip()
+    manifest_fqbn = str(manifest_board.get("fqbn", "")).strip()
+    profile_board_id = _board_id_for_fqbn(profile_fqbn, targets) if profile_fqbn else ""
+    manifest_board_id = (
+        _board_id_for_fqbn(manifest_fqbn, targets) if manifest_fqbn else ""
+    )
+    strict_fqbn_mismatch = (
+        profile_fqbn and manifest_fqbn and profile_fqbn != manifest_fqbn
+    )
+    if strict_fqbn_mismatch:
+        # Bootloader/FQBN suffix differences are acceptable if they still resolve to same board id.
+        if not (
+            profile_board_id
+            and manifest_board_id
+            and profile_board_id == manifest_board_id
+        ):
+            errors.append("board_fqbn_mismatch")
+    checks["board_fqbn"] = {
+        "profile": profile_fqbn,
+        "manifest": manifest_fqbn,
+        "ok": "board_fqbn_mismatch" not in errors,
+        "profile_board_id": profile_board_id,
+        "manifest_board_id": manifest_board_id,
+    }
+
+    profile_family = _family_for_fqbn(profile_fqbn, targets) if profile_fqbn else ""
+    manifest_family = str(manifest_board.get("family", "")).strip()
+    if profile_family and manifest_family and profile_family != manifest_family:
+        errors.append("board_family_mismatch")
+    checks["board_family"] = {
+        "profile": profile_family or "",
+        "manifest": manifest_family or "",
+        "ok": not (
+            profile_family and manifest_family and profile_family != manifest_family
+        ),
+    }
+
+    profile_commands = [
+        str(x).strip().upper()
+        for x in list(profile_probe.get("commands") or [])
+        if str(x).strip()
+    ]
+    core_required_commands = ["GET", "ARM", "DISARM", "PID", "SETPOINT"]
+    missing_core = [
+        cmd for cmd in core_required_commands if cmd not in manifest_commands
+    ]
+    if missing_core:
+        errors.append("commands_mismatch:" + ",".join(missing_core[:8]))
+    optional_missing = [
+        cmd
+        for cmd in profile_commands
+        if cmd not in manifest_commands and cmd not in core_required_commands
+    ]
+    if optional_missing:
+        warnings.append("commands_optional_missing:" + ",".join(optional_missing[:8]))
+    checks["commands"] = {
+        "required_core": core_required_commands,
+        "profile_observed": profile_commands,
+        "missing_core": missing_core,
+        "missing_optional": optional_missing,
+        "ok": len(missing_core) == 0,
+    }
+
+    required_fields = [
+        str(x).strip()
+        for x in list(profile_compat.get("required_fields") or [])
+        if str(x).strip()
+    ]
+    if not required_fields:
+        required_fields = ["mode", "ang", "raw", "gyro|gyr|gx", "out", "set"]
+    missing_fields = [
+        token
+        for token in required_fields
+        if not _manifest_required_field_present(token, manifest_fields)
+    ]
+    if missing_fields:
+        errors.append("telemetry_mismatch:" + ",".join(missing_fields[:8]))
+    checks["telemetry_fields"] = {
+        "required": required_fields,
+        "missing": missing_fields,
+        "ok": len(missing_fields) == 0,
+    }
+
+    manifest_imu_protocol = (
+        str(
+            (
+                (
+                    manifest_interfaces.get("imu")
+                    if isinstance(manifest_interfaces.get("imu"), dict)
+                    else {}
+                )
+                or {}
+            ).get("protocol", "")
+        )
+        .strip()
+        .lower()
+    )
+    manifest_encoder_protocol = (
+        str(
+            (
+                (
+                    manifest_interfaces.get("encoders")
+                    if isinstance(manifest_interfaces.get("encoders"), dict)
+                    else {}
+                )
+                or {}
+            ).get("protocol", "")
+        )
+        .strip()
+        .lower()
+    )
+    manifest_actuator_protocol = (
+        str(
+            (
+                (
+                    manifest_interfaces.get("actuator")
+                    if isinstance(manifest_interfaces.get("actuator"), dict)
+                    else {}
+                )
+                or {}
+            ).get("protocol", "")
+        )
+        .strip()
+        .lower()
+    )
+
+    profile_parts = (
+        active_profile.get("parts")
+        if isinstance(active_profile.get("parts"), dict)
+        else {}
+    )
+    profile_pinmap = (
+        active_profile.get("pinmap")
+        if isinstance(active_profile.get("pinmap"), dict)
+        else {}
+    )
+    profile_imu_bus = (
+        profile_pinmap.get("imu_bus")
+        if isinstance(profile_pinmap.get("imu_bus"), dict)
+        else {}
+    )
+    profile_enc_map = (
+        profile_pinmap.get("encoders")
+        if isinstance(profile_pinmap.get("encoders"), dict)
+        else {}
+    )
+    profile_motor_map = (
+        profile_pinmap.get("motor")
+        if isinstance(profile_pinmap.get("motor"), dict)
+        else {}
+    )
+    profile_imu = (
+        profile_parts.get("imu") if isinstance(profile_parts.get("imu"), dict) else {}
+    )
+    profile_enc = (
+        profile_parts.get("encoders")
+        if isinstance(profile_parts.get("encoders"), dict)
+        else {}
+    )
+    profile_act = (
+        profile_parts.get("motor_driver")
+        if isinstance(profile_parts.get("motor_driver"), dict)
+        else {}
+    )
+
+    profile_imu_protocol = (
+        str(
+            profile_imu_bus.get("protocol")
+            or profile_imu_bus.get("type")
+            or profile_imu.get("protocol")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    profile_encoder_protocol = (
+        str(profile_enc_map.get("protocol") or profile_enc.get("protocol") or "")
+        .strip()
+        .lower()
+    )
+    profile_actuator_protocol = (
+        str(profile_motor_map.get("protocol") or profile_act.get("protocol") or "")
+        .strip()
+        .lower()
+    )
+
+    protocol_mismatches: list[str] = []
+    if (
+        profile_imu_protocol
+        and manifest_imu_protocol
+        and profile_imu_protocol != manifest_imu_protocol
+    ):
+        protocol_mismatches.append(
+            f"imu:{profile_imu_protocol}->{manifest_imu_protocol}"
+        )
+    if (
+        profile_encoder_protocol
+        and manifest_encoder_protocol
+        and profile_encoder_protocol != manifest_encoder_protocol
+    ):
+        protocol_mismatches.append(
+            f"encoders:{profile_encoder_protocol}->{manifest_encoder_protocol}"
+        )
+    if (
+        profile_actuator_protocol
+        and manifest_actuator_protocol
+        and profile_actuator_protocol != manifest_actuator_protocol
+    ):
+        protocol_mismatches.append(
+            f"actuator:{profile_actuator_protocol}->{manifest_actuator_protocol}"
+        )
+    if protocol_mismatches:
+        warnings.append("protocol_mismatch:" + ",".join(protocol_mismatches))
+    checks["protocols"] = {
+        "profile": {
+            "imu": profile_imu_protocol,
+            "encoders": profile_encoder_protocol,
+            "actuator": profile_actuator_protocol,
+        },
+        "manifest": {
+            "imu": manifest_imu_protocol,
+            "encoders": manifest_encoder_protocol,
+            "actuator": manifest_actuator_protocol,
+        },
+        "mismatches": protocol_mismatches,
+        "ok": len(protocol_mismatches) == 0,
+    }
+
+    return {
+        "ok": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "checks": checks,
+    }
+
+
+def _build_hardware_registry(targets: Dict[str, Any]) -> Dict[str, Any]:
+    family_capabilities = _family_capabilities()
+    protocol_schema = _protocol_schema()
+    telemetry_core_fields = [
+        "mode",
+        "ang",
+        "raw",
+        "gyro|gyr|gx",
+        "out",
+        "fault",
+        "estop",
+    ]
+    board_rows = []
+    for row in list(targets.get("boards") or []):
+        if not isinstance(row, dict):
+            continue
+        family = str(row.get("family", "")).strip() or "unknown"
+        caps = family_capabilities.get(family, {})
+        board_rows.append(
+            {
+                "id": str(row.get("id", "")).strip(),
+                "label": str(row.get("label", "")).strip(),
+                "family": family,
+                "fqbn_base": str(row.get("fqbn_base", "")).strip(),
+                "default_bootloader": str(row.get("default_bootloader", "")).strip(),
+                "bootloaders": list(row.get("bootloaders") or []),
+                "capabilities": {
+                    "default_telemetry_hz": int(caps.get("default_telemetry_hz", 200)),
+                    "imu_protocols": list(caps.get("imu_protocols") or []),
+                    "encoder_protocols": list(caps.get("encoder_protocols") or []),
+                    "actuator_protocols": list(caps.get("actuator_protocols") or []),
+                    "actuator_classes": list(caps.get("actuator_classes") or []),
+                },
+                "required_runtime_fields": list(telemetry_core_fields),
+            }
+        )
+
+    return {
+        "ok": True,
+        "version": 1,
+        "families": list(targets.get("families") or []),
+        "boards": board_rows,
+        "sensors": [
+            {
+                "id": "imu_mpu6050",
+                "label": "MPU6050 IMU",
+                "class": "imu",
+                "supported_protocols": ["i2c"],
+                "required_signals": ["accel", "gyro"],
+                "typical_output_fields": ["ang", "raw", "gyro"],
+            },
+            {
+                "id": "imu_bno085",
+                "label": "BNO085/BNO080 IMU",
+                "class": "imu",
+                "supported_protocols": ["i2c", "uart", "spi"],
+                "required_signals": ["quat|euler", "gyro"],
+                "typical_output_fields": ["ang", "gyro"],
+            },
+            {
+                "id": "enc_quadrature",
+                "label": "Quadrature Encoder",
+                "class": "encoder",
+                "supported_protocols": ["quadrature"],
+                "required_signals": ["A", "B"],
+                "typical_output_fields": ["encL", "encR", "wpos", "wspd"],
+            },
+            {
+                "id": "enc_hall",
+                "label": "Hall Encoder",
+                "class": "encoder",
+                "supported_protocols": ["hall"],
+                "required_signals": ["pulse"],
+                "typical_output_fields": ["encL", "encR", "wpos", "wspd"],
+            },
+            {
+                "id": "enc_spi_abs",
+                "label": "SPI Absolute Encoder",
+                "class": "encoder",
+                "supported_protocols": ["spi"],
+                "required_signals": ["angle"],
+                "typical_output_fields": ["wpos", "wspd"],
+            },
+        ],
+        "actuators": [
+            {
+                "id": "dual_dc_hbridge_pwm",
+                "label": "Dual DC H-Bridge (PWM)",
+                "class": "motor_driver",
+                "required_channels": ["left_pwm", "right_pwm"],
+            },
+            {
+                "id": "dual_dc_hbridge_dir_pwm",
+                "label": "Dual DC H-Bridge (DIR+PWM)",
+                "class": "motor_driver",
+                "required_channels": ["left_dir", "left_pwm", "right_dir", "right_pwm"],
+            },
+            {
+                "id": "bldc_foc",
+                "label": "BLDC FOC Driver",
+                "class": "motor_driver",
+                "required_channels": ["left_phase", "right_phase"],
+            },
+        ],
+        "profile_schema": {
+            "required_profile_fields": [
+                "profile_id",
+                "label",
+                "board",
+                "parts",
+                "pinmap",
+            ],
+            "required_board_fields": ["fqbn", "port"],
+            "required_parts_fields": ["imu", "encoders", "motor_driver"],
+            "required_pinmap_fields": ["imu_bus", "motor", "encoders"],
+            "required_runtime_commands": ["GET", "ARM", "DISARM", "PID", "SETPOINT"],
+            "required_runtime_telemetry": list(telemetry_core_fields),
+            "optional_profile_fields": ["mcu_topology"],
+            "mcu_topology_schema": {
+                "required_when_present": ["control_mcu"],
+                "control_mcu_required_fields": ["id"],
+                "io_mcu_required_fields_when_present": ["id"],
+                "optional_fields": ["io_mcu", "link", "command_namespaces"],
+                "recommended_remote_control_namespace_suffix": "_",
+            },
+        },
+        "protocol_schema": protocol_schema,
+        "templates": [
+            {
+                "id": "nano_balancer_v1",
+                "label": "Nano Balancer Baseline",
+                "board_family": "arduino_avr",
+                "sensor_ids": ["imu_mpu6050", "enc_quadrature"],
+                "actuator_ids": ["dual_dc_hbridge_dir_pwm"],
+            },
+            {
+                "id": "teensy_balancer_v1",
+                "label": "Teensy Performance Balancer",
+                "board_family": "teensy",
+                "sensor_ids": ["imu_bno085", "enc_spi_abs"],
+                "actuator_ids": ["bldc_foc"],
+            },
+            {
+                "id": "esp32_balancer_v1",
+                "label": "ESP32 Balancer",
+                "board_family": "esp32",
+                "sensor_ids": ["imu_mpu6050", "enc_quadrature"],
+                "actuator_ids": ["dual_dc_hbridge_pwm"],
+            },
+        ],
+    }
 
 
 class RobotProfilesManager:
@@ -4154,7 +6662,7 @@ class AuthManager:
                 if "CERTIFICATE_VERIFY_FAILED" in emsg:
                     raise RuntimeError("openai_tls_cert_verify_failed") from exc
                 raise RuntimeError("openai_key_verification_failed:network") from exc
-        m = (model or "gpt-5-mini").strip() or "gpt-5-mini"
+        m = (model or "gpt-5-codex").strip() or "gpt-5-codex"
         cipher = self._encrypt(k)
         now = time.time()
         with self._lock, self._connect() as con:
@@ -4285,6 +6793,149 @@ TUNING_PREFLIGHT_DELTA = {
     "setpoint": {"deg": 0.35},
     "limits": {"out_max": 8.0, "tip_deg": 2.0, "i_max": 8.0},
 }
+
+HUD_CANONICAL_FIELDS = ("mode", "ang", "raw", "gyro", "out", "fault", "estop")
+
+RUNTIME_TELEMETRY_ADAPTERS: Dict[str, Dict[str, Any]] = {
+    "generic_v1": {
+        "label": "Generic Runtime Adapter",
+        "signature_keys": [],
+        "aliases": {
+            "mode": ["mode", "state", "run_mode", "fsm_state"],
+            "ang": ["ang", "angle", "pitch", "theta", "tilt", "angle_deg"],
+            "raw": ["raw", "accel_angle", "pitch_raw", "theta_raw", "accel_tilt"],
+            "gyro": ["gyro", "gyr", "gx", "gyro_rate", "gyro_z", "omega", "wz"],
+            "out": ["out", "motor_out", "pwm", "pwm_out", "u_cmd", "torque_cmd"],
+            "fault": ["fault", "fault_code", "err", "error", "overrun"],
+            "estop": ["estop", "e_stop", "estop_latched", "kill", "estop_state"],
+        },
+    },
+    "arduino_balance_v1": {
+        "label": "Arduino Balance Adapter",
+        "signature_keys": ["ang", "raw", "out"],
+        "aliases": {},
+    },
+    "teensy_balance_v1": {
+        "label": "Teensy Balance Adapter",
+        "signature_keys": ["angle", "gyro_rate", "motor_out"],
+        "aliases": {
+            "ang": ["angle", "angle_deg", "pitch"],
+            "raw": ["accel_angle", "pitch_raw"],
+            "gyro": ["gyro_rate", "gyro_z", "omega"],
+            "out": ["motor_out", "u_cmd"],
+            "mode": ["state", "run_mode"],
+            "fault": ["fault_code", "fault"],
+            "estop": ["estop_latched", "estop"],
+        },
+    },
+    "esp32_balance_v1": {
+        "label": "ESP32 Balance Adapter",
+        "signature_keys": ["theta", "omega", "u_cmd"],
+        "aliases": {
+            "ang": ["theta", "angle", "pitch"],
+            "raw": ["theta_raw", "accel_angle"],
+            "gyro": ["omega", "gyro_z", "gyro"],
+            "out": ["u_cmd", "motor_out", "pwm_out"],
+            "mode": ["state", "mode"],
+            "fault": ["fault", "error"],
+            "estop": ["kill", "estop"],
+        },
+    },
+    "rp2040_balance_v1": {
+        "label": "RP2040 Balance Adapter",
+        "signature_keys": ["pitch", "gyro_z", "pwm_out"],
+        "aliases": {
+            "ang": ["pitch", "angle"],
+            "raw": ["pitch_raw", "raw"],
+            "gyro": ["gyro_z", "gyr", "gyro"],
+            "out": ["pwm_out", "motor_out"],
+            "mode": ["fsm_state", "mode"],
+            "fault": ["fault", "overrun"],
+            "estop": ["estop_state", "estop"],
+        },
+    },
+}
+
+
+def _choose_runtime_adapter(status: Dict[str, Any]) -> str:
+    if not isinstance(status, dict) or not status:
+        return "generic_v1"
+    best_id = "generic_v1"
+    best_score = -1
+    for adapter_id, node in RUNTIME_TELEMETRY_ADAPTERS.items():
+        if adapter_id == "generic_v1":
+            continue
+        signatures = [str(k) for k in list(node.get("signature_keys") or []) if str(k)]
+        if not signatures:
+            continue
+        score = sum(1 for key in signatures if key in status)
+        if score > best_score:
+            best_score = score
+            best_id = adapter_id
+    if best_score <= 0:
+        return "generic_v1"
+    return best_id
+
+
+def _normalize_status_for_hud(
+    status: Dict[str, Any], *, adapter_hint: Optional[str] = None
+) -> Dict[str, Any]:
+    if not isinstance(status, dict):
+        return {
+            "status": {},
+            "adapter": {
+                "id": "generic_v1",
+                "label": RUNTIME_TELEMETRY_ADAPTERS["generic_v1"]["label"],
+                "mapped_fields": {},
+                "missing_canonical_fields": list(HUD_CANONICAL_FIELDS),
+                "source_keys": [],
+            },
+        }
+
+    raw = dict(status)
+    adapter_id = (
+        adapter_hint
+        if adapter_hint in RUNTIME_TELEMETRY_ADAPTERS
+        else _choose_runtime_adapter(raw)
+    )
+    adapter = RUNTIME_TELEMETRY_ADAPTERS.get(
+        adapter_id, RUNTIME_TELEMETRY_ADAPTERS["generic_v1"]
+    )
+    generic_aliases = dict(RUNTIME_TELEMETRY_ADAPTERS["generic_v1"].get("aliases", {}))
+    adapter_aliases = dict(adapter.get("aliases", {}))
+
+    normalized = dict(raw)
+    mapped_fields: Dict[str, str] = {}
+    missing: list[str] = []
+    for field in HUD_CANONICAL_FIELDS:
+        if field in normalized:
+            continue
+        search_order = list(adapter_aliases.get(field, [])) + list(
+            generic_aliases.get(field, [])
+        )
+        seen: set[str] = set()
+        for alias in search_order:
+            key = str(alias).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if key in raw:
+                normalized[field] = raw[key]
+                mapped_fields[field] = key
+                break
+        if field not in normalized:
+            missing.append(field)
+
+    return {
+        "status": normalized,
+        "adapter": {
+            "id": adapter_id,
+            "label": str(adapter.get("label", adapter_id)),
+            "mapped_fields": mapped_fields,
+            "missing_canonical_fields": missing,
+            "source_keys": sorted([str(k) for k in raw.keys()]),
+        },
+    }
 
 
 def _status_float(status: Dict[str, Any], *keys: str, default: float = 0.0) -> float:
@@ -4581,6 +7232,12 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
         - contract_version_detected: "v1" or "v2"
         - v1_ok: bool
         - v2_ready: bool
+        - phase1_ready: bool (core calibration + v1 telemetry)
+        - phase2_ready: bool (advanced anti-drift/v2 telemetry)
+        - phase1_missing_fields: list of missing Phase 1 fields
+        - phase1_present_fields: list of present Phase 1 fields
+        - phase2_missing_fields: list of missing Phase 2 fields
+        - phase2_present_fields: list of present Phase 2 fields
         - v2_missing_fields: list of missing v2 readiness fields
         - v2_present_fields: list of v2 optional fields that are present
         - readiness_checks: list of {check, status, detail}
@@ -4590,6 +7247,13 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
             "contract_version_detected": "unknown",
             "v1_ok": False,
             "v2_ready": False,
+            "phase1_ready": False,
+            "phase2_ready": False,
+            "calibration_flow": "phase1_phase2",
+            "phase1_missing_fields": list(V1_REQUIRED_FIELDS) + ["gyro|gyr|gx"],
+            "phase1_present_fields": [],
+            "phase2_missing_fields": list(V2_READINESS_FIELDS),
+            "phase2_present_fields": [],
             "v2_missing_fields": list(V2_READINESS_FIELDS),
             "v2_factory_ready": False,
             "v2_factory_missing_fields": list(V2_FACTORY_FIELDS),
@@ -4611,6 +7275,8 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
     if not has_gyro:
         v1_missing.append("gyro|gyr|gx")
     v1_ok = len(v1_missing) == 0
+    phase1_present = [f for f in V1_REQUIRED_FIELDS if f in status]
+    phase1_present.extend([alias for alias in V1_GYRO_ALIASES if alias in status])
 
     checks.append(
         {
@@ -4695,10 +7361,36 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
         }
     )
 
+    checks.append(
+        {
+            "check": "phase1_core_ready",
+            "status": "pass" if v1_ok else "fail",
+            "detail": "Phase 1 core readiness satisfied"
+            if v1_ok
+            else "Phase 1 incomplete: core telemetry/calibration missing",
+        }
+    )
+    checks.append(
+        {
+            "check": "phase2_advanced_ready",
+            "status": "pass" if v2_ready else "warn",
+            "detail": "Phase 2 advanced readiness satisfied"
+            if v2_ready
+            else "Phase 2 incomplete: advanced anti-drift fields missing",
+        }
+    )
+
     return {
         "contract_version_detected": "v2" if v2_ready else "v1",
         "v1_ok": v1_ok,
         "v2_ready": v2_ready,
+        "phase1_ready": v1_ok,
+        "phase2_ready": v2_ready,
+        "calibration_flow": "phase1_phase2",
+        "phase1_missing_fields": v1_missing,
+        "phase1_present_fields": phase1_present,
+        "phase2_missing_fields": v2_missing,
+        "phase2_present_fields": v2_present,
         "v2_missing_fields": v2_missing,
         "v2_factory_ready": v2_factory_ready,
         "v2_factory_missing_fields": v2_factory_missing,
@@ -4713,6 +7405,7 @@ def _compute_action_gates(
     status: Dict[str, Any],
     control_snapshot: Dict[str, Any],
     session_fresh: bool,
+    prearm_safety: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     status_map = status if isinstance(status, dict) else {}
     control_map = control_snapshot if isinstance(control_snapshot, dict) else {}
@@ -4720,7 +7413,11 @@ def _compute_action_gates(
     estop = bool(control_map.get("estop_latched", False))
     arm_prepared = bool(control_map.get("arm_prepared", False))
     readiness = detect_contract_readiness(status_map)
-    v1_ok = bool(readiness.get("v1_ok", False))
+    phase1_ready = bool(readiness.get("phase1_ready", readiness.get("v1_ok", False)))
+    phase2_ready = bool(readiness.get("phase2_ready", readiness.get("v2_ready", False)))
+    prearm = prearm_safety if isinstance(prearm_safety, dict) else {}
+    prearm_required = bool(prearm.get("required", False))
+    prearm_passed = bool(prearm.get("passed", False))
 
     def gate(reasons: list[str]) -> Dict[str, Any]:
         return {"ok": len(reasons) == 0, "reasons": reasons}
@@ -4734,10 +7431,12 @@ def _compute_action_gates(
         arm_prepare_reasons.append("session_stale")
     if estop:
         arm_prepare_reasons.append("estop_latched")
-    if not v1_ok:
+    if not phase1_ready:
         arm_prepare_reasons.append("telemetry_contract_incomplete")
     if mode in {"ARMED", "BALANCING"}:
         arm_prepare_reasons.append("already_armed")
+    if prearm_required and not prearm_passed:
+        arm_prepare_reasons.append("prearm_safety_check_required")
     gates["arm_prepare"] = gate(arm_prepare_reasons)
 
     arm_confirm_reasons: list[str] = []
@@ -4751,6 +7450,8 @@ def _compute_action_gates(
         arm_confirm_reasons.append("arm_not_prepared")
     if mode in {"ARMED", "BALANCING"}:
         arm_confirm_reasons.append("already_armed")
+    if prearm_required and not prearm_passed:
+        arm_confirm_reasons.append("prearm_safety_check_required")
     gates["arm_confirm"] = gate(arm_confirm_reasons)
 
     arm_reasons: list[str] = []
@@ -4762,6 +7463,8 @@ def _compute_action_gates(
         arm_reasons.append("estop_latched")
     if mode in {"ARMED", "BALANCING"}:
         arm_reasons.append("already_armed")
+    if prearm_required and not prearm_passed:
+        arm_reasons.append("prearm_safety_check_required")
     gates["arm"] = gate(arm_reasons)
 
     disarm_reasons: list[str] = []
@@ -4790,12 +7493,21 @@ def _compute_action_gates(
         tune_reasons.append("serial_disconnected")
     if estop:
         tune_reasons.append("estop_latched")
-    if not v1_ok:
+    if not phase1_ready:
         tune_reasons.append("telemetry_contract_incomplete")
     gates["pid"] = gate(list(tune_reasons))
-    gates["motion"] = gate(list(tune_reasons))
+    motion_reasons = list(tune_reasons)
+    if not phase2_ready:
+        motion_reasons.append("phase2_required_for_motion")
+    gates["motion"] = gate(motion_reasons)
     gates["setpoint"] = gate(list(tune_reasons))
     gates["limits"] = gate(list(tune_reasons))
+    gates["prearm_safety"] = {
+        "ok": (not prearm_required) or prearm_passed,
+        "reasons": []
+        if ((not prearm_required) or prearm_passed)
+        else ["prearm_safety_check_required"],
+    }
 
     return gates
 
@@ -4989,22 +7701,25 @@ def _resolve_compat_profile(
 def _resolve_action_gates(
     gateway: NanoSerialGateway,
     control: BridgeControlState,
+    prearm_gate: Optional[PreArmSafetyGate] = None,
     *,
     status_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     health = gateway.health()
     connected = bool(health.get("connected", False))
-    status_src = (
+    status_src_raw = (
         status_override
         if isinstance(status_override, dict)
         else dict(health.get("last_status", {}))
     )
+    status_src = _normalize_status_for_hud(status_src_raw).get("status", status_src_raw)
     control_snapshot = control.snapshot()
     return _compute_action_gates(
         connected=connected,
         status=status_src,
         control_snapshot=control_snapshot,
         session_fresh=control.session_fresh(),
+        prearm_safety=(prearm_gate.snapshot() if prearm_gate is not None else None),
     )
 
 
@@ -5012,15 +7727,29 @@ def _require_action_allowed(
     action: str,
     gateway: NanoSerialGateway,
     control: BridgeControlState,
+    prearm_gate: Optional[PreArmSafetyGate] = None,
     *,
     status_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    gates = _resolve_action_gates(gateway, control, status_override=status_override)
+    gates = _resolve_action_gates(
+        gateway,
+        control,
+        prearm_gate=prearm_gate,
+        status_override=status_override,
+    )
     node = gates.get(action, {"ok": True, "reasons": []})
     if not bool(node.get("ok", False)):
         reasons = ",".join([str(r) for r in list(node.get("reasons", [])) if str(r)])
         raise RuntimeError(f"action_blocked:{action}:{reasons}")
     return gates
+
+
+def _run_prearm_hardware_check(
+    gateway: NanoSerialGateway,
+    control: BridgeControlState,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _run_prearm_hardware_check_impl(gateway, control, body)
 
 
 def run_compat_probe(
@@ -5064,8 +7793,12 @@ def run_compat_probe(
     report["firmware_id"] = firmware_id
 
     # 2) Required status schema check
-    status = gateway.get_status()
+    status_raw = gateway.get_status()
+    norm = _normalize_status_for_hud(status_raw)
+    status = dict(norm.get("status", status_raw))
     report["status"] = status
+    report["status_raw"] = status_raw
+    report["telemetry_adapter"] = dict(norm.get("adapter", {}))
     missing_fields = _status_has_required_fields(status, required_fields_policy)
     report["missing_fields"] = missing_fields
 
@@ -5140,6 +7873,17 @@ def run_compat_probe(
     report["contract_version_detected"] = v2_readiness["contract_version_detected"]
     report["v1_ok"] = v2_readiness["v1_ok"]
     report["v2_ready"] = v2_readiness["v2_ready"]
+    report["phase1_ready"] = v2_readiness.get("phase1_ready", report["v1_ok"])
+    report["phase2_ready"] = v2_readiness.get("phase2_ready", report["v2_ready"])
+    report["calibration_flow"] = v2_readiness.get("calibration_flow", "phase1_phase2")
+    report["phase1_missing_fields"] = v2_readiness.get("phase1_missing_fields", [])
+    report["phase1_present_fields"] = v2_readiness.get("phase1_present_fields", [])
+    report["phase2_missing_fields"] = v2_readiness.get(
+        "phase2_missing_fields", v2_readiness["v2_missing_fields"]
+    )
+    report["phase2_present_fields"] = v2_readiness.get(
+        "phase2_present_fields", v2_readiness["v2_present_fields"]
+    )
     report["v2_missing_fields"] = v2_readiness["v2_missing_fields"]
     report["v2_factory_ready"] = v2_readiness["v2_factory_ready"]
     report["v2_factory_missing_fields"] = v2_readiness["v2_factory_missing_fields"]
@@ -5257,14 +8001,24 @@ def run_connect_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
         report["warnings"].append(f"compat probe failed: {exc}")
 
     status = compat.get("status") if isinstance(compat, dict) else None
+    status_raw = compat.get("status_raw") if isinstance(compat, dict) else None
+    adapter_meta = compat.get("telemetry_adapter") if isinstance(compat, dict) else None
     if not status:
         try:
-            status = gateway.get_status()
+            status_raw = gateway.get_status()
+            norm = _normalize_status_for_hud(status_raw)
+            status = dict(norm.get("status", status_raw))
+            adapter_meta = dict(norm.get("adapter", {}))
         except Exception as exc:
             report["status_error"] = str(exc)
             status = {}
+            status_raw = {}
+            adapter_meta = {}
 
     report["compat"] = compat
+    report["status"] = status
+    report["status_raw"] = status_raw
+    report["telemetry_adapter"] = dict(adapter_meta or {})
     report["firmware_profile"] = str(compat.get("profile", "unknown"))
     report["commands"] = list(compat.get("supported_commands", []))
     report["missing_commands"] = list(compat.get("missing_commands", []))
@@ -5309,6 +8063,17 @@ def run_connect_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
     report["contract_version_detected"] = v2_readiness["contract_version_detected"]
     report["v1_ok"] = v2_readiness["v1_ok"]
     report["v2_ready"] = v2_readiness["v2_ready"]
+    report["phase1_ready"] = v2_readiness.get("phase1_ready", report["v1_ok"])
+    report["phase2_ready"] = v2_readiness.get("phase2_ready", report["v2_ready"])
+    report["calibration_flow"] = v2_readiness.get("calibration_flow", "phase1_phase2")
+    report["phase1_missing_fields"] = v2_readiness.get("phase1_missing_fields", [])
+    report["phase1_present_fields"] = v2_readiness.get("phase1_present_fields", [])
+    report["phase2_missing_fields"] = v2_readiness.get(
+        "phase2_missing_fields", v2_readiness["v2_missing_fields"]
+    )
+    report["phase2_present_fields"] = v2_readiness.get(
+        "phase2_present_fields", v2_readiness["v2_present_fields"]
+    )
     report["v2_missing_fields"] = v2_readiness["v2_missing_fields"]
     report["v2_factory_ready"] = v2_readiness["v2_factory_ready"]
     report["v2_factory_missing_fields"] = v2_readiness["v2_factory_missing_fields"]
@@ -5316,23 +8081,27 @@ def run_connect_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
     report["readiness_checks"] = v2_readiness["readiness_checks"]
 
     # Recommended next action for v2 readiness
-    if not v2_readiness["v2_ready"]:
+    if not v2_readiness["phase1_ready"]:
+        report["v2_recommended_action"] = (
+            "Run Calibration Phase 1 (core sensor zero + baseline checks) before arming."
+        )
+    elif not v2_readiness["v2_ready"]:
         missing = v2_readiness["v2_missing_fields"]
         if "gyro_bias" in missing:
             report["v2_recommended_action"] = (
-                "Run gyro calibration to establish sensor bias"
+                "Run Calibration Phase 2 to establish gyro bias and advanced anti-drift telemetry."
             )
         elif "vel_meas" in missing:
             report["v2_recommended_action"] = (
-                "Firmware update needed for velocity feedback"
+                "Complete Calibration Phase 2: enable velocity feedback telemetry."
             )
         elif "outer_loop_enabled" in missing:
             report["v2_recommended_action"] = (
-                "Enable outer velocity loop for anti-drift"
+                "Complete Calibration Phase 2: enable outer velocity loop for anti-drift."
             )
         else:
             report["v2_recommended_action"] = (
-                "Complete v2 setup for anti-drift capabilities"
+                "Complete Calibration Phase 2 for advanced anti-drift capabilities."
             )
     else:
         report["v2_recommended_action"] = None
@@ -5836,6 +8605,8 @@ def build_handler(
     ai: AIManager,
     ai_profiles: AIProfileManager,
     knowledge: AssistantKnowledgeManager,
+    agent_mission: AgentMissionManager,
+    provider_router: ProviderRouter,
     auth: AuthManager,
     mission_memory: MissionMemoryStore,
     profiles: RobotProfilesManager,
@@ -5844,12 +8615,14 @@ def build_handler(
     codex_agent: Optional[Any] = None,
     hardware_context_store: Optional[HardwareContextStore] = None,
     setup_attempt_history_store: Optional[SetupAttemptHistoryStore] = None,
+    prearm_safety_gate: Optional[PreArmSafetyGate] = None,
 ):
     repo_root = firmware.repo_root
     hw_context_store = hardware_context_store or HardwareContextStore(repo_root)
     setup_attempt_history = setup_attempt_history_store or SetupAttemptHistoryStore(
         repo_root
     )
+    prearm_safety = prearm_safety_gate or PreArmSafetyGate(required=True)
     tuning_preflight = TuningPreflightStore(ttl_s=900.0, max_entries=256)
     probe_cache_lock = threading.Lock()
     probe_cache: Dict[str, Dict[str, Any]] = {
@@ -5963,6 +8736,225 @@ def build_handler(
         notice = _format_hardware_context_notice(stored_ctx, update_info)
         return {"update": update_info, "notice": notice}
 
+    def _clean_tool_call(
+        *,
+        name: str,
+        arguments: Dict[str, Any],
+        ok: bool,
+        data: Optional[Dict[str, Any]] = None,
+        error: str = "",
+        started_ms: int = 0,
+    ) -> Dict[str, Any]:
+        ended_ms = int(time.time() * 1000)
+        dt = max(0, ended_ms - int(started_ms or ended_ms))
+        return {
+            "name": name,
+            "arguments": arguments,
+            "result": {
+                "ok": bool(ok),
+                "data": data or {},
+                "error": str(error or ""),
+                "execution_time_ms": dt,
+            },
+        }
+
+    def _run_clean_auto_tools(
+        *,
+        message: str,
+        model: str,
+    ) -> list[Dict[str, Any]]:
+        txt = str(message or "").lower()
+        calls: list[Dict[str, Any]] = []
+        # Explicit trigger tags keep runtime deterministic and avoid surprise extra latency.
+        wants_connect = "[tool:connect_probe]" in txt
+        wants_compat = "[tool:compat_probe]" in txt
+        wants_compile = "[tool:compile_profiled_runtime_v1]" in txt
+
+        if wants_connect:
+            t0 = int(time.time() * 1000)
+            try:
+                rep = run_connect_probe(gateway)
+                calls.append(
+                    _clean_tool_call(
+                        name="connect_probe",
+                        arguments={},
+                        ok=True,
+                        data={
+                            "ok": bool(rep.get("ok", False)),
+                            "confidence_pct": int(rep.get("confidence_pct", 0) or 0),
+                        },
+                        started_ms=t0,
+                    )
+                )
+            except Exception as exc:
+                calls.append(
+                    _clean_tool_call(
+                        name="connect_probe",
+                        arguments={},
+                        ok=False,
+                        error=str(exc),
+                        started_ms=t0,
+                    )
+                )
+
+        if wants_compat:
+            t0 = int(time.time() * 1000)
+            try:
+                rep = run_compat_probe(gateway)
+                calls.append(
+                    _clean_tool_call(
+                        name="compat_probe",
+                        arguments={},
+                        ok=True,
+                        data={
+                            "ok": bool(rep.get("ok", False)),
+                            "missing_fields": list(rep.get("missing_fields", [])[:12]),
+                            "missing_commands": list(
+                                rep.get("missing_commands", [])[:12]
+                            ),
+                        },
+                        started_ms=t0,
+                    )
+                )
+            except Exception as exc:
+                calls.append(
+                    _clean_tool_call(
+                        name="compat_probe",
+                        arguments={},
+                        ok=False,
+                        error=str(exc),
+                        started_ms=t0,
+                    )
+                )
+
+        if wants_compile:
+            t0 = int(time.time() * 1000)
+            sketch = _clean_default_sketch_path(repo_root, firmware)
+            fqbn = _clean_default_fqbn()
+            try:
+                st = firmware.compile(sketch=sketch, fqbn=fqbn)
+                calls.append(
+                    _clean_tool_call(
+                        name="firmware_compile",
+                        arguments={"sketch": sketch, "fqbn": fqbn},
+                        ok=True,
+                        data={
+                            "state": str(st.get("state", "")),
+                            "phase": str(st.get("phase", "")),
+                            "returncode": st.get("returncode"),
+                        },
+                        started_ms=t0,
+                    )
+                )
+            except Exception as exc:
+                calls.append(
+                    _clean_tool_call(
+                        name="firmware_compile",
+                        arguments={"sketch": sketch, "fqbn": fqbn},
+                        ok=False,
+                        error=str(exc),
+                        started_ms=t0,
+                    )
+                )
+
+        return calls
+
+    def _build_clean_agent_context(
+        *,
+        mode: str,
+        session_key: str,
+        thread_id: Optional[str],
+        attachments: Optional[list[Dict[str, Any]]] = None,
+        clean_tool_calls: Optional[list[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        serial_h = gateway.health()
+        cached_status = dict(serial_h.get("last_status", {}))
+        fw = firmware.status()
+        fw_tail = list(fw.get("log_tail", [])[-8:]) if isinstance(fw, dict) else []
+        recent_attempts_raw = setup_attempt_history.list_recent(limit=4)
+        recent_attempts: list[Dict[str, Any]] = []
+        for node in recent_attempts_raw:
+            if not isinstance(node, dict):
+                continue
+            result = node.get("result") if isinstance(node.get("result"), dict) else {}
+            recent_attempts.append(
+                {
+                    "test_type": str(node.get("test_type", "")),
+                    "status": str(node.get("status", "")),
+                    "created_at": node.get("created_at"),
+                    "failure_summary": str(result.get("failure_summary", "")),
+                }
+            )
+
+        telemetry_summary = {
+            "mode": str(cached_status.get("mode", "UNKNOWN")),
+            "angle": str(cached_status.get("ang", "n/a")),
+            "raw": str(cached_status.get("raw", "n/a")),
+            "gyro": str(
+                cached_status.get(
+                    "gyro",
+                    cached_status.get("gyr", cached_status.get("gx", "n/a")),
+                )
+            ),
+            "output": str(cached_status.get("out", "n/a")),
+            "feed_present": bool(cached_status),
+        }
+
+        # Clean lane sessions are local-scoped; persist explicit mission facts for continuity.
+        try:
+            full_history = ai.history(session_key, thread_id) if thread_id else []
+        except Exception:
+            full_history = []
+        extracted_facts = _extract_mission_facts(full_history)
+        if extracted_facts:
+            mission_memory.upsert(
+                session_key, extracted_facts, source="clean_thread_history"
+            )
+        mission_facts = mission_memory.get(session_key)
+
+        ctx: Dict[str, Any] = {
+            "mission_mode": mode,
+            "status": cached_status,
+            "status_source": "gateway.health.last_status_cached",
+            "serial_health": serial_h,
+            "control": control.snapshot(),
+            "firmware": fw,
+            "telemetry_summary": telemetry_summary,
+            "recent_firmware_outcome": {
+                "state": str(fw.get("state", "")) if isinstance(fw, dict) else "",
+                "phase": str(fw.get("phase", "")) if isinstance(fw, dict) else "",
+                "running": bool(fw.get("running", False))
+                if isinstance(fw, dict)
+                else False,
+                "returncode": fw.get("returncode") if isinstance(fw, dict) else None,
+                "last_cmd": list(fw.get("last_cmd", [])[-8:])
+                if isinstance(fw, dict)
+                else [],
+                "log_tail": fw_tail,
+            },
+            "recent_setup_attempts": recent_attempts,
+            "assistant_knowledge": knowledge.context(),
+            "config_snapshots": config_history.list_snapshots(limit=6),
+            "assistant_capabilities": _assistant_capabilities_context(
+                allow_apply=False
+            ),
+        }
+        if mission_facts:
+            ctx["mission_facts"] = mission_facts
+        if attachments:
+            ctx["attachments"] = attachments
+        if clean_tool_calls:
+            ctx["clean_tool_calls"] = clean_tool_calls
+        return ctx
+
+    def _clean_system_prompt(mode: str) -> str:
+        return (
+            "You are Codex for UpRight.os clean console. "
+            "Be concise, practical, and evidence-driven. "
+            "Use mission_facts, telemetry_summary, recent_firmware_outcome, and recent_setup_attempts when relevant. "
+            f"{_agent_mode_system_prompt(mode)}"
+        )
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
             return
@@ -5981,6 +8973,7 @@ def build_handler(
                             "ok": True,
                             "health": gateway.health(),
                             "control": control.snapshot(),
+                            "prearm_safety": prearm_safety.snapshot(),
                             "telemetry_ws": f"ws://127.0.0.1:{telemetry_port}/telemetry",
                             "telemetry_enabled": websockets is not None,
                         },
@@ -5988,17 +8981,38 @@ def build_handler(
                 if u.path == "/status":
                     # Keep /status non-blocking: return cached status only.
                     # Serial worker drains spontaneous STATUS lines in background.
-                    st = dict(gateway.health().get("last_status", {}))
+                    st_raw = dict(gateway.health().get("last_status", {}))
+                    normalized = _normalize_status_for_hud(st_raw)
+                    st = dict(normalized.get("status", st_raw))
                     return _json(
                         self,
                         200,
                         {
                             "ok": True,
                             "status": st,
+                            "status_raw": st_raw,
+                            "telemetry_adapter": normalized.get("adapter", {}),
                             "control": control.snapshot(),
+                            "prearm_safety": prearm_safety.snapshot(),
                             "action_gates": _resolve_action_gates(
-                                gateway, control, status_override=st
+                                gateway,
+                                control,
+                                prearm_gate=prearm_safety,
+                                status_override=st,
                             ),
+                        },
+                    )
+                if u.path == "/telemetry/adapter-map":
+                    st_raw = dict(gateway.health().get("last_status", {}))
+                    normalized = _normalize_status_for_hud(st_raw)
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "adapter": normalized.get("adapter", {}),
+                            "adapters": RUNTIME_TELEMETRY_ADAPTERS,
+                            "canonical_fields": list(HUD_CANONICAL_FIELDS),
                         },
                     )
                 if u.path == "/diag/serial":
@@ -6029,6 +9043,21 @@ def build_handler(
                     )
                 if u.path == "/firmware/status":
                     return _json(self, 200, {"ok": True, "firmware": firmware.status()})
+                if u.path == "/firmware/artifacts":
+                    q = parse_qs(u.query)
+                    n_raw = str((q.get("limit") or ["20"])[0]).strip()
+                    try:
+                        n = int(n_raw)
+                    except Exception:
+                        n = 20
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "firmware_artifacts": firmware.list_run_artifacts(limit=n),
+                        },
+                    )
                 if u.path == "/firmware/unified-schema":
                     return _json(
                         self, 200, {"ok": True, "schema": firmware.unified_schema()}
@@ -6044,14 +9073,14 @@ def build_handler(
                                 "ok": True,
                                 "ai": ai.status(
                                     configured=False,
-                                    model="gpt-5-mini",
+                                    model="gpt-5-codex",
                                     session_key="anon",
                                 ),
                                 "history": [],
                                 "threads": [],
                             },
                         )
-                    model = str(me.get("openai_model") or "gpt-5-mini")
+                    model = str(me.get("openai_model") or "gpt-5-codex")
                     configured = bool(me.get("openai_configured"))
                     skey = f"user:{me['id']}"
                     st = ai.status(configured=configured, model=model, session_key=skey)
@@ -6064,6 +9093,223 @@ def build_handler(
                             "ai": st,
                             "history": ai.history(skey, tid)[-80:],
                             "threads": ai.list_threads(skey),
+                        },
+                    )
+                if u.path == "/agent/status":
+                    tok = _extract_auth_token(self)
+                    me = auth.me(tok) if tok else None
+                    user_creds = (
+                        auth.get_openai_key(int(me["id"]))
+                        if me and isinstance(me.get("id"), int)
+                        else None
+                    )
+                    mode_state = agent_mission.status()
+                    resolved = provider_router.resolve_agent_runtime(
+                        mode=str(mode_state.get("mode", "robot_dev")),
+                        requested_api_key=None,
+                        requested_model=None,
+                        user_creds=user_creds,
+                        env_api_key=ai.default_api_key,
+                        env_model=os.environ.get("OPENAI_MODEL", ""),
+                    )
+                    codex_login = _codex_cli_login_status()
+                    use_codex_cli = bool(codex_login.get("logged_in", False))
+                    has_api_key = bool(str(resolved.get("api_key", "")).strip())
+                    runtime_exec = _agent_choose_executor(
+                        mode=str(mode_state.get("mode", "robot_dev")),
+                        enable_tools=True,
+                        has_api_key=has_api_key,
+                        codex_logged_in=use_codex_cli,
+                        codex_agent_available=bool(codex_agent is not None),
+                    )
+                    runtime_model = _agent_resolve_model(
+                        str(mode_state.get("mode", "robot_dev")),
+                        str(resolved.get("model", "")),
+                        prefer_codex=use_codex_cli,
+                    )
+                    runtime_model_allowed = (
+                        True if use_codex_cli else _agent_model_allowed(runtime_model)
+                    )
+                    runtime_configured = has_api_key or bool(use_codex_cli)
+                    serial_h = gateway.health()
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "agent": {
+                                "mode": mode_state.get("mode", "robot_dev"),
+                                "allowed_modes": mode_state.get("allowed_modes", []),
+                                "updated_at": mode_state.get("updated_at"),
+                                "openai_configured": runtime_configured,
+                                "openai_model": runtime_model,
+                                "openai_model_allowed": runtime_model_allowed,
+                                "provider": (
+                                    "codex_cli"
+                                    if use_codex_cli
+                                    else str(resolved.get("provider", "openai"))
+                                ),
+                                "executor": str(
+                                    runtime_exec.get("executor", "unknown")
+                                ),
+                                "can_execute": bool(
+                                    runtime_exec.get("can_execute", False)
+                                ),
+                                "degraded": bool(runtime_exec.get("degraded", False)),
+                                "degraded_reason": str(
+                                    runtime_exec.get("degraded_reason", "")
+                                ),
+                                "model_source": (
+                                    "codex_cli"
+                                    if use_codex_cli
+                                    else str(resolved.get("model_source", ""))
+                                ),
+                                "api_key_source": (
+                                    "codex_login"
+                                    if use_codex_cli
+                                    else str(resolved.get("api_key_source", ""))
+                                ),
+                                "codex_login": codex_login,
+                            },
+                            "knowledge": knowledge.context(),
+                            "health": serial_h,
+                            "control": control.snapshot(),
+                            "status": dict(serial_h.get("last_status", {})),
+                            "lines": gateway.recent_lines(80),
+                        },
+                    )
+                if u.path == "/agent/clean/status":
+                    mode = (
+                        str(
+                            (parse_qs(u.query).get("mode", ["app_dev"]) or ["app_dev"])[
+                                0
+                            ]
+                            or "app_dev"
+                        ).strip()
+                        or "app_dev"
+                    )
+                    codex_login = _codex_cli_login_status()
+                    serial_h = gateway.health()
+                    status = dict(serial_h.get("last_status", {}))
+                    control_state = control.snapshot()
+                    model = (
+                        str(
+                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                        ).strip()
+                        or "gpt-5-codex"
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "clean_api": {
+                                "version": 2,
+                                "min_ui_version": 2,
+                                "capabilities": [
+                                    "agent_clean_status_v2",
+                                    "firmware_compile",
+                                    "firmware_upload_guarded",
+                                    "firmware_upload_precheck",
+                                    "runtime_manifest_validate",
+                                    "runtime_manifest_preflight_gate",
+                                    "runtime_manifest_profile_compat",
+                                    "clean_chat_stream",
+                                    "clean_preflight",
+                                ],
+                            },
+                            "agent": {
+                                "mode": mode,
+                                "executor": "codex_cli_exec"
+                                if bool(codex_login.get("logged_in", False))
+                                else "blocked",
+                                "provider": "codex_cli",
+                                "model": model,
+                                "can_chat": bool(codex_login.get("logged_in", False)),
+                                "degraded_reason": ""
+                                if bool(codex_login.get("logged_in", False))
+                                else "codex_login_required",
+                                "codex_login": codex_login,
+                            },
+                            "health": serial_h,
+                            "control": control_state,
+                            "status": status,
+                            "lines": gateway.recent_lines(80),
+                        },
+                    )
+                if u.path == "/agent/clean/threads":
+                    q = parse_qs(u.query)
+                    mode = (
+                        str((q.get("mode", ["app_dev"]) or ["app_dev"])[0]).strip()
+                        or "app_dev"
+                    )
+                    session_key = f"local:clean:{mode}"
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "mode": mode,
+                            "threads": ai.list_threads(session_key),
+                            "ai": ai.status(
+                                configured=bool(
+                                    _codex_cli_login_status().get("logged_in", False)
+                                ),
+                                model=str(
+                                    os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                                ),
+                                session_key=session_key,
+                            ),
+                        },
+                    )
+                if u.path == "/agent/threads":
+                    q = parse_qs(u.query)
+                    mode_state = agent_mission.status()
+                    mode = str((q.get("mode", [""]) or [""])[0] or "").strip() or str(
+                        mode_state.get("mode", "robot_dev")
+                    )
+                    tok = _extract_auth_token(self)
+                    me = auth.me(tok) if tok else None
+                    user_creds = (
+                        auth.get_openai_key(int(me["id"]))
+                        if me and isinstance(me.get("id"), int)
+                        else None
+                    )
+                    session_key = (
+                        f"user:{me['id']}:agent:{mode}"
+                        if me and isinstance(me.get("id"), int)
+                        else f"local:{mode}"
+                    )
+                    resolved = provider_router.resolve_agent_runtime(
+                        mode=mode,
+                        requested_api_key=None,
+                        requested_model=None,
+                        user_creds=user_creds,
+                        env_api_key=ai.default_api_key,
+                        env_model=os.environ.get("OPENAI_MODEL", ""),
+                    )
+                    codex_login = _codex_cli_login_status()
+                    use_codex_cli = bool(codex_login.get("logged_in", False))
+                    runtime_model = _agent_resolve_model(
+                        mode,
+                        str(resolved.get("model", "")),
+                        prefer_codex=use_codex_cli,
+                    )
+                    runtime_configured = bool(resolved.get("api_key")) or bool(
+                        use_codex_cli
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "agent": mode_state,
+                            "threads": ai.list_threads(session_key),
+                            "ai": ai.status(
+                                configured=runtime_configured,
+                                model=runtime_model or "(unset)",
+                                session_key=session_key,
+                            ),
                         },
                     )
                 if u.path == "/ai/threads":
@@ -6082,7 +9328,7 @@ def build_handler(
                             "threads": ai.list_threads(skey),
                             "ai": ai.status(
                                 configured=bool(me.get("openai_configured")),
-                                model=str(me.get("openai_model") or "gpt-5-mini"),
+                                model=str(me.get("openai_model") or "gpt-5-codex"),
                                 session_key=skey,
                             ),
                         },
@@ -6157,6 +9403,62 @@ def build_handler(
                 if u.path == "/firmware/boards":
                     return _json(
                         self, 200, {"ok": True, "boards": firmware.list_boards()}
+                    )
+                if u.path == "/firmware/targets":
+                    return _json(
+                        self, 200, {"ok": True, "targets": firmware.list_targets()}
+                    )
+                if u.path == "/firmware/runtime-manifest":
+                    q = parse_qs(u.query)
+                    sketch = (
+                        str((q.get("sketch", [""]) or [""])[0] or "").strip() or None
+                    )
+                    check = firmware.validate_runtime_manifest(
+                        sketch=sketch, require_exists=True
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": bool(check.get("ok", False)),
+                            "validation": check,
+                        },
+                    )
+                if u.path == "/firmware/runtime-manifest/compat":
+                    q = parse_qs(u.query)
+                    sketch = (
+                        str((q.get("sketch", [""]) or [""])[0] or "").strip() or None
+                    )
+                    manifest_check = firmware.validate_runtime_manifest(
+                        sketch=sketch, require_exists=True
+                    )
+                    prof_state = profiles.list()
+                    active_id = str(prof_state.get("active_profile_id") or "").strip()
+                    active_profile = next(
+                        (
+                            p
+                            for p in list(prof_state.get("profiles") or [])
+                            if isinstance(p, dict)
+                            and str(p.get("profile_id", "")).strip() == active_id
+                        ),
+                        None,
+                    )
+                    compat = _runtime_manifest_profile_compatibility(
+                        manifest_validation=manifest_check,
+                        active_profile=active_profile
+                        if isinstance(active_profile, dict)
+                        else None,
+                        targets=firmware.list_targets(),
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": bool(compat.get("ok", False)),
+                            "compatibility": compat,
+                            "active_profile_id": active_id or None,
+                            "manifest_validation": manifest_check,
+                        },
                     )
                 if u.path == "/firmware/sketch-folders":
                     return _json(
@@ -6344,6 +9646,14 @@ def build_handler(
                     )
                 if u.path == "/profiles":
                     return _json(self, 200, {"ok": True, "profiles": profiles.list()})
+                if u.path == "/profiles/hardware":
+                    targets = firmware.list_targets()
+                    registry = _build_hardware_registry(targets)
+                    return _json(
+                        self,
+                        200,
+                        {"ok": True, "registry": registry},
+                    )
                 if u.path == "/tooling/traces":
                     return _json(
                         self, 200, {"ok": True, "traces": tooling_trace_candidates()}
@@ -6495,7 +9805,7 @@ def build_handler(
                     created = ai.create_thread(skey, title=body.get("title"))
                     st = ai.status(
                         configured=bool(me.get("openai_configured")),
-                        model=str(me.get("openai_model") or "gpt-5-mini"),
+                        model=str(me.get("openai_model") or "gpt-5-codex"),
                         session_key=skey,
                     )
                     return _json(
@@ -6528,7 +9838,7 @@ def build_handler(
                     selected = ai.select_thread(skey, thread_id)
                     st = ai.status(
                         configured=bool(me.get("openai_configured")),
-                        model=str(me.get("openai_model") or "gpt-5-mini"),
+                        model=str(me.get("openai_model") or "gpt-5-codex"),
                         session_key=skey,
                     )
                     return _json(
@@ -6585,7 +9895,7 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     api_key = str(body.get("api_key", ""))
-                    model = str(body.get("model", "gpt-5-mini"))
+                    model = str(body.get("model", "gpt-5-codex"))
                     out = auth.set_openai_key(int(me["id"]), api_key, model)
                     return _json(self, 200, {"ok": True, "openai": out})
 
@@ -6652,6 +9962,7 @@ def build_handler(
                         fqbn=body.get("fqbn"),
                         port=body.get("port"),
                     )
+                    prearm_safety.require("firmware_upload")
                     return _json(self, 200, {"ok": True, "firmware": st})
 
                 if u.path == "/firmware/upload-guarded":
@@ -6661,6 +9972,7 @@ def build_handler(
                         fqbn=body.get("fqbn"),
                         port=body.get("port"),
                     )
+                    prearm_safety.require("firmware_upload_guarded")
                     return _json(self, 200, {"ok": True, "firmware": st})
 
                 if u.path == "/firmware/install-cli":
@@ -6721,6 +10033,26 @@ def build_handler(
                         sample_interval_s=sample_interval_s,
                     )
                     return _json(self, 200, {"ok": True, "validation": report})
+
+                if u.path == "/firmware/runtime-manifest/validate":
+                    sketch = str(body.get("sketch", "")).strip() or None
+                    inline_manifest = body.get("manifest")
+                    manifest_obj = (
+                        inline_manifest if isinstance(inline_manifest, dict) else None
+                    )
+                    check = firmware.validate_runtime_manifest(
+                        sketch=sketch,
+                        manifest=manifest_obj,
+                        require_exists=manifest_obj is None,
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": bool(check.get("ok", False)),
+                            "validation": check,
+                        },
+                    )
 
                 if u.path == "/v1/setup/compat-test":
                     sketch_revision = str(body.get("sketch_revision", "")).strip()
@@ -6851,6 +10183,1748 @@ def build_handler(
                         {"ok": True, "revert": out, "control": control.snapshot()},
                     )
 
+                if u.path == "/agent/file/upload":
+                    try:
+                        attachment = _agent_upload_from_body(repo_root, body)
+                    except RuntimeError as exc:
+                        return _json(self, 400, {"ok": False, "error": str(exc)})
+                    except Exception as exc:
+                        return _json(self, 500, {"ok": False, "error": str(exc)})
+                    return _json(self, 200, {"ok": True, "attachment": attachment})
+
+                if u.path == "/agent/clean/file/upload":
+                    try:
+                        attachment = _agent_upload_from_body(repo_root, body)
+                    except RuntimeError as exc:
+                        return _json(self, 400, {"ok": False, "error": str(exc)})
+                    except Exception as exc:
+                        return _json(self, 500, {"ok": False, "error": str(exc)})
+                    return _json(self, 200, {"ok": True, "attachment": attachment})
+
+                if u.path == "/agent/clean/firmware/compile":
+                    sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    fqbn = str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    idempotency_key = (
+                        str(body.get("idempotency_key", "")).strip() or None
+                    )
+                    t0 = int(time.time() * 1000)
+                    try:
+                        st = firmware.compile(
+                            sketch=sketch,
+                            fqbn=fqbn,
+                            idempotency_key=idempotency_key,
+                        )
+                        tool_call = _clean_tool_call(
+                            name="firmware_compile",
+                            arguments={
+                                "sketch": sketch,
+                                "fqbn": fqbn,
+                                "idempotency_key": idempotency_key,
+                            },
+                            ok=True,
+                            data={
+                                "state": str(st.get("state", "")),
+                                "phase": str(st.get("phase", "")),
+                                "returncode": st.get("returncode"),
+                                "idempotent_reused": bool(
+                                    st.get("idempotent_reused", False)
+                                ),
+                            },
+                            started_ms=t0,
+                        )
+                    except Exception as exc:
+                        if str(exc) == "operation_in_progress":
+                            return _json(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "operation_in_progress",
+                                    "firmware": firmware.status(),
+                                    "tool_call": _clean_tool_call(
+                                        name="firmware_compile",
+                                        arguments={
+                                            "sketch": sketch,
+                                            "fqbn": fqbn,
+                                            "idempotency_key": idempotency_key,
+                                        },
+                                        ok=False,
+                                        error="operation_in_progress",
+                                        started_ms=t0,
+                                    ),
+                                },
+                            )
+                        return _json(
+                            self,
+                            500,
+                            {
+                                "ok": False,
+                                "error": str(exc),
+                                "tool_call": _clean_tool_call(
+                                    name="firmware_compile",
+                                    arguments={
+                                        "sketch": sketch,
+                                        "fqbn": fqbn,
+                                        "idempotency_key": idempotency_key,
+                                    },
+                                    ok=False,
+                                    error=str(exc),
+                                    started_ms=t0,
+                                ),
+                            },
+                        )
+                    return _json(
+                        self, 200, {"ok": True, "firmware": st, "tool_call": tool_call}
+                    )
+
+                if u.path == "/agent/clean/firmware/upload":
+                    sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    fqbn = str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    idempotency_key = (
+                        str(body.get("idempotency_key", "")).strip() or None
+                    )
+                    port = (
+                        str(body.get("port", "")).strip()
+                        or str(os.environ.get("UPRIGHT_CLEAN_UPLOAD_PORT", "")).strip()
+                        or None
+                    )
+                    t0 = int(time.time() * 1000)
+                    try:
+                        st = firmware.upload_guarded(
+                            gateway=gateway,
+                            sketch=sketch,
+                            fqbn=fqbn,
+                            port=port,
+                            idempotency_key=idempotency_key,
+                        )
+                        prearm_safety.require("firmware_upload_guarded")
+                        tool_call = _clean_tool_call(
+                            name="firmware_upload_guarded",
+                            arguments={
+                                "sketch": sketch,
+                                "fqbn": fqbn,
+                                "port": port,
+                                "idempotency_key": idempotency_key,
+                            },
+                            ok=True,
+                            data={
+                                "state": str(st.get("state", "")),
+                                "phase": str(st.get("phase", "")),
+                                "returncode": st.get("returncode"),
+                                "idempotent_reused": bool(
+                                    st.get("idempotent_reused", False)
+                                ),
+                            },
+                            started_ms=t0,
+                        )
+                    except Exception as exc:
+                        if str(exc) == "operation_in_progress":
+                            return _json(
+                                self,
+                                409,
+                                {
+                                    "ok": False,
+                                    "error": "operation_in_progress",
+                                    "firmware": firmware.status(),
+                                    "tool_call": _clean_tool_call(
+                                        name="firmware_upload_guarded",
+                                        arguments={
+                                            "sketch": sketch,
+                                            "fqbn": fqbn,
+                                            "port": port,
+                                            "idempotency_key": idempotency_key,
+                                        },
+                                        ok=False,
+                                        error="operation_in_progress",
+                                        started_ms=t0,
+                                    ),
+                                },
+                            )
+                        return _json(
+                            self,
+                            500,
+                            {
+                                "ok": False,
+                                "error": str(exc),
+                                "tool_call": _clean_tool_call(
+                                    name="firmware_upload_guarded",
+                                    arguments={
+                                        "sketch": sketch,
+                                        "fqbn": fqbn,
+                                        "port": port,
+                                        "idempotency_key": idempotency_key,
+                                    },
+                                    ok=False,
+                                    error=str(exc),
+                                    started_ms=t0,
+                                ),
+                            },
+                        )
+                    return _json(
+                        self, 200, {"ok": True, "firmware": st, "tool_call": tool_call}
+                    )
+
+                if u.path == "/agent/clean/firmware/upload/precheck":
+                    requested_port = str(body.get("port", "")).strip()
+                    requested_fqbn = (
+                        str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    )
+                    requested_sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    payload = _clean_upload_precheck_payload(
+                        gateway=gateway,
+                        firmware=firmware,
+                        requested_port=requested_port,
+                        requested_fqbn=requested_fqbn,
+                        requested_sketch=requested_sketch,
+                    )
+                    return _json(self, 200, payload)
+
+                if u.path == "/agent/clean/recovery/known-good":
+                    requested_port = str(body.get("port", "")).strip()
+                    requested_fqbn = (
+                        str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    )
+                    requested_sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    t0 = int(time.time() * 1000)
+                    steps: list[Dict[str, Any]] = []
+
+                    # 1) Soft bridge recover (deterministic in-process alternative to process restart)
+                    try:
+                        gateway.close()
+                    except Exception:
+                        pass
+                    try:
+                        gateway.connect()
+                        ready = gateway.wait_ready(timeout=6.0)
+                        steps.append(
+                            {
+                                "id": "bridge_recover",
+                                "ok": True,
+                                "detail": f"bridge recovered: mode={ready.get('mode', 'UNKNOWN')}",
+                            }
+                        )
+                    except Exception as exc:
+                        steps.append(
+                            {
+                                "id": "bridge_recover",
+                                "ok": False,
+                                "detail": str(exc),
+                            }
+                        )
+
+                    # 2) Detect current board/ports
+                    boards = firmware.list_boards()
+                    detected_ports: list[str] = []
+                    for row in boards.get("ports") or []:
+                        if not isinstance(row, dict):
+                            continue
+                        addr = str(row.get("address") or "").strip()
+                        if addr:
+                            detected_ports.append(addr)
+                    recommended_port = str(boards.get("recommended_port") or "").strip()
+                    effective_port = requested_port or recommended_port
+                    steps.append(
+                        {
+                            "id": "detect",
+                            "ok": bool(boards.get("ok", False)),
+                            "detail": f"detected_ports={len(detected_ports)} selected_port={effective_port or 'none'}",
+                        }
+                    )
+
+                    # 3) Precheck with selected/effective port
+                    payload = _clean_upload_precheck_payload(
+                        gateway=gateway,
+                        firmware=firmware,
+                        requested_port=effective_port,
+                        requested_fqbn=requested_fqbn,
+                        requested_sketch=requested_sketch,
+                    )
+                    steps.append(
+                        {
+                            "id": "precheck",
+                            "ok": bool(payload.get("ready", False)),
+                            "detail": (
+                                "ready"
+                                if bool(payload.get("ready", False))
+                                else ",".join(
+                                    [
+                                        str(x)
+                                        for x in list(
+                                            payload.get("hard_fail_reasons") or []
+                                        )
+                                    ]
+                                )
+                            ),
+                        }
+                    )
+
+                    # 4) Validate status/gates
+                    h = gateway.health()
+                    st_raw = dict(h.get("last_status", {}))
+                    normalized = _normalize_status_for_hud(st_raw)
+                    st = dict(normalized.get("status", st_raw))
+                    gates = _resolve_action_gates(
+                        gateway, control, prearm_gate=prearm_safety, status_override=st
+                    )
+                    arm_prepare_ok = bool(
+                        (gates.get("arm_prepare") or {}).get("ok", False)
+                    )
+                    status_ok = bool(h.get("connected", False)) and len(st) > 0
+                    steps.append(
+                        {
+                            "id": "status_validate",
+                            "ok": status_ok,
+                            "detail": f"connected={bool(h.get('connected', False))} status_keys={len(st)} arm_prepare_ok={arm_prepare_ok}",
+                        }
+                    )
+
+                    ok = all(bool(step.get("ok", False)) for step in steps)
+                    report = {
+                        "ok": ok,
+                        "steps": steps,
+                        "selected_port": effective_port,
+                        "detected_ports": detected_ports,
+                        "precheck": payload,
+                        "status": st,
+                        "action_gates": gates,
+                    }
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": ok,
+                            "recovery": report,
+                            "tool_call": _clean_tool_call(
+                                name="known_good_recovery",
+                                arguments={
+                                    "fqbn": requested_fqbn,
+                                    "port": effective_port,
+                                    "sketch": requested_sketch,
+                                },
+                                ok=ok,
+                                data={
+                                    "step_count": len(steps),
+                                    "passed_steps": sum(
+                                        1
+                                        for step in steps
+                                        if bool(step.get("ok", False))
+                                    ),
+                                },
+                                error="" if ok else "known_good_recovery_failed",
+                                started_ms=t0,
+                            ),
+                        },
+                    )
+
+                if u.path == "/agent/clean/thread/new":
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    title = str(body.get("title", "")).strip() or None
+                    session_key = f"local:clean:{mode}"
+                    thread = ai.create_thread(session_key, title)
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "mode": mode,
+                            "thread": thread,
+                            "threads": ai.list_threads(session_key),
+                            "history": ai.history(session_key, str(thread.get("id")))[
+                                -80:
+                            ],
+                        },
+                    )
+
+                if u.path == "/agent/clean/thread/select":
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    thread_id = str(body.get("thread_id", "")).strip()
+                    if not thread_id:
+                        return _json(
+                            self, 400, {"ok": False, "error": "thread_id_required"}
+                        )
+                    session_key = f"local:clean:{mode}"
+                    try:
+                        thread = ai.select_thread(session_key, thread_id)
+                    except RuntimeError as exc:
+                        if str(exc) == "thread_not_found":
+                            return _json(
+                                self, 404, {"ok": False, "error": "thread_not_found"}
+                            )
+                        raise
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "mode": mode,
+                            "thread": thread,
+                            "threads": ai.list_threads(session_key),
+                            "history": ai.history(session_key, thread_id)[-80:],
+                        },
+                    )
+
+                if u.path == "/agent/clean/chat":
+                    msg = str(body.get("message", "")).strip()
+                    if not msg:
+                        return _json(
+                            self, 400, {"ok": False, "error": "missing_message"}
+                        )
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    codex_login = _codex_cli_login_status()
+                    if not bool(codex_login.get("logged_in", False)):
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": "codex_login_required",
+                                "executor": "blocked",
+                                "can_execute": False,
+                            },
+                        )
+                    model = (
+                        str(body.get("model", "")).strip()
+                        or str(
+                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                        ).strip()
+                        or "gpt-5-codex"
+                    )
+                    clean_timeout_s = int(
+                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    )
+                    attachments = _sanitize_agent_attachments(body.get("attachments"))
+                    thread_id = str(body.get("thread_id", "")).strip() or None
+                    session_key = f"local:clean:{mode}"
+                    auto_tools = bool(body.get("auto_tools", False))
+                    tool_calls: list[Dict[str, Any]] = []
+                    if auto_tools:
+                        tool_calls = _run_clean_auto_tools(message=msg, model=model)
+                    ctx = _build_clean_agent_context(
+                        mode=mode,
+                        session_key=session_key,
+                        thread_id=thread_id,
+                        attachments=attachments,
+                        clean_tool_calls=tool_calls,
+                    )
+                    try:
+                        out = ai.chat_codex_cli(
+                            message=msg,
+                            context=ctx,
+                            session_key=session_key,
+                            model=model,
+                            thread_id=thread_id,
+                            system_prompt=_clean_system_prompt(mode),
+                            timeout_s_override=max(30, clean_timeout_s),
+                        )
+                    except RuntimeError as exc:
+                        emsg = str(exc)
+                        lower = emsg.lower()
+                        if emsg.startswith("codex_cli_timeout:"):
+                            return _json(
+                                self,
+                                504,
+                                {
+                                    "ok": False,
+                                    "error": emsg,
+                                    "error_kind": "timeout",
+                                    "executor": "codex_cli_exec",
+                                    "tool_calls": tool_calls,
+                                },
+                            )
+                        if ("usage limit" in lower) or (
+                            "purchase more credits" in lower
+                        ):
+                            return _json(
+                                self,
+                                429,
+                                {
+                                    "ok": False,
+                                    "error": "codex_usage_limited",
+                                    "detail": emsg[-420:],
+                                    "error_kind": "quota",
+                                    "executor": "codex_cli_exec",
+                                    "tool_calls": tool_calls,
+                                },
+                            )
+                        return _json(
+                            self,
+                            502,
+                            {
+                                "ok": False,
+                                "error": emsg,
+                                "error_kind": "upstream",
+                                "executor": "codex_cli_exec",
+                                "tool_calls": tool_calls,
+                            },
+                        )
+                    tid = str(out.get("thread_id", "")).strip() or None
+                    hist = ai.history(session_key, tid)[-80:] if tid else []
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "mode": mode,
+                            "reply": _normalize_reply_for_prompt(
+                                msg, str(out.get("answer", "(no output)"))
+                            ),
+                            "thread_id": tid,
+                            "history": hist,
+                            "threads": ai.list_threads(session_key),
+                            "provider": "codex_cli",
+                            "executor": "codex_cli_exec",
+                            "tool_calls": tool_calls,
+                        },
+                    )
+
+                if u.path == "/agent/clean/chat/stream":
+                    msg = str(body.get("message", "")).strip()
+                    if not msg:
+                        return _json(
+                            self, 400, {"ok": False, "error": "missing_message"}
+                        )
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    codex_login = _codex_cli_login_status()
+                    if not bool(codex_login.get("logged_in", False)):
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": "codex_login_required",
+                                "executor": "blocked",
+                                "can_execute": False,
+                            },
+                        )
+                    model = (
+                        str(body.get("model", "")).strip()
+                        or str(
+                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                        ).strip()
+                        or "gpt-5-codex"
+                    )
+                    clean_timeout_s = int(
+                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    )
+                    attachments = _sanitize_agent_attachments(body.get("attachments"))
+                    thread_id = str(body.get("thread_id", "")).strip() or None
+                    session_key = f"local:clean:{mode}"
+                    auto_tools = bool(body.get("auto_tools", False))
+                    tool_calls: list[Dict[str, Any]] = []
+                    if auto_tools:
+                        tool_calls = _run_clean_auto_tools(message=msg, model=model)
+                    ctx = _build_clean_agent_context(
+                        mode=mode,
+                        session_key=session_key,
+                        thread_id=thread_id,
+                        attachments=attachments,
+                        clean_tool_calls=tool_calls,
+                    )
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type, Authorization, X-Session-Token",
+                    )
+                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+                    self.end_headers()
+
+                    disconnected = threading.Event()
+                    cancelled = threading.Event()
+
+                    def send_evt(name: str, payload_obj: Dict[str, Any]) -> None:
+                        if disconnected.is_set():
+                            return
+                        blob = (
+                            f"event: {name}\ndata: {json.dumps(payload_obj, ensure_ascii=True)}\n\n"
+                        ).encode("utf-8")
+                        try:
+                            self.wfile.write(blob)
+                            self.wfile.flush()
+                        except Exception:
+                            disconnected.set()
+                            cancelled.set()
+
+                    send_evt("start", {"ok": True})
+                    try:
+                        out = ai.chat_codex_cli_stream(
+                            message=msg,
+                            context=ctx,
+                            session_key=session_key,
+                            model=model,
+                            thread_id=thread_id,
+                            system_prompt=_clean_system_prompt(mode),
+                            timeout_s_override=max(30, clean_timeout_s),
+                            cancel_event=cancelled,
+                            on_progress=lambda line: send_evt(
+                                "progress", {"line": line}
+                            ),
+                            on_delta=lambda txt: send_evt("delta", {"text": txt}),
+                        )
+                        if disconnected.is_set():
+                            return
+                        tid = str(out.get("thread_id", "")).strip() or None
+                        hist = ai.history(session_key, tid)[-80:] if tid else []
+                        send_evt(
+                            "done",
+                            {
+                                "ok": True,
+                                "mode": mode,
+                                "reply": _normalize_reply_for_prompt(
+                                    msg, str(out.get("answer", "(no output)"))
+                                ),
+                                "thread_id": tid,
+                                "history": hist,
+                                "threads": ai.list_threads(session_key),
+                                "provider": "codex_cli",
+                                "executor": "codex_cli_exec",
+                                "tool_calls": tool_calls,
+                            },
+                        )
+                    except Exception as exc:
+                        if disconnected.is_set():
+                            return
+                        send_evt(
+                            "error",
+                            {
+                                "ok": False,
+                                "error": str(exc),
+                                "executor": "codex_cli_exec",
+                                "tool_calls": tool_calls,
+                            },
+                        )
+                    return
+
+                if u.path == "/agent/clean/preflight":
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    max_ms = max(1000, int(body.get("max_ms", 45000) or 45000))
+                    max_ms_tools = max(
+                        max_ms, int(body.get("max_ms_tools", 120000) or 120000)
+                    )
+                    gate_only = bool(body.get("gate_only", False))
+                    with_compile = bool(body.get("with_compile", False))
+                    codex_login = _codex_cli_login_status()
+                    if not bool(codex_login.get("logged_in", False)):
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": "codex_login_required",
+                                "results": [],
+                            },
+                        )
+                    model = (
+                        str(body.get("model", "")).strip()
+                        or str(
+                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                        ).strip()
+                        or "gpt-5-codex"
+                    )
+                    sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    manifest_gate = firmware.validate_runtime_manifest(
+                        sketch=sketch, require_exists=True
+                    )
+                    profile_state = profiles.list()
+                    active_profile_id = str(
+                        profile_state.get("active_profile_id") or ""
+                    ).strip()
+                    active_profile = next(
+                        (
+                            p
+                            for p in list(profile_state.get("profiles") or [])
+                            if isinstance(p, dict)
+                            and str(p.get("profile_id", "")).strip()
+                            == active_profile_id
+                        ),
+                        None,
+                    )
+                    compat_gate = _runtime_manifest_profile_compatibility(
+                        manifest_validation=manifest_gate,
+                        active_profile=active_profile
+                        if isinstance(active_profile, dict)
+                        else None,
+                        targets=firmware.list_targets(),
+                    )
+                    if not bool(manifest_gate.get("ok", False)):
+                        reason = "runtime_manifest_invalid:" + ", ".join(
+                            list(manifest_gate.get("errors") or [])[:5]
+                        )
+                        return _json(
+                            self,
+                            200,
+                            {
+                                "ok": False,
+                                "mode": mode,
+                                "failures": 1,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                },
+                                "results": [
+                                    {
+                                        "id": "manifest_gate",
+                                        "ok": False,
+                                        "dt_ms": 0,
+                                        "limit_ms": max_ms,
+                                        "expect_tools": False,
+                                        "tool_calls": [],
+                                        "error": reason,
+                                        "reply": "runtime manifest gate blocked preflight",
+                                    }
+                                ],
+                            },
+                        )
+                    if not bool(compat_gate.get("ok", False)):
+                        reason = "runtime_manifest_profile_incompatible:" + ", ".join(
+                            list(compat_gate.get("errors") or [])[:5]
+                        )
+                        return _json(
+                            self,
+                            200,
+                            {
+                                "ok": False,
+                                "mode": mode,
+                                "failures": 1,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                },
+                                "results": [
+                                    {
+                                        "id": "manifest_profile_compat_gate",
+                                        "ok": False,
+                                        "dt_ms": 0,
+                                        "limit_ms": max_ms,
+                                        "expect_tools": False,
+                                        "tool_calls": [],
+                                        "error": reason,
+                                        "reply": "runtime manifest/profile compatibility gate blocked preflight",
+                                    }
+                                ],
+                            },
+                        )
+                    if gate_only:
+                        return _json(
+                            self,
+                            200,
+                            {
+                                "ok": True,
+                                "mode": mode,
+                                "failures": 0,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                    "gate_only": True,
+                                },
+                                "results": [
+                                    {
+                                        "id": "manifest_gate",
+                                        "ok": True,
+                                        "dt_ms": 0,
+                                        "limit_ms": max_ms,
+                                        "expect_tools": False,
+                                        "tool_calls": [],
+                                        "error": "",
+                                        "reply": "runtime manifest gates passed",
+                                    }
+                                ],
+                            },
+                        )
+                    clean_timeout_s = int(
+                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    )
+                    questions = [
+                        "one line only: preflight q1 ok",
+                        "run connect probe [tool:connect_probe] and summarize in one line",
+                        "run compat probe [tool:compat_probe] and summarize in one line",
+                    ]
+                    if with_compile:
+                        questions.append(
+                            "compile profiled runtime [tool:compile_profiled_runtime_v1] and report one-line result"
+                        )
+                    questions.extend(
+                        [
+                            "one line: confirm clean lane is codex-cli runtime",
+                            "one line only: preflight complete",
+                        ]
+                    )
+                    session_key = f"local:clean:{mode}"
+                    thread = ai.create_thread(session_key, "Clean Preflight")
+                    thread_id = str(thread.get("id", "")).strip() or None
+                    results: list[Dict[str, Any]] = []
+                    failures = 0
+                    for idx, prompt in enumerate(questions):
+                        expect_tools = "[tool:" in prompt.lower()
+                        limit_ms = max_ms_tools if expect_tools else max_ms
+                        tool_calls: list[Dict[str, Any]] = []
+                        if expect_tools:
+                            tool_calls = _run_clean_auto_tools(
+                                message=prompt, model=model
+                            )
+                        ctx = _build_clean_agent_context(
+                            mode=mode,
+                            session_key=session_key,
+                            thread_id=thread_id,
+                            attachments=None,
+                            clean_tool_calls=tool_calls,
+                        )
+                        t0 = int(time.time() * 1000)
+                        reply = ""
+                        ok = True
+                        error = ""
+                        try:
+                            out = ai.chat_codex_cli(
+                                message=prompt,
+                                context=ctx,
+                                session_key=session_key,
+                                model=model,
+                                thread_id=thread_id,
+                                system_prompt=_clean_system_prompt(mode),
+                                timeout_s_override=max(30, clean_timeout_s),
+                            )
+                            thread_id = (
+                                str(out.get("thread_id", "")).strip() or thread_id
+                            )
+                            reply = str(out.get("answer", "(no output)"))
+                        except Exception as exc:
+                            ok = False
+                            error = str(exc)
+                        dt_ms = int(time.time() * 1000) - t0
+                        if expect_tools and len(tool_calls) <= 0:
+                            ok = False
+                            error = error or "tool_calls_missing"
+                        if dt_ms > limit_ms:
+                            ok = False
+                            error = error or f"slow:{dt_ms}>{limit_ms}"
+                        if not reply.strip():
+                            ok = False
+                            error = error or "empty_reply"
+                        if not ok:
+                            failures += 1
+                        results.append(
+                            {
+                                "id": f"q{idx + 1}",
+                                "ok": ok,
+                                "dt_ms": dt_ms,
+                                "limit_ms": limit_ms,
+                                "expect_tools": expect_tools,
+                                "tool_calls": tool_calls,
+                                "error": error,
+                                "reply": _normalize_reply_for_prompt(prompt, reply)[
+                                    :240
+                                ],
+                            }
+                        )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": failures == 0,
+                            "mode": mode,
+                            "failures": failures,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "results": results,
+                        },
+                    )
+
+                if u.path == "/agent/clean/preflight/stream":
+                    mode = str(body.get("mode", "")).strip() or "app_dev"
+                    max_ms = max(1000, int(body.get("max_ms", 45000) or 45000))
+                    max_ms_tools = max(
+                        max_ms, int(body.get("max_ms_tools", 120000) or 120000)
+                    )
+                    gate_only = bool(body.get("gate_only", False))
+                    with_compile = bool(body.get("with_compile", False))
+                    codex_login = _codex_cli_login_status()
+                    if not bool(codex_login.get("logged_in", False)):
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": "codex_login_required",
+                                "results": [],
+                            },
+                        )
+                    model = (
+                        str(body.get("model", "")).strip()
+                        or str(
+                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
+                        ).strip()
+                        or "gpt-5-codex"
+                    )
+                    sketch = str(
+                        body.get("sketch", "")
+                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    manifest_gate = firmware.validate_runtime_manifest(
+                        sketch=sketch, require_exists=True
+                    )
+                    profile_state = profiles.list()
+                    active_profile_id = str(
+                        profile_state.get("active_profile_id") or ""
+                    ).strip()
+                    active_profile = next(
+                        (
+                            p
+                            for p in list(profile_state.get("profiles") or [])
+                            if isinstance(p, dict)
+                            and str(p.get("profile_id", "")).strip()
+                            == active_profile_id
+                        ),
+                        None,
+                    )
+                    compat_gate = _runtime_manifest_profile_compatibility(
+                        manifest_validation=manifest_gate,
+                        active_profile=active_profile
+                        if isinstance(active_profile, dict)
+                        else None,
+                        targets=firmware.list_targets(),
+                    )
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type, Authorization, X-Session-Token",
+                    )
+                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+                    self.end_headers()
+
+                    def send_evt(name: str, payload_obj: Dict[str, Any]) -> None:
+                        blob = (
+                            f"event: {name}\ndata: {json.dumps(payload_obj, ensure_ascii=True)}\n\n"
+                        ).encode("utf-8")
+                        self.wfile.write(blob)
+                        self.wfile.flush()
+
+                    send_evt("start", {"ok": True, "mode": mode})
+
+                    if not bool(manifest_gate.get("ok", False)):
+                        reason = "runtime_manifest_invalid:" + ", ".join(
+                            list(manifest_gate.get("errors") or [])[:5]
+                        )
+                        result = {
+                            "id": "manifest_gate",
+                            "ok": False,
+                            "dt_ms": 0,
+                            "limit_ms": max_ms,
+                            "expect_tools": False,
+                            "tool_calls": [],
+                            "error": reason,
+                            "reply": "runtime manifest gate blocked preflight",
+                        }
+                        send_evt(
+                            "check_done", {"index": 1, "total": 1, "result": result}
+                        )
+                        send_evt(
+                            "done",
+                            {
+                                "ok": False,
+                                "mode": mode,
+                                "failures": 1,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                },
+                                "results": [result],
+                            },
+                        )
+                        return
+
+                    if not bool(compat_gate.get("ok", False)):
+                        reason = "runtime_manifest_profile_incompatible:" + ", ".join(
+                            list(compat_gate.get("errors") or [])[:5]
+                        )
+                        result = {
+                            "id": "manifest_profile_compat_gate",
+                            "ok": False,
+                            "dt_ms": 0,
+                            "limit_ms": max_ms,
+                            "expect_tools": False,
+                            "tool_calls": [],
+                            "error": reason,
+                            "reply": "runtime manifest/profile compatibility gate blocked preflight",
+                        }
+                        send_evt(
+                            "check_done", {"index": 1, "total": 1, "result": result}
+                        )
+                        send_evt(
+                            "done",
+                            {
+                                "ok": False,
+                                "mode": mode,
+                                "failures": 1,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                },
+                                "results": [result],
+                            },
+                        )
+                        return
+
+                    if gate_only:
+                        result = {
+                            "id": "manifest_gate",
+                            "ok": True,
+                            "dt_ms": 0,
+                            "limit_ms": max_ms,
+                            "expect_tools": False,
+                            "tool_calls": [],
+                            "error": "",
+                            "reply": "runtime manifest gates passed",
+                        }
+                        send_evt(
+                            "check_done", {"index": 1, "total": 1, "result": result}
+                        )
+                        send_evt(
+                            "done",
+                            {
+                                "ok": True,
+                                "mode": mode,
+                                "failures": 0,
+                                "max_ms": max_ms,
+                                "max_ms_tools": max_ms_tools,
+                                "gate": {
+                                    "runtime_manifest": manifest_gate,
+                                    "manifest_profile_compat": compat_gate,
+                                    "active_profile_id": active_profile_id or None,
+                                    "fail_closed": True,
+                                    "gate_only": True,
+                                },
+                                "results": [result],
+                            },
+                        )
+                        return
+
+                    clean_timeout_s = int(
+                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    )
+                    questions = [
+                        "one line only: preflight q1 ok",
+                        "run connect probe [tool:connect_probe] and summarize in one line",
+                        "run compat probe [tool:compat_probe] and summarize in one line",
+                    ]
+                    if with_compile:
+                        questions.append(
+                            "compile profiled runtime [tool:compile_profiled_runtime_v1] and report one-line result"
+                        )
+                    questions.extend(
+                        [
+                            "one line: confirm clean lane is codex-cli runtime",
+                            "one line only: preflight complete",
+                        ]
+                    )
+                    session_key = f"local:clean:{mode}"
+                    thread = ai.create_thread(session_key, "Clean Preflight")
+                    thread_id = str(thread.get("id", "")).strip() or None
+                    results: list[Dict[str, Any]] = []
+                    failures = 0
+                    total = len(questions)
+                    for idx, prompt in enumerate(questions):
+                        expect_tools = "[tool:" in prompt.lower()
+                        send_evt(
+                            "check_start",
+                            {
+                                "index": idx + 1,
+                                "total": total,
+                                "id": f"q{idx + 1}",
+                                "expect_tools": expect_tools,
+                                "prompt": prompt,
+                            },
+                        )
+                        limit_ms = max_ms_tools if expect_tools else max_ms
+                        tool_calls: list[Dict[str, Any]] = []
+                        if expect_tools:
+                            tool_calls = _run_clean_auto_tools(
+                                message=prompt, model=model
+                            )
+                        ctx = _build_clean_agent_context(
+                            mode=mode,
+                            session_key=session_key,
+                            thread_id=thread_id,
+                            attachments=None,
+                            clean_tool_calls=tool_calls,
+                        )
+                        t0 = int(time.time() * 1000)
+                        reply = ""
+                        ok = True
+                        error = ""
+                        try:
+                            out = ai.chat_codex_cli(
+                                message=prompt,
+                                context=ctx,
+                                session_key=session_key,
+                                model=model,
+                                thread_id=thread_id,
+                                system_prompt=_clean_system_prompt(mode),
+                                timeout_s_override=max(30, clean_timeout_s),
+                            )
+                            thread_id = (
+                                str(out.get("thread_id", "")).strip() or thread_id
+                            )
+                            reply = str(out.get("answer", "(no output)"))
+                        except Exception as exc:
+                            ok = False
+                            error = str(exc)
+                        dt_ms = int(time.time() * 1000) - t0
+                        if expect_tools and len(tool_calls) <= 0:
+                            ok = False
+                            error = error or "tool_calls_missing"
+                        if dt_ms > limit_ms:
+                            ok = False
+                            error = error or f"slow:{dt_ms}>{limit_ms}"
+                        if not reply.strip():
+                            ok = False
+                            error = error or "empty_reply"
+                        if not ok:
+                            failures += 1
+                        result = {
+                            "id": f"q{idx + 1}",
+                            "ok": ok,
+                            "dt_ms": dt_ms,
+                            "limit_ms": limit_ms,
+                            "expect_tools": expect_tools,
+                            "tool_calls": tool_calls,
+                            "error": error,
+                            "reply": _normalize_reply_for_prompt(prompt, reply)[:240],
+                        }
+                        results.append(result)
+                        send_evt(
+                            "check_done",
+                            {"index": idx + 1, "total": total, "result": result},
+                        )
+
+                    send_evt(
+                        "done",
+                        {
+                            "ok": failures == 0,
+                            "mode": mode,
+                            "failures": failures,
+                            "max_ms": max_ms,
+                            "max_ms_tools": max_ms_tools,
+                            "results": results,
+                        },
+                    )
+                    return
+
+                if u.path == "/agent/mode":
+                    mode = str(body.get("mode", "")).strip()
+                    if not mode:
+                        return _json(self, 400, {"ok": False, "error": "mode_required"})
+                    try:
+                        state = agent_mission.set_mode(mode)
+                    except RuntimeError as exc:
+                        if str(exc) == "invalid_mode":
+                            return _json(
+                                self,
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": "invalid_mode",
+                                    "allowed_modes": agent_mission.status().get(
+                                        "allowed_modes", []
+                                    ),
+                                },
+                            )
+                        raise
+                    return _json(self, 200, {"ok": True, "agent": state})
+
+                if u.path == "/agent/thread/new":
+                    mode_state = agent_mission.status()
+                    mode = str(body.get("mode", "")).strip() or str(
+                        mode_state.get("mode", "robot_dev")
+                    )
+                    tok = _extract_auth_token(self, body)
+                    me = auth.me(tok) if tok else None
+                    session_key = (
+                        f"user:{me['id']}:agent:{mode}"
+                        if me and isinstance(me.get("id"), int)
+                        else f"local:{mode}"
+                    )
+                    title = str(body.get("title", "")).strip() or None
+                    thread = ai.create_thread(session_key, title)
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "agent": mode_state,
+                            "thread": thread,
+                            "threads": ai.list_threads(session_key),
+                            "history": ai.history(session_key, str(thread.get("id")))[
+                                -80:
+                            ],
+                        },
+                    )
+
+                if u.path == "/agent/thread/select":
+                    mode_state = agent_mission.status()
+                    mode = str(body.get("mode", "")).strip() or str(
+                        mode_state.get("mode", "robot_dev")
+                    )
+                    thread_id = str(body.get("thread_id", "")).strip()
+                    if not thread_id:
+                        return _json(
+                            self, 400, {"ok": False, "error": "thread_id_required"}
+                        )
+                    tok = _extract_auth_token(self, body)
+                    me = auth.me(tok) if tok else None
+                    session_key = (
+                        f"user:{me['id']}:agent:{mode}"
+                        if me and isinstance(me.get("id"), int)
+                        else f"local:{mode}"
+                    )
+                    try:
+                        thread = ai.select_thread(session_key, thread_id)
+                    except RuntimeError as exc:
+                        if str(exc) == "thread_not_found":
+                            return _json(
+                                self, 404, {"ok": False, "error": "thread_not_found"}
+                            )
+                        raise
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "agent": mode_state,
+                            "thread": thread,
+                            "threads": ai.list_threads(session_key),
+                            "history": ai.history(session_key, thread_id)[-80:],
+                        },
+                    )
+
+                if u.path == "/agent/chat":
+                    msg = str(body.get("message", "")).strip()
+                    if not msg:
+                        return _json(
+                            self, 400, {"ok": False, "error": "missing_message"}
+                        )
+                    mode_state = agent_mission.status()
+                    mode = str(body.get("mode", "")).strip() or str(
+                        mode_state.get("mode", "robot_dev")
+                    )
+                    if mode != mode_state.get("mode"):
+                        try:
+                            mode_state = agent_mission.set_mode(mode)
+                        except RuntimeError:
+                            mode = str(mode_state.get("mode", "robot_dev"))
+                    tok = _extract_auth_token(self, body)
+                    me = auth.me(tok) if tok else None
+                    user_creds = (
+                        auth.get_openai_key(int(me["id"]))
+                        if me and isinstance(me.get("id"), int)
+                        else None
+                    )
+                    resolved = provider_router.resolve_agent_runtime(
+                        mode=mode,
+                        requested_api_key=str(body.get("api_key", "")).strip() or None,
+                        requested_model=str(body.get("model", "")).strip() or None,
+                        user_creds=user_creds,
+                        env_api_key=ai.default_api_key,
+                        env_model=os.environ.get("OPENAI_MODEL", ""),
+                    )
+                    codex_login = _codex_cli_login_status()
+                    api_key = str(resolved.get("api_key", "")).strip()
+                    use_codex_cli = bool(codex_login.get("logged_in", False))
+                    enable_tools = bool(body.get("enable_tools", True))
+                    runtime_exec = _agent_choose_executor(
+                        mode=mode,
+                        enable_tools=enable_tools,
+                        has_api_key=bool(api_key),
+                        codex_logged_in=use_codex_cli,
+                        codex_agent_available=bool(codex_agent is not None),
+                    )
+                    executor = str(runtime_exec.get("executor", "blocked"))
+                    model = _agent_resolve_model(
+                        mode,
+                        str(resolved.get("model", "")),
+                        prefer_codex=use_codex_cli,
+                    )
+                    if executor == "blocked":
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": str(
+                                    runtime_exec.get(
+                                        "degraded_reason", "runtime_blocked"
+                                    )
+                                ),
+                                "executor": executor,
+                                "can_execute": False,
+                            },
+                        )
+                    if not model:
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": "openai_model_missing",
+                                "required": "codex_model",
+                                "model_source": str(resolved.get("model_source", "")),
+                            },
+                        )
+                    if (not use_codex_cli) and (not _agent_model_allowed(model)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": "agent_model_not_allowed",
+                                "required_substring": ",".join(
+                                    resolved.get("allowed_model_substrings", [])
+                                ),
+                                "resolved_model": model,
+                            },
+                        )
+                    serial_h = gateway.health()
+                    cached_status = dict(serial_h.get("last_status", {}))
+                    attachments = _sanitize_agent_attachments(body.get("attachments"))
+                    ctx = {
+                        "mission_mode": mode,
+                        "status": cached_status,
+                        "status_source": "gateway.health.last_status_cached",
+                        "serial_health": serial_h,
+                        "control": control.snapshot(),
+                        "firmware": firmware.status(),
+                        "commissioning": _commissioning_ai_context(commissioning),
+                        "host_capture": _host_capture_ai_context(host_capture),
+                        "burst": burst_status(),
+                        "config_snapshots": config_history.list_snapshots(limit=8),
+                        "assistant_knowledge": knowledge.context(),
+                        "assistant_capabilities": _assistant_capabilities_context(
+                            allow_apply=False
+                        ),
+                    }
+                    if attachments:
+                        ctx["attachments"] = attachments
+                    thread_id = str(body.get("thread_id", "")).strip() or None
+                    session_key = (
+                        f"user:{me['id']}:agent:{mode}"
+                        if me and isinstance(me.get("id"), int)
+                        else f"local:{mode}"
+                    )
+                    prior_history = (
+                        ai.history(session_key, thread_id) if thread_id else []
+                    )
+                    try:
+                        if executor == "openai_tools":
+                            fw_status = firmware.status()
+                            fw_defaults = (
+                                fw_status.get("defaults", {})
+                                if isinstance(fw_status, dict)
+                                else {}
+                            )
+                            active_sketch = str(
+                                body.get("sketch_path")
+                                or fw_status.get("sketch_path", "")
+                                or fw_defaults.get("sketch", "")
+                            )
+                            board_fqbn = str(
+                                body.get("board")
+                                or fw_status.get("board", "")
+                                or fw_defaults.get("fqbn", "arduino:avr:nano")
+                            )
+                            port = str(
+                                body.get("port")
+                                or fw_status.get("port", "")
+                                or fw_defaults.get("port", "")
+                            )
+                            tool_out = codex_agent.chat_with_tools(
+                                message=msg,
+                                context=ctx,
+                                api_key=api_key,
+                                model=model,
+                                system_prompt=_agent_mode_system_prompt(mode),
+                                enable_tools=True,
+                                active_sketch_path=active_sketch or None,
+                                active_robot_id=str(body.get("robot_id", "default")),
+                                board_fqbn=board_fqbn,
+                                port=port,
+                                conversation_history=prior_history,
+                            )
+                            answer = (
+                                str(tool_out.get("answer", "")).strip() or "(no output)"
+                            )
+                            tid = ai._append(
+                                session_key, "user", msg, thread_id=thread_id
+                            )
+                            ai._append(session_key, "assistant", answer, thread_id=tid)
+                            hist = ai.history(session_key, tid)[-80:]
+                            return _json(
+                                self,
+                                200,
+                                {
+                                    "ok": True,
+                                    "agent": mode_state,
+                                    "reply": _normalize_reply_for_prompt(msg, answer),
+                                    "thread_id": tid,
+                                    "history": hist,
+                                    "threads": ai.list_threads(session_key),
+                                    "tool_calls": tool_out.get("tool_calls", []),
+                                    "iterations": int(
+                                        tool_out.get("iterations", 1) or 1
+                                    ),
+                                    "provider": "openai_tools",
+                                    "executor": executor,
+                                },
+                            )
+                        if executor == "codex_cli_exec":
+                            out = ai.chat_codex_cli(
+                                message=msg,
+                                context=ctx,
+                                session_key=session_key,
+                                model=model,
+                                thread_id=thread_id,
+                                system_prompt=_agent_mode_system_prompt(mode),
+                            )
+                            tid = str(out.get("thread_id", "")).strip() or None
+                            hist = ai.history(session_key, tid)[-80:] if tid else []
+                            return _json(
+                                self,
+                                200,
+                                {
+                                    "ok": True,
+                                    "agent": mode_state,
+                                    "reply": _normalize_reply_for_prompt(
+                                        msg, out["answer"]
+                                    ),
+                                    "thread_id": tid,
+                                    "history": hist,
+                                    "threads": ai.list_threads(session_key),
+                                    "tool_calls": [],
+                                    "iterations": 1,
+                                    "provider": "codex_cli",
+                                    "executor": executor,
+                                },
+                            )
+                        out = ai.chat(
+                            message=msg,
+                            context=ctx,
+                            session_key=session_key,
+                            api_key=api_key,
+                            model=model,
+                            thread_id=thread_id,
+                            system_prompt=_agent_mode_system_prompt(mode),
+                        )
+                    except RuntimeError as exc:
+                        return _json(self, 500, {"ok": False, "error": str(exc)})
+                    tid = str(out.get("thread_id", "")).strip() or None
+                    hist = ai.history(session_key, tid)[-80:] if tid else []
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "agent": mode_state,
+                            "reply": _normalize_reply_for_prompt(msg, out["answer"]),
+                            "thread_id": tid,
+                            "history": hist,
+                            "threads": ai.list_threads(session_key),
+                            "tool_calls": [],
+                            "iterations": 1,
+                            "provider": "openai",
+                            "executor": "openai_chat",
+                        },
+                    )
+
+                if u.path == "/agent/chat/stream":
+                    msg = str(body.get("message", "")).strip()
+                    if not msg:
+                        return _json(
+                            self, 400, {"ok": False, "error": "missing_message"}
+                        )
+                    mode_state = agent_mission.status()
+                    mode = str(body.get("mode", "")).strip() or str(
+                        mode_state.get("mode", "robot_dev")
+                    )
+                    if mode != mode_state.get("mode"):
+                        try:
+                            mode_state = agent_mission.set_mode(mode)
+                        except RuntimeError:
+                            mode = str(mode_state.get("mode", "robot_dev"))
+                    tok = _extract_auth_token(self, body)
+                    me = auth.me(tok) if tok else None
+                    user_creds = (
+                        auth.get_openai_key(int(me["id"]))
+                        if me and isinstance(me.get("id"), int)
+                        else None
+                    )
+                    resolved = provider_router.resolve_agent_runtime(
+                        mode=mode,
+                        requested_api_key=str(body.get("api_key", "")).strip() or None,
+                        requested_model=str(body.get("model", "")).strip() or None,
+                        user_creds=user_creds,
+                        env_api_key=ai.default_api_key,
+                        env_model=os.environ.get("OPENAI_MODEL", ""),
+                    )
+                    codex_login = _codex_cli_login_status()
+                    api_key = str(resolved.get("api_key", "")).strip()
+                    use_codex_cli = bool(codex_login.get("logged_in", False))
+                    enable_tools = bool(body.get("enable_tools", True))
+                    runtime_exec = _agent_choose_executor(
+                        mode=mode,
+                        enable_tools=enable_tools,
+                        has_api_key=bool(api_key),
+                        codex_logged_in=use_codex_cli,
+                        codex_agent_available=bool(codex_agent is not None),
+                    )
+                    executor = str(runtime_exec.get("executor", "blocked"))
+                    model = _agent_resolve_model(
+                        mode,
+                        str(resolved.get("model", "")),
+                        prefer_codex=use_codex_cli,
+                    )
+                    if executor == "blocked":
+                        return _json(
+                            self,
+                            403,
+                            {
+                                "ok": False,
+                                "error": str(
+                                    runtime_exec.get(
+                                        "degraded_reason", "runtime_blocked"
+                                    )
+                                ),
+                                "executor": executor,
+                                "can_execute": False,
+                            },
+                        )
+                    if (not use_codex_cli) and (not _agent_model_allowed(model)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": "agent_model_not_allowed",
+                                "required_substring": ",".join(
+                                    resolved.get("allowed_model_substrings", [])
+                                ),
+                                "resolved_model": model,
+                            },
+                        )
+
+                    serial_h = gateway.health()
+                    cached_status = dict(serial_h.get("last_status", {}))
+                    attachments = _sanitize_agent_attachments(body.get("attachments"))
+                    ctx = {
+                        "mission_mode": mode,
+                        "status": cached_status,
+                        "status_source": "gateway.health.last_status_cached",
+                        "serial_health": serial_h,
+                        "control": control.snapshot(),
+                        "firmware": firmware.status(),
+                        "commissioning": _commissioning_ai_context(commissioning),
+                        "host_capture": _host_capture_ai_context(host_capture),
+                        "burst": burst_status(),
+                        "config_snapshots": config_history.list_snapshots(limit=8),
+                        "assistant_knowledge": knowledge.context(),
+                        "assistant_capabilities": _assistant_capabilities_context(
+                            allow_apply=False
+                        ),
+                    }
+                    if attachments:
+                        ctx["attachments"] = attachments
+                    thread_id = str(body.get("thread_id", "")).strip() or None
+                    session_key = (
+                        f"user:{me['id']}:agent:{mode}"
+                        if me and isinstance(me.get("id"), int)
+                        else f"local:{mode}"
+                    )
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type, Authorization, X-Session-Token",
+                    )
+                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+                    self.end_headers()
+
+                    def send_evt(name: str, payload_obj: Dict[str, Any]) -> None:
+                        blob = (
+                            f"event: {name}\ndata: {json.dumps(payload_obj, ensure_ascii=True)}\n\n"
+                        ).encode("utf-8")
+                        self.wfile.write(blob)
+                        self.wfile.flush()
+
+                    send_evt("start", {"ok": True})
+                    try:
+                        if executor == "openai_tools":
+                            fw_status = firmware.status()
+                            fw_defaults = (
+                                fw_status.get("defaults", {})
+                                if isinstance(fw_status, dict)
+                                else {}
+                            )
+                            active_sketch = str(
+                                body.get("sketch_path")
+                                or fw_status.get("sketch_path", "")
+                                or fw_defaults.get("sketch", "")
+                            )
+                            board_fqbn = str(
+                                body.get("board")
+                                or fw_status.get("board", "")
+                                or fw_defaults.get("fqbn", "arduino:avr:nano")
+                            )
+                            port = str(
+                                body.get("port")
+                                or fw_status.get("port", "")
+                                or fw_defaults.get("port", "")
+                            )
+                            prior_history = (
+                                ai.history(session_key, thread_id) if thread_id else []
+                            )
+                            tool_out = codex_agent.chat_with_tools(
+                                message=msg,
+                                context=ctx,
+                                api_key=api_key,
+                                model=model,
+                                system_prompt=_agent_mode_system_prompt(mode),
+                                enable_tools=True,
+                                active_sketch_path=active_sketch or None,
+                                active_robot_id=str(body.get("robot_id", "default")),
+                                board_fqbn=board_fqbn,
+                                port=port,
+                                conversation_history=prior_history,
+                            )
+                            answer = (
+                                str(tool_out.get("answer", "")).strip() or "(no output)"
+                            )
+                            send_evt("delta", {"text": answer})
+                            tid = ai._append(
+                                session_key, "user", msg, thread_id=thread_id
+                            )
+                            ai._append(session_key, "assistant", answer, thread_id=tid)
+                            hist = ai.history(session_key, tid)[-80:]
+                            send_evt(
+                                "done",
+                                {
+                                    "ok": True,
+                                    "agent": mode_state,
+                                    "reply": _normalize_reply_for_prompt(msg, answer),
+                                    "thread_id": tid,
+                                    "history": hist,
+                                    "threads": ai.list_threads(session_key),
+                                    "tool_calls": tool_out.get("tool_calls", []),
+                                    "iterations": int(
+                                        tool_out.get("iterations", 1) or 1
+                                    ),
+                                    "provider": "openai_tools",
+                                    "executor": executor,
+                                },
+                            )
+                            return
+                        if executor == "codex_cli_exec":
+                            out = ai.chat_codex_cli(
+                                message=msg,
+                                context=ctx,
+                                session_key=session_key,
+                                model=model,
+                                thread_id=thread_id,
+                                system_prompt=_agent_mode_system_prompt(mode),
+                            )
+                            answer = str(out.get("answer", "")).strip() or "(no output)"
+                            send_evt("delta", {"text": answer})
+                            tid = str(out.get("thread_id", "")).strip() or None
+                            hist = ai.history(session_key, tid)[-80:] if tid else []
+                            send_evt(
+                                "done",
+                                {
+                                    "ok": True,
+                                    "agent": mode_state,
+                                    "reply": _normalize_reply_for_prompt(msg, answer),
+                                    "thread_id": tid,
+                                    "history": hist,
+                                    "threads": ai.list_threads(session_key),
+                                    "tool_calls": [],
+                                    "iterations": 1,
+                                    "provider": "codex_cli",
+                                    "executor": executor,
+                                },
+                            )
+                            return
+
+                        out = ai.chat_stream(
+                            message=msg,
+                            context=ctx,
+                            session_key=session_key,
+                            api_key=api_key,
+                            model=model,
+                            on_delta=lambda txt: send_evt("delta", {"text": txt}),
+                            thread_id=thread_id,
+                            system_prompt=_agent_mode_system_prompt(mode),
+                        )
+                        tid = str(out.get("thread_id", "")).strip() or None
+                        hist = ai.history(session_key, tid)[-80:] if tid else []
+                        send_evt(
+                            "done",
+                            {
+                                "ok": True,
+                                "agent": mode_state,
+                                "reply": _normalize_reply_for_prompt(
+                                    msg,
+                                    str(out.get("answer", "")).strip() or "(no output)",
+                                ),
+                                "thread_id": tid,
+                                "history": hist,
+                                "threads": ai.list_threads(session_key),
+                                "tool_calls": [],
+                                "iterations": 1,
+                                "provider": "openai",
+                                "executor": "openai_chat",
+                            },
+                        )
+                    except Exception as exc:
+                        send_evt("error", {"ok": False, "error": str(exc)})
+                    return
+
                 if u.path == "/ai/chat":
                     tok = _extract_auth_token(self, body)
                     me = auth.me(tok)
@@ -6947,7 +12021,7 @@ def build_handler(
                                 "reply": reply,
                                 "ai": ai.status(
                                     configured=True,
-                                    model=str(creds["model"] or "gpt-5-mini"),
+                                    model=str(creds["model"] or "gpt-5-codex"),
                                     session_key=skey,
                                 ),
                                 "history": ai.history(skey, tid)[-80:],
@@ -6961,7 +12035,7 @@ def build_handler(
                         context=ctx,
                         session_key=skey,
                         api_key=creds["api_key"],
-                        model=str(creds["model"] or "gpt-5-mini"),
+                        model=str(creds["model"] or "gpt-5-codex"),
                         thread_id=thread_id,
                         system_prompt=prompt,
                     )
@@ -7001,7 +12075,7 @@ def build_handler(
                             "reply": reply,
                             "ai": ai.status(
                                 configured=True,
-                                model=str(creds["model"] or "gpt-5-mini"),
+                                model=str(creds["model"] or "gpt-5-codex"),
                                 session_key=skey,
                             ),
                             "history": hist,
@@ -7523,7 +12597,7 @@ def build_handler(
                             context=ctx,
                             session_key=skey,
                             api_key=creds["api_key"],
-                            model=str(creds["model"] or "gpt-5-mini"),
+                            model=str(creds["model"] or "gpt-5-codex"),
                             on_delta=on_stream_delta,
                             thread_id=thread_id,
                             system_prompt=prompt,
@@ -7569,7 +12643,7 @@ def build_handler(
                                 "reply": reply,
                                 "ai": ai.status(
                                     configured=True,
-                                    model=str(creds["model"] or "gpt-5-mini"),
+                                    model=str(creds["model"] or "gpt-5-codex"),
                                     session_key=skey,
                                 ),
                                 "history": hist,
@@ -8194,7 +13268,9 @@ def build_handler(
                     )
 
                 if u.path == "/burst/arm":
-                    _require_action_allowed("burst_arm", gateway, control)
+                    _require_action_allowed(
+                        "burst_arm", gateway, control, prearm_gate=prearm_safety
+                    )
                     delay_ms = int(body.get("delay_ms", 3000) or 3000)
                     lines = int(body.get("lines", 80) or 80)
                     freq_hz = float(body.get("freq_hz", 8.0) or 8.0)
@@ -8229,13 +13305,36 @@ def build_handler(
                     )
 
                 if u.path == "/arm/prepare":
-                    _require_action_allowed("arm_prepare", gateway, control)
+                    _require_action_allowed(
+                        "arm_prepare", gateway, control, prearm_gate=prearm_safety
+                    )
                     return _json(
                         self, 200, {"ok": True, "control": control.prepare_arm()}
                     )
 
+                if u.path == "/arm/precheck":
+                    report = _run_prearm_hardware_check(gateway, control, body)
+                    if bool(report.get("ok", False)):
+                        prearm = prearm_safety.mark_pass(report)
+                    else:
+                        prearm = prearm_safety.require("prearm_failed")
+                    return _json(
+                        self,
+                        200 if bool(report.get("ok", False)) else 409,
+                        {
+                            "ok": bool(report.get("ok", False)),
+                            "prearm_check": report,
+                            "prearm_safety": prearm,
+                            "action_gates": _resolve_action_gates(
+                                gateway, control, prearm_gate=prearm_safety
+                            ),
+                        },
+                    )
+
                 if u.path == "/arm/confirm":
-                    _require_action_allowed("arm_confirm", gateway, control)
+                    _require_action_allowed(
+                        "arm_confirm", gateway, control, prearm_gate=prearm_safety
+                    )
                     control.consume_arm_prepare()
                     gateway.command("ARM", timeout=1.0)
                     return _json(
@@ -8249,7 +13348,9 @@ def build_handler(
                     )
 
                 if u.path == "/arm":
-                    _require_action_allowed("arm", gateway, control)
+                    _require_action_allowed(
+                        "arm", gateway, control, prearm_gate=prearm_safety
+                    )
                     gateway.command("ARM", timeout=1.0)
                     control.clear_arm_prepare()
                     return _json(
@@ -8263,7 +13364,9 @@ def build_handler(
                     )
 
                 if u.path == "/disarm":
-                    _require_action_allowed("disarm", gateway, control)
+                    _require_action_allowed(
+                        "disarm", gateway, control, prearm_gate=prearm_safety
+                    )
                     gateway.command("DISARM", timeout=1.0)
                     control.clear_arm_prepare()
                     return _json(
@@ -8562,7 +13665,9 @@ def build_handler(
                             "error": "action_blocked",
                             "action": action,
                             "reasons": reasons,
-                            "action_gates": _resolve_action_gates(gateway, control),
+                            "action_gates": _resolve_action_gates(
+                                gateway, control, prearm_gate=prearm_safety
+                            ),
                             "control": control.snapshot(),
                         },
                     )
@@ -8582,7 +13687,7 @@ def build_handler(
                             "commissioning": commissioning.status(),
                         },
                     )
-                if msg == "firmware_running":
+                if msg in {"firmware_running", "operation_in_progress"}:
                     return _json(
                         self,
                         409,
@@ -8660,6 +13765,7 @@ def _startup_rag_indexing(openai_key: Optional[str]) -> None:
 
 
 def main() -> int:
+    _install_runtime_diagnostics()
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--port", default=os.environ.get("NANO_PORT", "/dev/cu.usbserial-2210")
@@ -8669,12 +13775,17 @@ def main() -> int:
     )
     ap.add_argument("--host", default=os.environ.get("APP_BRIDGE_HOST", "127.0.0.1"))
     ap.add_argument(
-        "--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8787"))
+        "--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8797"))
     )
     ap.add_argument(
         "--telemetry-port",
         type=int,
-        default=int(os.environ.get("APP_TELEMETRY_PORT", "8788")),
+        default=int(os.environ.get("APP_TELEMETRY_PORT", "8798")),
+    )
+    ap.add_argument(
+        "--instance",
+        default=os.environ.get("APP_BRIDGE_INSTANCE", "upright-lean-v1"),
+        help="Instance label for process isolation/observability",
     )
     ap.add_argument(
         "--watchdog-timeout",
@@ -8691,6 +13802,7 @@ def main() -> int:
     if not args.supervised:
         print("\n⚠️  Running bridge directly (no supervisor).")
         print("   For auto-restart on failure, use: ./tools/start_bridge.sh\n")
+    print(f"bridge instance: {args.instance}")
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     gw = NanoSerialGateway(args.port, args.baud)
@@ -8710,6 +13822,8 @@ def main() -> int:
     ai = AIManager(repo_root)
     ai_profiles = AIProfileManager(repo_root)
     knowledge = AssistantKnowledgeManager(repo_root)
+    agent_mission = AgentMissionManager(repo_root)
+    provider_router = ProviderRouter(repo_root)
 
     # Initialize CodexAgent for tool-enabled chat (optional - gracefully degrades if unavailable)
     codex_agent: Optional[Any] = None
@@ -8745,6 +13859,7 @@ def main() -> int:
     setup_attempt_history = SetupAttemptHistoryStore(repo_root)
     profiles = RobotProfilesManager(repo_root)
     config_history = ConfigHistoryManager(repo_root)
+    prearm_safety = PreArmSafetyGate(required=True)
     telemetry = TelemetryHub(gw, control, host_capture, args.host, args.telemetry_port)
     telemetry.start()
 
@@ -8779,6 +13894,8 @@ def main() -> int:
             ai,
             ai_profiles,
             knowledge,
+            agent_mission,
+            provider_router,
             auth,
             mission_memory,
             profiles,
@@ -8787,6 +13904,7 @@ def main() -> int:
             codex_agent,
             hardware_context,
             setup_attempt_history,
+            prearm_safety,
         ),
     )
     print(f"bridge listening on http://{args.host}:{args.http_port}")

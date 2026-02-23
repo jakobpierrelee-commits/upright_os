@@ -47,25 +47,19 @@ export function RagStatusBadge({ authReady }: Props) {
     return null;
   }
 
-  if (loading && !stats) {
-    return <span className="hud-pill unknown">RAG …</span>;
-  }
-
-  if (error && !stats) {
-    return (
-      <span className="hud-pill warn" title={`RAG error: ${error}`}>
-        RAG ⚠
-      </span>
-    );
-  }
-
-  if (!stats) {
-    return <span className="hud-pill unknown">RAG —</span>;
-  }
-
-  const ready = stats.doc_chunk_count > 0 && stats.has_openai_key;
-  const tone = ready ? 'good' : 'warn';
-  const title = `${stats.embedded_docs_count} docs / ${stats.doc_chunk_count} chunks\nModel: ${stats.embedding_model}\nChunk size: ${stats.chunk_size}\nFreshness: ${formatFreshness(stats.latest_embedding_ts)}`;
+  const hasStats = Boolean(stats);
+  const ready = Boolean(stats && stats.doc_chunk_count > 0 && stats.has_openai_key);
+  const tone = ready ? 'good' : error ? 'warn' : hasStats ? 'warn' : 'unknown';
+  const label = loading && !stats
+    ? 'RAG …'
+    : error && !stats
+      ? 'RAG ⚠'
+      : !stats
+        ? 'RAG —'
+        : `RAG ${ready ? '✓' : '○'} ${stats.doc_chunk_count}`;
+  const title = hasStats && stats
+    ? `${stats.embedded_docs_count} docs / ${stats.doc_chunk_count} chunks\nModel: ${stats.embedding_model}\nChunk size: ${stats.chunk_size}\nFreshness: ${formatFreshness(stats.latest_embedding_ts)}`
+    : (error ? `RAG error: ${error}` : 'RAG status unavailable; click for details.');
 
   const runReindex = async () => {
     if (indexing) return;
@@ -95,15 +89,21 @@ export function RagStatusBadge({ authReady }: Props) {
         aria-expanded={panelOpen}
         aria-label="RAG status panel"
       >
-        RAG {ready ? '✓' : '○'} {stats.doc_chunk_count}
+        {label}
       </button>
       {panelOpen && (
         <div className="rag-status-panel" role="dialog" aria-label="RAG indexing status">
-          <p><strong>Docs:</strong> {stats.embedded_docs_count}</p>
-          <p><strong>Chunks:</strong> {stats.doc_chunk_count}</p>
-          <p><strong>Model:</strong> {stats.embedding_model}</p>
-          <p><strong>Chunk Size:</strong> {stats.chunk_size}</p>
-          <p><strong>Freshness:</strong> {formatFreshness(stats.latest_embedding_ts)}</p>
+          {stats ? (
+            <>
+              <p><strong>Docs:</strong> {stats.embedded_docs_count}</p>
+              <p><strong>Chunks:</strong> {stats.doc_chunk_count}</p>
+              <p><strong>Model:</strong> {stats.embedding_model}</p>
+              <p><strong>Chunk Size:</strong> {stats.chunk_size}</p>
+              <p><strong>Freshness:</strong> {formatFreshness(stats.latest_embedding_ts)}</p>
+            </>
+          ) : (
+            <p>RAG stats unavailable. Use Refresh to retry.</p>
+          )}
           {error && <p><strong>Error:</strong> {error}</p>}
           {notice && <p>{notice}</p>}
           <div className="rag-status-actions">
@@ -114,8 +114,8 @@ export function RagStatusBadge({ authReady }: Props) {
               type="button"
               className="btn-secondary btn-sm"
               onClick={() => void runReindex()}
-              disabled={indexing || !stats.has_openai_key}
-              title={!stats.has_openai_key ? 'OpenAI key required for indexing' : 'Reindex docs and sketches'}
+              disabled={indexing || !stats?.has_openai_key}
+              title={!stats?.has_openai_key ? 'OpenAI key required for indexing' : 'Reindex docs and sketches'}
             >
               {indexing ? 'Reindexing…' : 'Reindex'}
             </button>

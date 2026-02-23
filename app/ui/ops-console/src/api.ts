@@ -1,6 +1,6 @@
 import type { ControlState, Health, Status } from './types';
 
-const BASE = (import.meta.env.VITE_BRIDGE_BASE as string | undefined) ?? 'http://127.0.0.1:8787';
+const BASE = (import.meta.env.VITE_BRIDGE_BASE as string | undefined) ?? 'http://127.0.0.1:8797';
 let SESSION_TOKEN = '';
 
 export function setSessionToken(token: string | null): void {
@@ -250,6 +250,7 @@ export type ActionGate = {
 };
 
 export type ActionGates = {
+  prearm_safety?: ActionGate;
   arm_prepare?: ActionGate;
   arm_confirm?: ActionGate;
   arm?: ActionGate;
@@ -332,6 +333,35 @@ export type AiStatus = {
   history_len: number;
   active_thread_id?: string;
   thread_count?: number;
+};
+
+export type AgentMode = 'app_dev' | 'robot_dev' | 'ops_debug';
+
+export type AgentStatus = {
+  mode: AgentMode;
+  allowed_modes: AgentMode[];
+  updated_at?: number;
+  openai_configured: boolean;
+  openai_model?: string;
+  openai_model_allowed?: boolean;
+  provider?: string;
+  api_key_source?: string;
+  model_source?: string;
+  codex_login?: {
+    available?: boolean;
+    logged_in?: boolean;
+    detail?: string;
+  };
+};
+
+export type AgentAttachment = {
+  id?: string;
+  name: string;
+  mime: string;
+  kind: 'text' | 'csv' | 'image' | 'binary' | string;
+  size: number;
+  path?: string;
+  text_excerpt?: string;
 };
 
 export type AiThreadSummary = {
@@ -419,6 +449,13 @@ export type V2Readiness = {
   contract_version_detected: 'v1' | 'v2' | 'unknown';
   v1_ok: boolean;
   v2_ready: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
@@ -441,6 +478,13 @@ export type CompatReport = {
   contract_version_detected?: 'v1' | 'v2' | 'unknown';
   v1_ok?: boolean;
   v2_ready?: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields?: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
@@ -485,6 +529,13 @@ export type ConnectProbeReport = {
   contract_version_detected?: 'v1' | 'v2' | 'unknown';
   v1_ok?: boolean;
   v2_ready?: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields?: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
@@ -1027,6 +1078,259 @@ export async function aiStatus(): Promise<{ ai: AiStatus; history: AiHistoryItem
   return { ai: d.ai, history: d.history, threads: d.threads ?? [] };
 }
 
+export async function agentStatus(): Promise<{
+  agent: AgentStatus;
+  knowledge: Record<string, unknown>;
+  health: Health;
+  control: ControlState;
+  status: Status;
+  lines: string[];
+}> {
+  const d = await req<{
+    ok: true;
+    agent: AgentStatus;
+    knowledge: Record<string, unknown>;
+    health: Health;
+    control: ControlState;
+    status: Status;
+    lines: string[];
+  }>('/agent/status');
+  return {
+    agent: d.agent,
+    knowledge: d.knowledge,
+    health: d.health,
+    control: d.control,
+    status: d.status,
+    lines: d.lines,
+  };
+}
+
+export async function agentSetMode(mode: AgentMode): Promise<AgentStatus> {
+  const d = await req<{ ok: true; agent: AgentStatus }>('/agent/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+  return d.agent;
+}
+
+export async function agentChat(
+  message: string,
+  mode?: AgentMode,
+  threadId?: string,
+  attachments?: AgentAttachment[],
+): Promise<{
+  agent: AgentStatus;
+  reply: string;
+  thread_id?: string;
+  history: AiHistoryItem[];
+  threads?: AiThreadSummary[];
+  tool_calls?: ToolCallResult[];
+  iterations?: number;
+}> {
+  const d = await req<{
+    ok: true;
+    agent: AgentStatus;
+    reply: string;
+    thread_id?: string;
+    history: AiHistoryItem[];
+    threads?: AiThreadSummary[];
+    tool_calls?: ToolCallResult[];
+    iterations?: number;
+  }>('/agent/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, mode, thread_id: threadId, enable_tools: true, attachments: attachments ?? [] }),
+  }, 45000);
+  return {
+    agent: d.agent,
+    reply: d.reply,
+    thread_id: d.thread_id,
+    history: d.history,
+    threads: d.threads ?? [],
+    tool_calls: d.tool_calls ?? [],
+    iterations: d.iterations ?? 1,
+  };
+}
+
+export async function agentChatStream(
+  message: string,
+  mode: AgentMode | undefined,
+  threadId: string | undefined,
+  attachments: AgentAttachment[] | undefined,
+  handlers: {
+    onStart?: () => void;
+    onDelta?: (text: string) => void;
+    onDone?: (payload: {
+      agent: AgentStatus;
+      reply: string;
+      thread_id?: string;
+      history: AiHistoryItem[];
+      threads?: AiThreadSummary[];
+      tool_calls?: ToolCallResult[];
+      iterations?: number;
+      provider?: string;
+    }) => void;
+  },
+  signal?: AbortSignal,
+): Promise<{
+  agent: AgentStatus;
+  reply: string;
+  thread_id?: string;
+  history: AiHistoryItem[];
+  threads?: AiThreadSummary[];
+  tool_calls?: ToolCallResult[];
+  iterations?: number;
+  provider?: string;
+}> {
+  const res = await fetch(`${BASE}/agent/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
+    },
+    body: JSON.stringify({ message, mode, thread_id: threadId, enable_tools: true, attachments: attachments ?? [] }),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    let body = '';
+    try {
+      body = await res.text();
+    } catch {
+      body = '';
+    }
+    throw new Error(body || `${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let donePayload: {
+    agent: AgentStatus;
+    reply: string;
+    thread_id?: string;
+    history: AiHistoryItem[];
+    threads?: AiThreadSummary[];
+    tool_calls?: ToolCallResult[];
+    iterations?: number;
+    provider?: string;
+  } | null = null;
+
+  const handleFrame = (frame: string): void => {
+    const lines = frame.split('\n');
+    let evt = 'message';
+    const dataLines: string[] = [];
+    for (const ln of lines) {
+      if (ln.startsWith('event:')) evt = ln.slice(6).trim();
+      else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim());
+    }
+    if (dataLines.length === 0) return;
+    const dataTxt = dataLines.join('\n');
+    const obj = JSON.parse(dataTxt) as Record<string, unknown>;
+    if (evt === 'start') {
+      handlers.onStart?.();
+      return;
+    }
+    if (evt === 'delta') {
+      handlers.onDelta?.(String(obj.text ?? ''));
+      return;
+    }
+    if (evt === 'done') {
+      donePayload = {
+        agent: obj.agent as AgentStatus,
+        reply: String(obj.reply ?? ''),
+        thread_id: obj.thread_id as string | undefined,
+        history: (obj.history as AiHistoryItem[]) ?? [],
+        threads: (obj.threads as AiThreadSummary[]) ?? [],
+        tool_calls: (obj.tool_calls as ToolCallResult[]) ?? [],
+        iterations: Number(obj.iterations ?? 1),
+        provider: String(obj.provider ?? ''),
+      };
+      handlers.onDone?.(donePayload);
+      return;
+    }
+    if (evt === 'error') {
+      throw new Error(String(obj.error ?? 'stream_error'));
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    while (true) {
+      const idx = buf.indexOf('\n\n');
+      if (idx < 0) break;
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      if (frame.trim()) handleFrame(frame);
+    }
+  }
+  if (buf.trim()) handleFrame(buf);
+  if (!donePayload) throw new Error('stream_incomplete');
+  return donePayload;
+}
+
+export async function agentUploadFile(file: File): Promise<AgentAttachment> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const b64 = btoa(binary);
+  const d = await req<{ ok: true; attachment: AgentAttachment }>('/agent/file/upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: file.name,
+      mime: file.type || 'application/octet-stream',
+      content_base64: b64,
+    }),
+  }, 60000);
+  return d.attachment;
+}
+
+export async function agentThreads(mode?: AgentMode): Promise<{ agent: AgentStatus; ai: AiStatus; threads: AiThreadSummary[] }> {
+  const qs = mode ? `?mode=${encodeURIComponent(mode)}` : '';
+  const d = await req<{ ok: true; agent: AgentStatus; ai: AiStatus; threads: AiThreadSummary[] }>(`/agent/threads${qs}`);
+  return { agent: d.agent, ai: d.ai, threads: d.threads ?? [] };
+}
+
+export async function agentNewThread(mode?: AgentMode, title?: string): Promise<{
+  agent: AgentStatus;
+  thread: { id: string; title: string };
+  threads: AiThreadSummary[];
+  history: AiHistoryItem[];
+}> {
+  const d = await req<{
+    ok: true;
+    agent: AgentStatus;
+    thread: { id: string; title: string };
+    threads: AiThreadSummary[];
+    history: AiHistoryItem[];
+  }>('/agent/thread/new', {
+    method: 'POST',
+    body: JSON.stringify({ mode, title }),
+  });
+  return { agent: d.agent, thread: d.thread, threads: d.threads ?? [], history: d.history ?? [] };
+}
+
+export async function agentSelectThread(mode: AgentMode | undefined, threadId: string): Promise<{
+  agent: AgentStatus;
+  thread: { id: string; title: string };
+  threads: AiThreadSummary[];
+  history: AiHistoryItem[];
+}> {
+  const d = await req<{
+    ok: true;
+    agent: AgentStatus;
+    thread: { id: string; title: string };
+    threads: AiThreadSummary[];
+    history: AiHistoryItem[];
+  }>('/agent/thread/select', {
+    method: 'POST',
+    body: JSON.stringify({ mode, thread_id: threadId }),
+  });
+  return { agent: d.agent, thread: d.thread, threads: d.threads ?? [], history: d.history ?? [] };
+}
+
 export async function aiChat(
   message: string,
   threadId?: string,
@@ -1312,7 +1616,7 @@ export async function authMe(): Promise<AuthUser> {
   return d.user;
 }
 
-export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-mini'): Promise<{ configured: boolean; model: string }> {
+export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-codex'): Promise<{ configured: boolean; model: string }> {
   const d = await req<{ ok: true; openai: { configured: boolean; model: string } }>('/auth/openai-key', {
     method: 'POST',
     body: JSON.stringify({ api_key: apiKey, model }),
@@ -1374,6 +1678,43 @@ export async function postCommand(cmd: string, expect?: string, timeoutS?: numbe
 export async function armPrepare(): Promise<ControlState> {
   const d = await req<{ ok: true; control: ControlState }>('/arm/prepare', { method: 'POST', body: '{}' });
   return d.control;
+}
+
+export async function armPrecheck(payload: {
+  bot_on_stand_ok?: boolean;
+  left_wheel_pulse_ok?: boolean;
+  right_wheel_pulse_ok?: boolean;
+  auto_wheel_probe?: boolean;
+  estop_latch_ok?: boolean;
+  estop_unlatch_ok?: boolean;
+  auto_estop_probe?: boolean;
+}): Promise<{ ok: boolean; prearm_check: Record<string, unknown>; prearm_safety: Record<string, unknown>; action_gates?: ActionGates }> {
+  const res = await fetch(`${BASE}/arm/precheck`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  const d = (await res.json()) as {
+    ok?: boolean;
+    error?: string;
+    prearm_check?: Record<string, unknown>;
+    prearm_safety?: Record<string, unknown>;
+    action_gates?: ActionGates;
+  };
+  // /arm/precheck intentionally uses 409 when checks fail. Return structured
+  // payload so UI can show exact failed checks instead of generic "409".
+  if (!res.ok && res.status !== 409) {
+    throw new Error(String(d?.error ?? res.status));
+  }
+  return {
+    ok: Boolean(d.ok),
+    prearm_check: (d.prearm_check ?? {}) as Record<string, unknown>,
+    prearm_safety: (d.prearm_safety ?? {}) as Record<string, unknown>,
+    action_gates: d.action_gates,
+  };
 }
 
 export async function armConfirm(): Promise<{ status: Status; control: ControlState }> {

@@ -1,0 +1,15 @@
+graph TB
+  MCU["MCU\narduino:avr:nano"]
+  IMU["IMU\nunknown_imu"]
+  MD["Motor Driver\nunknown_driver"]
+  ENC["Wheel Encoders"]
+  USB["USB Serial"]
+  GATE["Safety Gate"]
+  MOT["Drive Motors"]
+
+  MCU --> IMU
+  MCU --> MD
+  MCU --> ENC
+  MCU --> USB
+  MCU --> GATE
+  MD --> MOT

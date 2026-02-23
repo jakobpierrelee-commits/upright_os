@@ -12,7 +12,8 @@
         "Rebased playbook on trusted references (MIT, UMich CTMS, MathWorks, UNC Kalman tutorial)",
         "Added explicit source-linked tuning guidance for inverted pendulum behaviors",
         "Refined anti-windup and saturation handling rules for real actuators",
-        "Kept telemetry field mapping and bounded-delta policy aligned with UpRight firmware schema"
+        "Kept telemetry field mapping and bounded-delta policy aligned with UpRight firmware schema",
+        "Added explicit signal->error->output and Kalman innovation guidance for UI/Overwatch/scaffold alignment"
       ]
     },
     {

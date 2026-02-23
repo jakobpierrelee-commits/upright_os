@@ -11,15 +11,10 @@ type Props = {
   hud: {
     angle: number;
     rawAngle: number;
-    output: number;
-    voltageRaw: number;
   };
   angleDelta: number;
-  outputDelta: number;
   angleDialPct: number;
   rawAngleDialPct: number;
-  outputDialPct: number;
-  voltageDialPct: number;
   chartPointsRaw: string;
   chartPointsKf: string;
   chartPointsRef: string;
@@ -70,11 +65,8 @@ export function HudVisuals(props: Props) {
     show,
     hud,
     angleDelta,
-    outputDelta,
     angleDialPct,
     rawAngleDialPct,
-    outputDialPct,
-    voltageDialPct,
     chartPointsRaw,
     chartPointsKf,
     chartPointsRef,
@@ -87,62 +79,45 @@ export function HudVisuals(props: Props) {
   return (
     <section className="hud-visuals" aria-label="Persistent telemetry visuals">
       <article className="dial-panel">
-        <h3>Reactor Dials</h3>
+        <h3>Amplified Reactor Dials</h3>
         <div className="dial-row">
-          <div className="dial-card">
-            <svg className="dial dial-semi" viewBox="0 0 120 88" role="img" aria-label="Angle dial">
+          <div className="dial-card amplified-angle-card">
+            <span className="dial-label">AMPLIFIED FILTERED ANGLE</span>
+            <svg className="dial dial-semi telemetry-semi" viewBox="0 0 120 88" role="img" aria-label="Filtered angle semicircle gauge">
               <path d={sideSemiTrackPath(46)} className="dial-semi-track" />
-              <line x1="60" y1="14" x2="60" y2="26" className="dial-axis-mark" />
-              <line x1="14" y1="60" x2="28" y2="60" className="dial-axis-mark dial-axis-mark-back" />
-              <line x1="92" y1="60" x2="106" y2="60" className="dial-axis-mark dial-axis-mark-forward" />
-              <path d={sideSemiFillPath(46, hud.angle, angleDialPct)} className="dial-fill dial-side dial-angle" />
+              <path d={sideSemiFillPath(46, hud.angle, angleDialPct)} className="dial-fill dial-side telemetry-gauge-value" />
+              <text x="60" y="58" textAnchor="middle" className="telemetry-semi-readout">
+                {hud.angle.toFixed(2)}
+              </text>
+              <text x="60" y="74" textAnchor="middle" className="telemetry-semi-unit">
+                DEG
+              </text>
             </svg>
-            <span className="dial-label">FILTERED ANGLE</span>
-            <span className="dial-value dial-semi-value">{hud.angle.toFixed(2)}°</span>
             <span className={`trend ${Math.abs(angleDelta) < 0.05 ? 'flat' : angleDelta > 0 ? 'up' : 'down'}`}>
               Δ {angleDelta.toFixed(3)}
             </span>
           </div>
 
-          <div className="dial-card">
-            <svg className="dial dial-semi" viewBox="0 0 120 88" role="img" aria-label="Raw angle dial">
+          <div className="dial-card amplified-angle-card">
+            <span className="dial-label">AMPLIFIED RAW ANGLE</span>
+            <svg className="dial dial-semi telemetry-semi" viewBox="0 0 120 88" role="img" aria-label="Raw angle semicircle gauge">
               <path d={sideSemiTrackPath(46)} className="dial-semi-track" />
-              <line x1="60" y1="14" x2="60" y2="26" className="dial-axis-mark" />
-              <line x1="14" y1="60" x2="28" y2="60" className="dial-axis-mark dial-axis-mark-back" />
-              <line x1="92" y1="60" x2="106" y2="60" className="dial-axis-mark dial-axis-mark-forward" />
-              <path d={sideSemiFillPath(46, hud.rawAngle, rawAngleDialPct)} className="dial-fill dial-side dial-raw" />
+              <path d={sideSemiFillPath(46, hud.rawAngle, rawAngleDialPct)} className="dial-fill dial-side telemetry-gauge-value" />
+              <text x="60" y="58" textAnchor="middle" className="telemetry-semi-readout">
+                {hud.rawAngle.toFixed(2)}
+              </text>
+              <text x="60" y="74" textAnchor="middle" className="telemetry-semi-unit">
+                DEG
+              </text>
             </svg>
-            <span className="dial-label">RAW ANGLE</span>
-            <span className="dial-value dial-semi-value">{hud.rawAngle.toFixed(2)}°</span>
-            <span className="trend flat">side profile</span>
+            <span className="trend flat">SIDE PROFILE</span>
           </div>
 
-          <div className="dial-card">
-            <svg className="dial" viewBox="0 0 120 120" role="img" aria-label="Output dial">
-              <circle cx="60" cy="60" r="46" className="dial-track" />
-              <circle cx="60" cy="60" r="46" className="dial-fill dial-output" strokeDasharray={`${(2 * Math.PI * 46 * outputDialPct).toFixed(1)} ${(2 * Math.PI * 46).toFixed(1)}`} />
-            </svg>
-            <span className="dial-label">OUTPUT</span>
-            <span className="dial-value">{hud.output.toFixed(1)}</span>
-            <span className={`trend ${Math.abs(outputDelta) < 0.2 ? 'flat' : outputDelta > 0 ? 'up' : 'down'}`}>
-              Δ {outputDelta.toFixed(2)}
-            </span>
-          </div>
-
-          <div className="dial-card">
-            <svg className="dial" viewBox="0 0 120 120" role="img" aria-label="Voltage dial">
-              <circle cx="60" cy="60" r="46" className="dial-track" />
-              <circle cx="60" cy="60" r="46" className="dial-fill dial-voltage" strokeDasharray={`${(2 * Math.PI * 46 * voltageDialPct).toFixed(1)} ${(2 * Math.PI * 46).toFixed(1)}`} />
-            </svg>
-            <span className="dial-label">VOLT RAW</span>
-            <span className="dial-value">{hud.voltageRaw.toFixed(0)}</span>
-            <span className="trend flat">rail health</span>
-          </div>
         </div>
       </article>
 
       <article className="imu-chart-panel">
-        <h3>IMU Overlay (Raw + Kalman + UI Ref)</h3>
+        <h3>IMU Overlay (True Signal History)</h3>
         <div className="chart-legend">
           <span className="legend-item"><i className="legend-dot raw" /> raw angle</span>
           <span className="legend-item"><i className="legend-dot kf" /> kalman angle</span>

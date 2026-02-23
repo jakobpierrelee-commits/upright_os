@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> SAFE_IDLE
+  SAFE_IDLE --> ARMED: ARM with prechecks
+  ARMED --> BALANCING: balance enabled
+  BALANCING --> SAFE_IDLE: DISARM
+  ARMED --> SAFE_IDLE: DISARM
+  SAFE_IDLE --> ESTOP: ESTOP_LATCH
+  ARMED --> ESTOP: ESTOP_LATCH
+  BALANCING --> ESTOP: ESTOP_LATCH or fault
+  ESTOP --> SAFE_IDLE: ESTOP_RESET with checks

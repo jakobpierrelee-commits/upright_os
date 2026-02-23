@@ -36,6 +36,7 @@ export function ControlPage(props: Props) {
       <h2>Control</h2>
       <div className="row">
         <button
+          className="btn-arm-action"
           disabled={control.estop_latched || !compatOk}
           onClick={async () => {
             const c = await armPrepareAction();
@@ -46,6 +47,7 @@ export function ControlPage(props: Props) {
           Prepare Arm
         </button>
         <button
+          className="btn-arm-action"
           disabled={!control.arm_prepared || control.estop_latched}
           onClick={async () => {
             const r = await armConfirmAction();
@@ -57,6 +59,7 @@ export function ControlPage(props: Props) {
           Confirm Arm
         </button>
         <button
+          className="btn-disarm-action"
           onClick={async () => {
             const r = await disarmAction();
             setStatus(r.status);
@@ -80,6 +83,7 @@ export function ControlPage(props: Props) {
           Cal Zero
         </button>
         <button
+          className="btn-danger btn-estop-latch"
           onClick={async () => {
             await saveCfgAction();
             setMsg('Config saved');

@@ -1,0 +1,279 @@
+{
+  "active_profile_id": "Pu8Jx7SO6Yo",
+  "profiles": [
+    {
+      "board": {
+        "detected": [
+          {
+            "address": "/dev/cu.debug-console",
+            "board_name": null,
+            "fqbn": null,
+            "label": "/dev/cu.debug-console",
+            "protocol": "serial"
+          },
+          {
+            "address": "/dev/cu.usbmodem102NTCZ4K0512",
+            "board_name": null,
+            "fqbn": null,
+            "label": "/dev/cu.usbmodem102NTCZ4K0512",
+            "protocol": "serial"
+          },
+          {
+            "address": "/dev/cu.Bluetooth-Incoming-Port",
+            "board_name": null,
+            "fqbn": null,
+            "label": "/dev/cu.Bluetooth-Incoming-Port",
+            "protocol": "serial"
+          },
+          {
+            "address": "/dev/cu.JakesBeatsStudio",
+            "board_name": null,
+            "fqbn": null,
+            "label": "/dev/cu.JakesBeatsStudio",
+            "protocol": "serial"
+          },
+          {
+            "address": "/dev/cu.usbserial-2210",
+            "board_name": null,
+            "fqbn": null,
+            "label": "/dev/cu.usbserial-2210",
+            "protocol": "serial"
+          }
+        ],
+        "fqbn": "arduino:avr:nano",
+        "port": "/dev/cu.usbserial-2210"
+      },
+      "calibration": {},
+      "chassis": "2wd_inverted_pendulum",
+      "created_at": 1771494314.586169,
+      "firmware": {
+        "profile": "upright_nano_balance_v2",
+        "sketch": "/Users/jvke/Documents/UpRight.os/app/bridge/firmware_templates/profiled_runtime_v1/profiled_runtime_v1.ino"
+      },
+      "label": "V4 TUMBLLER",
+      "limits": {},
+      "parts": {},
+      "pinmap": {},
+      "probe": {
+        "baud": 115200,
+        "commands": [
+          "GET",
+          "ARM",
+          "DISARM",
+          "PID",
+          "MOTION",
+          "SETPOINT",
+          "LIMITS",
+          "CAL ZERO",
+          "SAVECFG"
+        ],
+        "compat": {
+          "contract_version_detected": "v1",
+          "firmware_id": null,
+          "missing_commands": [],
+          "missing_fields": [],
+          "ok": true,
+          "profile": "upright_nano_balance_v2",
+          "readiness_checks": [
+            {
+              "check": "v1_required_fields",
+              "detail": "All v1 fields present",
+              "status": "pass"
+            },
+            {
+              "check": "v2_readiness_fields",
+              "detail": "Missing: ['gyro_bias', 'vel_meas', 'outer_loop_enabled']",
+              "status": "warn"
+            },
+            {
+              "check": "v2_optional_fields",
+              "detail": "No v2 optional fields present",
+              "status": "warn"
+            },
+            {
+              "check": "v2_factory_fields",
+              "detail": "Missing: ['gyro_bias', 'accel_level_offset', 'upright_trim', 'vel_meas', 'vel_target', 'outer_loop_enabled', 'target_angle_from_velocity', 'motor_l_trim', 'motor_r_trim', 'drift_diag_state']",
+              "status": "warn"
+            },
+            {
+              "check": "calibration_data",
+              "detail": "Calibration not complete",
+              "status": "warn"
+            },
+            {
+              "check": "outer_loop_ready",
+              "detail": "Outer loop not active or no velocity data",
+              "status": "warn"
+            }
+          ],
+          "required_fields": [
+            "mode",
+            "ang",
+            "raw",
+            "gyro|gyr|gx",
+            "out",
+            "kp",
+            "ki",
+            "kd",
+            "set"
+          ],
+          "status": {
+            "ang": "0.040",
+            "autorun": "0",
+            "axis": "Y",
+            "encL": "0",
+            "encR": "0",
+            "encmode": "LEFT",
+            "estop": "1",
+            "gyro": "-0.063",
+            "ipol": "1",
+            "kd": "0.000",
+            "ki": "0.000",
+            "kp": "14.000",
+            "kv": "0.0000",
+            "kx": "0.00000",
+            "mode": "SAFE_IDLE",
+            "mot": "0.00",
+            "mpol": "1",
+            "out": "0.00",
+            "pid": "0.00",
+            "raw": "-0.011",
+            "set": "0.000",
+            "swap": "1",
+            "volRaw": "187",
+            "wpos": "0.0",
+            "wspd": "0.00",
+            "zero": "-0.047"
+          },
+          "supported_commands": [
+            "GET",
+            "ARM",
+            "DISARM",
+            "PID",
+            "MOTION",
+            "SETPOINT",
+            "LIMITS",
+            "CAL ZERO",
+            "SAVECFG"
+          ],
+          "v1_ok": true,
+          "v2_factory_missing_fields": [
+            "gyro_bias",
+            "accel_level_offset",
+            "upright_trim",
+            "vel_meas",
+            "vel_target",
+            "outer_loop_enabled",
+            "target_angle_from_velocity",
+            "motor_l_trim",
+            "motor_r_trim",
+            "drift_diag_state"
+          ],
+          "v2_factory_ready": false,
+          "v2_missing_fields": [
+            "gyro_bias",
+            "vel_meas",
+            "outer_loop_enabled"
+          ],
+          "v2_present_fields": [],
+          "v2_ready": false,
+          "warnings": [
+            "no explicit firmware identity command detected"
+          ]
+        },
+        "components": {
+          "encoder_feedback": true,
+          "imu": true,
+          "motor_driver": true,
+          "persistent_calibration": true,
+          "voltage_telemetry": true,
+          "wheel_model": true
+        },
+        "confidence_pct": 100,
+        "connected": true,
+        "contract_version_detected": "v1",
+        "firmware_profile": "upright_nano_balance_v2",
+        "mcu_guess": "Generic USB CDC serial MCU",
+        "missing_commands": [],
+        "next_questions": [
+          "Which wheel+gearbox+motor set are you using on this bot build?",
+          "Which motor driver board/chip is wired (for example TB6612, L298N)?",
+          "Do encoders exist on both wheels, or only one side?",
+          "Is external motor power currently connected and enabled?"
+        ],
+        "ok": true,
+        "port": "/dev/cu.usbserial-2210",
+        "port_meta": {
+          "description": "USB Serial",
+          "device": "/dev/cu.usbserial-2210",
+          "hwid": "USB VID:PID=1A86:7523 LOCATION=34-1",
+          "manufacturer": null,
+          "pid": 29987,
+          "product": "USB Serial",
+          "serial_number": null,
+          "vid": 6790
+        },
+        "readiness_checks": [
+          {
+            "check": "v1_required_fields",
+            "detail": "All v1 fields present",
+            "status": "pass"
+          },
+          {
+            "check": "v2_readiness_fields",
+            "detail": "Missing: ['gyro_bias', 'vel_meas', 'outer_loop_enabled']",
+            "status": "warn"
+          },
+          {
+            "check": "v2_optional_fields",
+            "detail": "No v2 optional fields present",
+            "status": "warn"
+          },
+          {
+            "check": "v2_factory_fields",
+            "detail": "Missing: ['gyro_bias', 'accel_level_offset', 'upright_trim', 'vel_meas', 'vel_target', 'outer_loop_enabled', 'target_angle_from_velocity', 'motor_l_trim', 'motor_r_trim', 'drift_diag_state']",
+            "status": "warn"
+          },
+          {
+            "check": "calibration_data",
+            "detail": "Calibration not complete",
+            "status": "warn"
+          },
+          {
+            "check": "outer_loop_ready",
+            "detail": "Outer loop not active or no velocity data",
+            "status": "warn"
+          }
+        ],
+        "status_error": null,
+        "status_schema_ok": true,
+        "v1_ok": true,
+        "v2_factory_missing_fields": [
+          "gyro_bias",
+          "accel_level_offset",
+          "upright_trim",
+          "vel_meas",
+          "vel_target",
+          "outer_loop_enabled",
+          "target_angle_from_velocity",
+          "motor_l_trim",
+          "motor_r_trim",
+          "drift_diag_state"
+        ],
+        "v2_factory_ready": false,
+        "v2_missing_fields": [
+          "gyro_bias",
+          "vel_meas",
+          "outer_loop_enabled"
+        ],
+        "v2_present_fields": [],
+        "v2_ready": false,
+        "v2_recommended_action": "Run gyro calibration to establish sensor bias",
+        "warnings": []
+      },
+      "profile_id": "Pu8Jx7SO6Yo",
+      "updated_at": 1771701323.918972,
+      "validation": {}
+    }
+  ]
+}

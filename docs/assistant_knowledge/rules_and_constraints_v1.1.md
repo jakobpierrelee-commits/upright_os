@@ -6,6 +6,8 @@
 - Gyro rate: `gyro|gyr|gx`
 - Controller output: `out`
 - Setpoint: `set`
+- Error signal: `pid_err` (or derive `set-ang`)
+- Innovation residual: `kal_innov` (or derive `raw-ang`)
 - PID params: `kp,ki,kd`
 - Motion params: `kv,kx`
 - Safety/mode: `mode,estop`
@@ -15,6 +17,8 @@
 - Treat derivative as noise-sensitive.
 - Handle actuator saturation with anti-windup discipline.
 - Apply small bounded steps with immediate retest.
+- If innovation remains biased/high, prioritize calibration/filter quality before gain escalation.
+- If output is saturated for sustained windows, reduce aggressiveness and enforce conditional integration.
 
 ## Delta limits (single apply)
 - PID:

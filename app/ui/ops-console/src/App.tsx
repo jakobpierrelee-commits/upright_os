@@ -21,11 +21,14 @@ import {
   toolingTuningPreflight,
   postCommand,
   firmwareCheck,
+  firmwareStatus,
   firmwareInstallCli,
   firmwareCompile,
   firmwareUpload,
   firmwareUploadGuarded,
   firmwareBoards,
+  firmwareSketchFolders,
+  firmwarePickSketchFolder,
   firmwareGenerateUnified,
   firmwareGenerateDocsPack,
   firmwareReadSketch,
@@ -61,13 +64,16 @@ import { HudVisuals } from './pages/shared/HudVisuals';
 import { CodexPanel } from './features/codex/CodexPanel';
 import { useCodexWorkspace } from './hooks/useCodexWorkspace';
 import { useHudTelemetry, type ImuSample } from './hooks/useHudTelemetry';
+import { TabBar } from './components/navigation/TabBar';
+import { TabPanelSurface } from './components/navigation/TabPanelSurface';
+import { TAB_DEFINITIONS, isMainTabId, type MainTabId } from './components/navigation/tabs';
 import { strings } from './strings';
 import { ConnectPreflightPage } from './pages/stage1/ConnectPreflightPage';
 import { IterationPlaygroundPage } from './pages/stage2/IterationPlaygroundPage';
 
 const HISTORY_MAX = 180;
 
-type MainTab = 'setup' | 'tune' | 'ide' | 'playground';
+type MainTab = MainTabId;
 
 const BAL_BOUNDS = {
   kp: 1.0,
@@ -95,40 +101,7 @@ const LOCAL_COMMAND_REFERENCE = [
 ];
 
 const OVERWATCH_ACCEPT_STORAGE_KEY = 'upright.overwatch.accepted.v1';
-
-const KALMAN_STANDARD_SNIPPET = `// Standard IMU fusion contract (required by UpRight compatibility probe)
-// Inputs:
-//   measDeg  -> accel-derived tilt angle (degrees)
-//   gyroDps  -> gyro rate on balance axis (deg/s)
-// Output:
-//   kfAngle  -> filtered tilt estimate (publish as STATUS ang=...)
-// Also publish:
-//   STATUS raw=<accelAngleDeg> gyro=<gyroRateDps>
-float kalmanUpdate(float measDeg, float gyroDps, float dt) {
-  float rate = gyroDps - kfBias;
-  kfAngle += dt * rate;
-
-  P00 += dt * (dt * P11 - P01 - P10 + cfg.qAngle);
-  P01 -= dt * P11;
-  P10 -= dt * P11;
-  P11 += cfg.qBias * dt;
-
-  float innovation = measDeg - kfAngle;
-  float s = P00 + cfg.rMeasure;
-  float k0 = P00 / s;
-  float k1 = P10 / s;
-
-  kfAngle += k0 * innovation;
-  kfBias += k1 * innovation;
-
-  float p00 = P00;
-  float p01 = P01;
-  P00 -= k0 * p00;
-  P01 -= k0 * p01;
-  P10 -= k1 * p00;
-  P11 -= k1 * p01;
-  return kfAngle;
-}`;
+const GUARDED_FLASH_TRUST_WINDOW_MS = 15 * 60 * 1000;
 
 function n(v: string | undefined, fallback = 0): number {
   const parsed = Number.parseFloat(v ?? '');
@@ -162,6 +135,25 @@ function defaultUnifiedProfileDraft(fqbn: string, port: string): string {
       enc_r_b: -1,
     },
   }, null, 2);
+}
+
+function getTabFromUrl(): MainTab {
+  if (typeof window === 'undefined') return 'setup';
+  const q = new URLSearchParams(window.location.search).get('tab');
+  return isMainTabId(q) ? q : 'setup';
+}
+
+function getSurfaceVariantFromUrl(): 'surface-standard' | 'surface-floating' {
+  if (typeof window === 'undefined') return 'surface-floating';
+  const q = new URLSearchParams(window.location.search).get('surface');
+  if (q === 'standard') return 'surface-standard';
+  if (q === 'floating') return 'surface-floating';
+  return 'surface-floating';
+}
+
+function isSerialWindowViewFromUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('view') === 'serial';
 }
 
 function miniPolar(cx: number, cy: number, r: number, degFromTopCw: number) {
@@ -199,6 +191,14 @@ function miniSemiFillPath(radius: number, value: number, pct: number): string {
   const end = miniPolar(cx, cy, radius, value >= 0 ? sweep : -sweep);
   const sweepFlag = value >= 0 ? 1 : 0;
   return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 ${sweepFlag} ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+}
+
+function formatMissionElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const ss = String(totalSeconds % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
 }
 
 type TuneHelpKind = 'pid' | 'motion' | 'setpoint' | 'limits' | 'filter_windup';
@@ -352,7 +352,7 @@ function TuneRigHelp({ kind }: { kind: TuneHelpKind }) {
         ?
       </button>
       {open && (
-        <div className="tune-help-popover" role="dialog" aria-label={content.title}>
+        <div className="tune-help-popover glass-surface glass-surface-strong" role="dialog" aria-label={content.title}>
           <div className="tune-help-title">{content.title}</div>
           {renderTuneHelpGraphic(kind)}
           <div className="tune-help-list">
@@ -376,7 +376,7 @@ export default function App() {
   const lastAssistantApplyRef = useRef<string>('');
   const lastOverwatchOverallRef = useRef<string>('unknown');
   const missingTelemetryPromptedRef = useRef(false);
-  const [activeTab, setActiveTab] = useState<MainTab>('setup');
+  const [activeTab, setActiveTab] = useState<MainTab>(() => getTabFromUrl());
   const [health, setHealth] = useState<Health | null>(null);
   const [bridgeOnline, setBridgeOnline] = useState(false);
   const [status, setStatus] = useState<Status>({});
@@ -384,6 +384,7 @@ export default function App() {
   const [control, setControl] = useState<ControlState>({ arm_prepared: false, estop_latched: false });
   const [lines, setLines] = useState<string[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
+  const [aiHardwareContext, setAiHardwareContext] = useState<Record<string, unknown> | null>(null);
   const [unifiedSketchName, setUnifiedSketchName] = useState('upright_unified_v1');
   const [unifiedProfileJson, setUnifiedProfileJson] = useState(defaultUnifiedProfileDraft('arduino:avr:nano', '/dev/cu.usbserial-2210'));
 
@@ -415,18 +416,49 @@ export default function App() {
 
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [overwatchOpen, setOverwatchOpen] = useState(false);
+  const [sketchFolders, setSketchFolders] = useState<string[]>([]);
   const [overwatchDiagNote, setOverwatchDiagNote] = useState('');
   const [acceptedOverwatchChecks, setAcceptedOverwatchChecks] = useState<Record<string, number>>({});
   const compactUi = true;
+  const themeMode = 'blueprint';
+  const serialWindowMode = isSerialWindowViewFromUrl();
+  const [surfaceVariant, setSurfaceVariant] = useState<'surface-standard' | 'surface-floating'>(() => {
+    const fromUrl = getSurfaceVariantFromUrl();
+    if (fromUrl === 'surface-floating' || fromUrl === 'surface-standard') return fromUrl;
+    try {
+      const saved = window.localStorage.getItem('ops_surface_variant');
+      if (saved === 'surface-standard' || saved === 'surface-floating') return saved;
+      return 'surface-floating';
+    } catch {
+      return 'surface-floating';
+    }
+  });
   const [preflightChecks, setPreflightChecks] = useState({
     ide_closed: false,
     bot_safe: false,
     correct_port: false,
     power_expected: false,
   });
+  const [guardedFlashTrust, setGuardedFlashTrust] = useState<{
+    signature: string;
+    grantedAt: number;
+    expiresAt: number;
+  } | null>(null);
+  const [missionTimerPhase, setMissionTimerPhase] = useState<'idle' | 'armed_wait_balance' | 'running' | 'stopped'>('idle');
+  const [missionTimerStartMs, setMissionTimerStartMs] = useState<number | null>(null);
+  const [missionTimerStopMs, setMissionTimerStopMs] = useState<number | null>(null);
+  const [missionTimerNowMs, setMissionTimerNowMs] = useState<number>(Date.now());
 
   const [workbenchState, workbenchDispatch] = useReducer(workbenchReducer, initialWorkbenchState);
+  const tabKeepAlive = useMemo(
+    () => Object.fromEntries(TAB_DEFINITIONS.map((t) => [t.id, t.keepAlive])) as Record<MainTab, boolean>,
+    [],
+  );
   const { fw, fwCheck, fwCfg, workbenchTab, boardScan, sketchPath, sketchContent, serialWrite } = workbenchState;
+  const guardedFlashSignature = useMemo(
+    () => `${(fwCfg.sketch || '').trim()}|${(fwCfg.fqbn || '').trim()}|${(fwCfg.port || '').trim()}`,
+    [fwCfg.fqbn, fwCfg.port, fwCfg.sketch],
+  );
   const sketchRevision = useMemo(() => {
     const s = sketchContent ?? '';
     let h = 2166136261;
@@ -468,11 +500,49 @@ export default function App() {
     pushAlert(text, undefined, source);
   }, [pushAlert]);
 
-  const codex = useCodexWorkspace(setMsg);
+  const codex = useCodexWorkspace(setMsg, aiHardwareContext);
 
   useEffect(() => {
     void codex.actions.bootstrap();
   }, [codex.actions.bootstrap]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', activeTab);
+    params.set('surface', surfaceVariant === 'surface-floating' ? 'floating' : 'standard');
+    const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+    window.history.replaceState(null, '', next);
+  }, [activeTab, surfaceVariant]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      const map: Record<string, MainTab> = {
+        '1': 'setup',
+        '2': 'ide',
+        '3': 'tune',
+        '4': 'playground',
+      };
+      const next = map[event.key];
+      if (!next) return;
+      event.preventDefault();
+      setActiveTab(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => setActiveTab(getTabFromUrl());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!serialWindowMode) return;
+    setActiveTab('ide');
+    setWorkbenchTab('serial');
+  }, [serialWindowMode, setWorkbenchTab]);
 
   useEffect(() => {
     try {
@@ -500,11 +570,23 @@ export default function App() {
     }
   }, [acceptedOverwatchChecks]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('ops_surface_variant', surfaceVariant);
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [surfaceVariant]);
+
   const mode = status.mode ?? 'UNKNOWN';
   const balancing = mode === 'BALANCING';
   const compatKnown = compat !== null;
   const compatOk = compat?.ok === true;
   const modeUpper = mode.toUpperCase();
+  const armCycleActive =
+    control.arm_prepared || modeUpper === 'PREARM' || modeUpper === 'ARMED' || modeUpper === 'BALANCING';
+  const failOrTripState =
+    control.estop_latched || modeUpper === 'FAULT' || modeUpper === 'ESTOP' || modeUpper === 'ERROR' || modeUpper === 'TRIPPED';
   const modeTone =
     modeUpper === 'BALANCING' || modeUpper === 'ARMED'
       ? 'good'
@@ -516,6 +598,8 @@ export default function App() {
   const angleParsed = Number.parseFloat(status.ang ?? '');
   const angleAbs = Number.isFinite(angleParsed) ? Math.abs(angleParsed) : null;
   const angleTone = angleAbs == null ? 'unknown' : angleAbs <= 6.0 ? 'good' : angleAbs <= 12.0 ? 'warn' : 'bad';
+  const faultCode = Math.round(n(status.fault, 0));
+  const hasActiveFault = faultCode > 0 || modeUpper === 'FAULT';
   const estopTone = control.estop_latched ? 'bad' : 'good';
   const compatTone = !compatKnown ? 'unknown' : compatOk ? 'good' : 'bad';
   const burstHost = burstInfo?.host_capture ?? null;
@@ -560,6 +644,66 @@ export default function App() {
     () => robotProfilesState.profiles.find((p) => p.profile_id === robotProfilesState.active_profile_id) ?? null,
     [robotProfilesState.active_profile_id, robotProfilesState.profiles],
   );
+  const missionElapsedMs = useMemo(() => {
+    if (missionTimerStartMs == null) return 0;
+    if (missionTimerPhase === 'running') return Math.max(0, missionTimerNowMs - missionTimerStartMs);
+    if (missionTimerStopMs != null) return Math.max(0, missionTimerStopMs - missionTimerStartMs);
+    return 0;
+  }, [missionTimerNowMs, missionTimerPhase, missionTimerStartMs, missionTimerStopMs]);
+  const missionTickerLabel = useMemo(() => formatMissionElapsed(missionElapsedMs), [missionElapsedMs]);
+
+  useEffect(() => {
+    if (missionTimerPhase === 'idle') {
+      if (armCycleActive) {
+        setMissionTimerPhase('armed_wait_balance');
+        setMissionTimerStartMs(null);
+        setMissionTimerStopMs(null);
+      }
+      return;
+    }
+
+    if (missionTimerPhase === 'armed_wait_balance') {
+      if (!armCycleActive) {
+        setMissionTimerPhase('idle');
+        setMissionTimerStartMs(null);
+        setMissionTimerStopMs(null);
+        return;
+      }
+      if (modeUpper === 'BALANCING') {
+        const now = Date.now();
+        setMissionTimerStartMs(now);
+        setMissionTimerStopMs(null);
+        setMissionTimerNowMs(now);
+        setMissionTimerPhase('running');
+      }
+      return;
+    }
+
+    if (missionTimerPhase === 'running') {
+      const disarmed = !armCycleActive && modeUpper !== 'BALANCING';
+      if (failOrTripState || disarmed) {
+        setMissionTimerStopMs(Date.now());
+        setMissionTimerPhase('stopped');
+      }
+      return;
+    }
+
+    if (missionTimerPhase === 'stopped') {
+      if (armCycleActive) {
+        setMissionTimerPhase('armed_wait_balance');
+        setMissionTimerStartMs(null);
+        setMissionTimerStopMs(null);
+      }
+    }
+  }, [armCycleActive, failOrTripState, missionTimerPhase, modeUpper]);
+
+  useEffect(() => {
+    if (missionTimerPhase !== 'running') return;
+    const id = window.setInterval(() => {
+      setMissionTimerNowMs(Date.now());
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [missionTimerPhase]);
 
   const runCompatProbe = useCallback(async (): Promise<CompatReport | null> => {
     unlockAlertSource('bridge.poll');
@@ -955,6 +1099,40 @@ export default function App() {
     }
   }, [setBoardScan, setFwCfg, setMsg]);
 
+  const refreshSketchFolders = useCallback(async () => {
+    try {
+      const out = await firmwareSketchFolders();
+      const folders = Array.isArray(out.folders) ? out.folders.filter(Boolean) : [];
+      setSketchFolders(folders);
+      if (!fwCfg.sketch && folders.length > 0) {
+        setFwCfg((prev) => ({ ...prev, sketch: folders[0] }));
+      }
+    } catch {
+      setSketchFolders([]);
+    }
+  }, [fwCfg.sketch, setFwCfg]);
+
+  const pickSketchFolder = useCallback(async () => {
+    try {
+      const picked = await firmwarePickSketchFolder();
+      const path = String(picked.path || '').trim();
+      if (!path) return;
+      setFwCfg((prev) => ({ ...prev, sketch: path }));
+      setSketchFolders((prev) => (prev.includes(path) ? prev : [path, ...prev]));
+      setMsg(picked.has_ino ? `Sketch folder selected: ${path}` : `Folder selected (no .ino found yet): ${path}`);
+    } catch (e) {
+      const err = (e as Error).message || 'unknown';
+      const needsRestart = /not_found/.test(err);
+      const hint = needsRestart
+        ? 'Picker route unavailable on current bridge runtime. Restart bridge to load latest endpoints.'
+        : `pick folder error: ${err}`;
+      setMsg(hint);
+      if (typeof window !== 'undefined') {
+        window.alert(hint);
+      }
+    }
+  }, [setFwCfg, setMsg]);
+
   const loadSketch = useCallback(async () => {
     try {
       const sk = await firmwareReadSketch(sketchPath || undefined);
@@ -987,10 +1165,11 @@ export default function App() {
   useEffect(() => {
     if (!sketchContent) void loadSketch();
     if (!boardScan) void refreshBoards();
+    if (sketchFolders.length === 0) void refreshSketchFolders();
     void refreshSerialDiag();
     void refreshBurstInfo();
     void refreshProfiles();
-  }, [boardScan, loadSketch, refreshBoards, refreshBurstInfo, refreshSerialDiag, sketchContent]);
+  }, [boardScan, loadSketch, refreshBoards, refreshBurstInfo, refreshSerialDiag, refreshSketchFolders, refreshProfiles, sketchContent, sketchFolders.length]);
 
   useEffect(() => {
     let mounted = true;
@@ -1073,19 +1252,39 @@ export default function App() {
   }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, setFw, setMsg]);
 
   const runFirmwareUploadGuarded = useCallback(async () => {
+    const trusted =
+      guardedFlashTrust &&
+      guardedFlashTrust.signature === guardedFlashSignature &&
+      Date.now() < guardedFlashTrust.expiresAt;
+    if (trusted) {
+      try {
+        const st = await firmwareUploadGuarded(fwCfg.sketch, fwCfg.fqbn, fwCfg.port);
+        setFw(st);
+        setMsg('Guarded flash started (trusted session)');
+      } catch (e) {
+        setMsg(`guarded flash error: ${(e as Error).message}`);
+      }
+      return;
+    }
     setPreflightOpen(true);
-  }, []);
+  }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, guardedFlashSignature, guardedFlashTrust, setFw, setMsg]);
 
   const executeGuardedFlash = useCallback(async () => {
     try {
       setPreflightOpen(false);
       const st = await firmwareUploadGuarded(fwCfg.sketch, fwCfg.fqbn, fwCfg.port);
+      const now = Date.now();
+      setGuardedFlashTrust({
+        signature: guardedFlashSignature,
+        grantedAt: now,
+        expiresAt: now + GUARDED_FLASH_TRUST_WINDOW_MS,
+      });
       setFw(st);
       setMsg('Guarded flash started');
     } catch (e) {
       setMsg(`guarded flash error: ${(e as Error).message}`);
     }
-  }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, setFw, setMsg]);
+  }, [fwCfg.fqbn, fwCfg.port, fwCfg.sketch, guardedFlashSignature, setFw, setMsg]);
 
   const runGenerateUnified = useCallback(async () => {
     try {
@@ -1101,11 +1300,43 @@ export default function App() {
       setSketchPath(loaded.path);
       setSketchContent(loaded.content);
       setFwCfg((prev) => ({ ...prev, sketch: out.sketch_folder }));
+      setSketchFolders((prev) => (prev.includes(out.sketch_folder) ? prev : [out.sketch_folder, ...prev]));
       setMsg(`Unified scaffold generated: ${out.sketch_folder} (zip: ${out.archive})`);
     } catch (e) {
       setMsg(`unified generate error: ${(e as Error).message}`);
     }
   }, [setFwCfg, setMsg, setSketchContent, setSketchPath, unifiedProfileJson, unifiedSketchName]);
+
+  useEffect(() => {
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const pollFirmwareStatus = async () => {
+      try {
+        const next = await firmwareStatus();
+        if (!mounted) return;
+        setFw(next);
+        if (next.running) {
+          timer = setTimeout(() => {
+            void pollFirmwareStatus();
+          }, 1000);
+        }
+      } catch {
+        if (!mounted) return;
+        if (fw.running) {
+          timer = setTimeout(() => {
+            void pollFirmwareStatus();
+          }, 1500);
+        }
+      }
+    };
+
+    void pollFirmwareStatus();
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fw.running, setFw]);
 
   const applyPastedSketch = useCallback((text: string) => {
     const next = text.trim();
@@ -1515,15 +1746,6 @@ export default function App() {
     }
   }, [burstDelayMs, burstLines, burstFreqHz, setMsg]);
 
-  const insertKalmanTemplate = useCallback(() => {
-    if (sketchContent.includes('float kalmanUpdate(')) {
-      setMsg('Kalman function already exists in this sketch.');
-      return;
-    }
-    setSketchContent(`${sketchContent.trimEnd()}\n\n${KALMAN_STANDARD_SNIPPET}\n`);
-    setMsg('Inserted Kalman standard snippet (accel+gyro fusion + telemetry contract).');
-  }, [setMsg, setSketchContent, sketchContent]);
-
   const hudMetrics = useHudTelemetry(status, imuHistory, strings.hud, health?.last_status_age_ms ?? null);
   const transportQuality = useMemo(() => {
     const connected = Boolean(health?.connected) || bridgeOnline;
@@ -1702,13 +1924,67 @@ export default function App() {
     setMsg(`Assistant applied: ${sections}.`, 'codex.apply');
   }, [codex.state.aiHistory, initDraftsFromStatus, setFwCfg, setMsg, setSketchContent, setSketchPath]);
 
+  if (serialWindowMode) {
+    return (
+      <div className={`app-shell app-rebuild tab-ide theme-${themeMode} ${surfaceVariant} serial-window-mode ${compactUi ? 'compact-ui' : ''}`}>
+        <main className="serial-window-main" aria-label="Serial workspace">
+          <WorkbenchPanel
+            workbenchTab={workbenchTab}
+            setWorkbenchTab={setWorkbenchTab}
+            sketchPath={sketchPath}
+            setSketchPath={setSketchPath}
+            sketchContent={sketchContent}
+            setSketchContent={setSketchContent}
+            loadSketch={loadSketch}
+            saveSketch={saveSketch}
+            runFirmwareCheck={runFirmwareCheck}
+            runFirmwareInstall={runFirmwareInstall}
+            refreshBoards={refreshBoards}
+            fw={fw}
+            fwCheck={fwCheck}
+            fwCfg={fwCfg}
+            setFwCfg={setFwCfg}
+            boardScan={boardScan}
+            sketchFolders={sketchFolders}
+            pickSketchFolder={pickSketchFolder}
+            runFirmwareCompile={runFirmwareCompile}
+            runFirmwareUpload={runFirmwareUpload}
+            runFirmwareUploadGuarded={runFirmwareUploadGuarded}
+            unifiedSketchName={unifiedSketchName}
+            setUnifiedSketchName={setUnifiedSketchName}
+            unifiedProfileJson={unifiedProfileJson}
+            setUnifiedProfileJson={setUnifiedProfileJson}
+            runGenerateUnified={runGenerateUnified}
+            serialWrite={serialWrite}
+            setSerialWrite={setSerialWrite}
+            sendSerialLine={sendSerialLine}
+            sendSerialCommand={sendSerialCommand}
+            refreshLogs={refreshLogs}
+            serialDiag={serialHealth}
+            refreshSerialDiag={refreshSerialDiag}
+            lines={lines}
+            ideMode={true}
+            serialWindowMode={true}
+          />
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className={`app-shell app-rebuild ${compactUi ? 'compact-ui' : ''}`}>
-      <header className="topbar rebuild-topbar">
+    <div className={`app-shell app-rebuild tab-${activeTab} theme-${themeMode} ${surfaceVariant} ${compactUi ? 'compact-ui' : ''}`}>
+      <header className="topbar rebuild-topbar glass-surface glass-surface-subtle">
         <div>
           <h1>{strings.app.title} <span className="ui-build-chip">{strings.app.buildLabel}</span></h1>
         </div>
         <div className="topbar-actions">
+          <button
+            className="btn-secondary btn-sm"
+            onClick={() => setSurfaceVariant((prev) => (prev === 'surface-floating' ? 'surface-standard' : 'surface-floating'))}
+            title="Toggle panel surface treatment"
+          >
+            SURFACE: {surfaceVariant === 'surface-floating' ? 'FLOATING' : 'STANDARD'}
+          </button>
           <button className={`badge overwatch-chip ${overwatchTone}`} onClick={() => setOverwatchOpen(true)}>
             OVERWATCH {overwatchLabel}
           </button>
@@ -1724,15 +2000,10 @@ export default function App() {
         </aside>
 
         <section className="ops-main" aria-label="Main workspace">
-          <div className="ops-tabs" role="tablist" aria-label="Primary app tabs">
-            <button className={`btn-sm ${activeTab === 'setup' ? 'active' : ''}`} onClick={() => setActiveTab('setup')}>1_SETUP</button>
-            <button className={`btn-sm ${activeTab === 'ide' ? 'active' : ''}`} onClick={() => setActiveTab('ide')}>2_IDE</button>
-            <button className={`btn-sm ${activeTab === 'tune' ? 'active' : ''}`} onClick={() => setActiveTab('tune')}>3_TUNE</button>
-            <button className={`btn-sm ${activeTab === 'playground' ? 'active' : ''}`} onClick={() => setActiveTab('playground')}>4_PLAYGROUND</button>
-          </div>
+          <TabBar tabs={TAB_DEFINITIONS} activeTab={activeTab} onSelect={setActiveTab} />
 
-          {activeTab === 'setup' && (
-            <div className="setup-view-grid">
+          <TabPanelSurface id="setup" activeTab={activeTab} keepAlive={tabKeepAlive.setup}>
+            <div className="setup-view-grid setup-theme-zone">
               <section className="panel tool-panel" aria-label="Setup workflow">
                 <ConnectPreflightPage
                   healthPort={health?.port}
@@ -1761,6 +2032,7 @@ export default function App() {
                   activeProfileId={robotProfilesState.active_profile_id}
                   generateFirmwareDocsPack={generateFirmwareDocsPack}
                   runGenerateUnified={runGenerateUnified}
+                  unifiedProfileJson={unifiedProfileJson}
                   onPasteSketch={applyPastedSketch}
                   sketchPrepared={Boolean(sketchContent.trim().length > 0)}
                   sketchRevision={sketchRevision}
@@ -1775,13 +2047,14 @@ export default function App() {
                   deleteSavedRobotProfile={() => { void deleteSavedRobotProfile(); }}
                   deleteProfileById={(profileId) => { void deleteProfileById(profileId); }}
                   refreshBridge={refreshBridge}
+                  onHardwareContextChange={setAiHardwareContext}
                 />
               </section>
             </div>
-          )}
+          </TabPanelSurface>
 
-          {activeTab === 'tune' && (
-            <div className="tune-view-grid">
+          <TabPanelSurface id="tune" activeTab={activeTab} keepAlive={tabKeepAlive.tune}>
+            <div className="tune-view-grid tune-theme-zone">
               <section className="panel tool-panel" aria-label="Calibration and tuning">
                 <div className="tool-panel-head tune-head">
                   <div>
@@ -1839,7 +2112,17 @@ export default function App() {
                         <p className="workflow-label">Blocked: {gateReasonHuman('burst_arm')}</p>
                       )}
                       <div className="burst-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(burstProgressPct)}>
-                        <span style={{ width: `${burstProgressPct}%` }} />
+                        <svg className="burst-progress-svg" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                          <defs>
+                            <linearGradient id="burstBeamGradient" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="var(--burst-beam-stop-0)" />
+                              <stop offset="50%" stopColor="var(--burst-beam-stop-1)" />
+                              <stop offset="100%" stopColor="var(--burst-beam-stop-2)" />
+                            </linearGradient>
+                          </defs>
+                          <rect className="burst-progress-track" x={0} y={0} width={100} height={10} rx={2} ry={2} />
+                          <rect className="burst-progress-fill" x={0} y={0} width={burstProgressPct} height={10} rx={2} ry={2} fill="url(#burstBeamGradient)" />
+                        </svg>
                       </div>
                       <p className="burst-rig-status">
                         {burstInfo
@@ -1856,13 +2139,17 @@ export default function App() {
                         <span className="action-rig-title">Arm</span>
                       </div>
                       <div className="row action-rig-row">
-                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={control.estop_latched || !compatOk || (actionGates?.arm_prepare?.ok === false)} title={gateReason('arm_prepare')} onClick={async () => {
+                        <button className="btn-secondary btn-intent-safety btn-arm-action" disabled={control.estop_latched || !compatOk || (actionGates?.arm_prepare?.ok === false)} title={gateReason('arm_prepare')} onClick={async () => {
                           const c = await armPrepare();
                           setControl(c);
+                          const s = await getStatus();
+                          setStatus(s.status);
+                          if (s.control) setControl(s.control);
+                          setActionGates(s.action_gates ?? null);
                           setArmAdvisory(null);
                           setMsg('Arm prepared. Press Confirm Arm to execute.');
                         }}>{strings.tune.prepareArm}</button>
-                        <button className="btn-primary btn-lg btn-intent-safety" disabled={!control.arm_prepared || control.estop_latched || (actionGates?.arm_confirm?.ok === false)} title={gateReason('arm_confirm')} onClick={async () => {
+                        <button className="btn-primary btn-lg btn-intent-safety btn-arm-action" disabled={!control.arm_prepared || control.estop_latched || (actionGates?.arm_confirm?.ok === false)} title={gateReason('arm_confirm')} onClick={async () => {
                           try {
                             const r = await armConfirm();
                             setStatus(r.status);
@@ -1881,33 +2168,28 @@ export default function App() {
                             setMsg(`arm confirm error: ${(e as Error).message}`);
                           }
                         }}>{strings.tune.confirmArm}</button>
-                        <button className="btn-secondary btn-intent-safety btn-prepare-arm" disabled={actionGates?.disarm?.ok === false} title={gateReason('disarm')} onClick={async () => {
+                        <button className="btn-secondary btn-intent-safety btn-disarm-action" disabled={actionGates?.disarm?.ok === false} title={gateReason('disarm')} onClick={async () => {
                           const r = await disarm();
                           setStatus(r.status);
                           if (r.control) setControl(r.control);
                           setMsg('Disarmed');
                         }}>{strings.tune.disarm}</button>
-                      </div>
-                      {(actionGates?.arm_prepare?.ok === false || actionGates?.arm_confirm?.ok === false || actionGates?.disarm?.ok === false) && (
-                        <p className="workflow-label">
-                          Blocked:
-                          {actionGates?.arm_prepare?.ok === false ? ` Prepare(${gateReasonHuman('arm_prepare')})` : ''}
-                          {actionGates?.arm_confirm?.ok === false ? ` Confirm(${gateReasonHuman('arm_confirm')})` : ''}
-                          {actionGates?.disarm?.ok === false ? ` Disarm(${gateReasonHuman('disarm')})` : ''}
-                        </p>
-                      )}
-                      {armAdvisory && (
-                        <div className="compat-box action-rig-advisory">
-                          <p><strong>Arm Advisory:</strong> {armAdvisory}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="action-rig estop-rig">
-                      <div className="action-rig-head">
-                        <span className="action-rig-title">Emergency Stop</span>
-                      </div>
-                      <div className="row action-rig-row">
+                        <button
+                          className="btn-secondary btn-intent-safety btn-clear-fault-action"
+                          disabled={!hasActiveFault}
+                          onClick={async () => {
+                            await postCommand('FAULTCLR', 'OK FAULTCLR', 2.0);
+                            const s = await getStatus();
+                            setStatus(s.status);
+                            if (s.control) setControl(s.control);
+                            if (s.action_gates) setActionGates(s.action_gates);
+                            setArmAdvisory(null);
+                            setMsg('Fault cleared');
+                          }}
+                        >
+                          {strings.tune.clearFault}
+                        </button>
+                        <span className="action-rig-row-spacer" aria-hidden="true" />
                         <button
                           className={
                             control.estop_latched
@@ -1931,6 +2213,19 @@ export default function App() {
                           {control.estop_latched ? strings.tune.estopReset : strings.tune.estopLatch}
                         </button>
                       </div>
+                      {(actionGates?.arm_prepare?.ok === false || actionGates?.arm_confirm?.ok === false || actionGates?.disarm?.ok === false) && (
+                        <p className="workflow-label">
+                          Blocked:
+                          {actionGates?.arm_prepare?.ok === false ? ` Prepare(${gateReasonHuman('arm_prepare')})` : ''}
+                          {actionGates?.arm_confirm?.ok === false ? ` Confirm(${gateReasonHuman('arm_confirm')})` : ''}
+                          {actionGates?.disarm?.ok === false ? ` Disarm(${gateReasonHuman('disarm')})` : ''}
+                        </p>
+                      )}
+                      {armAdvisory && (
+                        <div className="compat-box action-rig-advisory">
+                          <p><strong>Arm Advisory:</strong> {armAdvisory}</p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="action-rig config-rig">
@@ -2060,74 +2355,64 @@ export default function App() {
               </section>
 
               <aside className="tune-hud-rail" aria-label="Live feed HUD rail">
-                <section className="panel transport-quality-panel" aria-label="Transport quality">
-                  <div className="tool-panel-head">
-                    <h3>Transport Quality</h3>
-                    <span className="workflow-label">truth-path health and timing</span>
-                  </div>
-                  <div className="transport-quality-grid">
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">Bridge Link</span>
-                      <strong>{transportQuality.connected ? 'ONLINE' : 'OFFLINE'}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.link}`}>{transportQuality.tones.link.toUpperCase()}</span>
-                    </article>
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">Telemetry Age</span>
-                      <strong>{transportQuality.telemetryAgeMs != null ? `${transportQuality.telemetryAgeMs.toFixed(0)} ms` : 'n/a'}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.age}`}>{transportQuality.tones.age.toUpperCase()}</span>
-                    </article>
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">Feed Rate</span>
-                      <strong>{transportQuality.sampleRateHz > 0 ? `${transportQuality.sampleRateHz.toFixed(1)} Hz` : 'n/a'}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.rate}`}>{transportQuality.tones.rate.toUpperCase()}</span>
-                    </article>
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">Queue Depth</span>
-                      <strong>{transportQuality.queueDepth}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.queue}`}>{transportQuality.tones.queue.toUpperCase()}</span>
-                    </article>
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">P95 Latency</span>
-                      <strong>{transportQuality.p95LatencyMs != null ? `${transportQuality.p95LatencyMs.toFixed(0)} ms` : 'n/a'}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.latency}`}>{transportQuality.tones.latency.toUpperCase()}</span>
-                    </article>
-                    <article className="transport-quality-item">
-                      <span className="transport-quality-label">Errors / Timeouts</span>
-                      <strong>{transportQuality.commandsErr} / {transportQuality.timeouts}</strong>
-                      <span className={`hud-pill ${transportQuality.tones.error === 'bad' || transportQuality.tones.timeout === 'bad' ? 'bad' : transportQuality.tones.error === 'warn' || transportQuality.tones.timeout === 'warn' ? 'warn' : 'good'}`}>
-                        {transportQuality.tones.error === 'bad' || transportQuality.tones.timeout === 'bad'
-                          ? 'BAD'
-                          : transportQuality.tones.error === 'warn' || transportQuality.tones.timeout === 'warn'
-                            ? 'WARN'
-                            : 'GOOD'}
-                      </span>
-                    </article>
-                  </div>
-                </section>
+                <div className="telemetry-mission-strip" aria-label="Mission telemetry strip">
+                  <span className="telemetry-mission-time">T+{missionTickerLabel}</span>
+                  <span className={`telemetry-mission-stat ${transportQuality.tones.link}`}>
+                    <small>link</small>
+                    <strong>{transportQuality.connected ? 'online' : 'offline'}</strong>
+                  </span>
+                  <span className={`telemetry-mission-stat ${transportQuality.tones.rate}`}>
+                    <small>rate</small>
+                    <strong>{transportQuality.sampleRateHz > 0 ? `${transportQuality.sampleRateHz.toFixed(1)} hz` : 'n/a'}</strong>
+                  </span>
+                  <span className={`telemetry-mission-stat ${transportQuality.tones.age}`}>
+                    <small>age</small>
+                    <strong>{transportQuality.telemetryAgeMs != null ? `${transportQuality.telemetryAgeMs.toFixed(0)} ms` : 'n/a'}</strong>
+                  </span>
+                  <span className={`telemetry-mission-stat ${transportQuality.tones.latency}`}>
+                    <small>lat</small>
+                    <strong>{transportQuality.p95LatencyMs != null ? `${transportQuality.p95LatencyMs.toFixed(0)} ms` : 'n/a'}</strong>
+                  </span>
+                  <span className={`telemetry-mission-stat ${transportQuality.tones.queue}`}>
+                    <small>queue</small>
+                    <strong>{transportQuality.queueDepth}</strong>
+                  </span>
+                  <span
+                    className={`telemetry-mission-stat ${transportQuality.tones.error === 'bad' || transportQuality.tones.timeout === 'bad'
+                      ? 'bad'
+                      : transportQuality.tones.error === 'warn' || transportQuality.tones.timeout === 'warn'
+                        ? 'warn'
+                        : 'good'}`}
+                  >
+                    <small>err/to</small>
+                    <strong>{transportQuality.commandsErr}/{transportQuality.timeouts}</strong>
+                  </span>
+                </div>
 
-                <section className="panel input-hud-panel" aria-label="Live input HUDs">
+                <section className="panel telemetry-section telemetry-section-input input-hud-panel input-hud-panel-compact" aria-label="Live input HUDs">
                   <div className="tool-panel-head">
-                    <h3>{strings.hud.title}</h3>
-                    <span className="workflow-label">{strings.hud.subtitle}</span>
+                    <h3>Telemetry HUD System</h3>
+                    <span className="workflow-label">input + reactor + imu telemetry stack</span>
                   </div>
-                  <div className="input-hud-grid">
-                    {hudMetrics.cards.map((card) => (
-                      <article key={card.id} className="input-hud-card">
-                        <span className="input-hud-label">{card.label}</span>
-                        {(card.id === 'filteredAngle' || card.id === 'rawAngle') && (
-                          <svg className="input-semi-dial" viewBox="0 0 40 28" role="img" aria-label={`${card.label} semicircle dial`}>
-                            <path d={miniSemiTrackPath(14.5)} className="input-semi-dial-track" />
-                            <line x1="20" y1="3.5" x2="20" y2="8.6" className="input-semi-dial-axis" />
-                            <path
-                              d={miniSemiFillPath(
-                                14.5,
-                                card.id === 'filteredAngle' ? hudMetrics.hud.angle : hudMetrics.hud.rawAngle,
-                                Math.max(0, Math.min(1, Math.abs(card.id === 'filteredAngle' ? hudMetrics.hud.angle : hudMetrics.hud.rawAngle) / 90)),
-                              )}
-                              className={`input-semi-dial-fill ${card.id === 'filteredAngle' ? 'filtered' : 'raw'}`}
-                            />
-                          </svg>
-                        )}
+                  <div className="input-hud-grid-wrap">
+                    <div aria-hidden="true" className="depth-sep-v depth-sep-minor hud-grid-sep-v" />
+                    <div aria-hidden="true" className="depth-sep-h depth-sep-minor hud-grid-sep-h hud-grid-sep-h--r1" />
+                    <div aria-hidden="true" className="depth-sep-h depth-sep-minor hud-grid-sep-h hud-grid-sep-h--r2" />
+                    <div aria-hidden="true" className="depth-sep-h depth-sep-minor hud-grid-sep-h hud-grid-sep-h--r3" />
+                    <div aria-hidden="true" className="depth-sep-h depth-sep-minor hud-grid-sep-h hud-grid-sep-h--r4" />
+                  <div className="input-hud-grid input-hud-grid-compact">
+                    {hudMetrics.cards.filter((card) => card.id !== 'innovation').map((card) => (
+                      <article
+                        key={card.id}
+                        className={`input-hud-card telemetry-metric-card ${card.id === 'filteredAngle' || card.id === 'rawAngle' ? 'angle-pair-card' : ''}`}
+                      >
+                        <span className="input-hud-label">
+                          {card.id === 'filteredAngle'
+                            ? 'TRUE FILTERED ANGLE'
+                            : card.id === 'rawAngle'
+                              ? 'TRUE RAW ANGLE'
+                              : card.label}
+                        </span>
                         {card.id === 'gyroRate' && (
                           <div className="hud-bidir-slider" role="img" aria-label="Gyro rate bidirectional slider">
                             <span className="hud-bidir-center" />
@@ -2139,7 +2424,7 @@ export default function App() {
                             )}
                           </div>
                         )}
-                        <strong className={`input-hud-value ${(card.id === 'filteredAngle' || card.id === 'rawAngle') ? 'angle-semi-value' : ''}`}>
+                        <strong className="input-hud-value">
                           {card.value}
                           {card.unit ? <small>{card.unit}</small> : null}
                         </strong>
@@ -2165,38 +2450,36 @@ export default function App() {
                             source decay: {hudMetrics.telemetryDecayMs != null ? `${hudMetrics.telemetryDecayMs.toFixed(0)} ms` : 'n/a'} | effective decay: {hudMetrics.perceivedDecayMs != null ? `${hudMetrics.perceivedDecayMs.toFixed(0)} ms` : 'n/a'}
                           </span>
                         )}
+                        {card.id === 'clampState' && card.detail && (
+                          <span className="loop-feed-stats">{card.detail}</span>
+                        )}
                         {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' && (
                           <span className="output-caution-text">CAUTION</span>
                         )}
-                        <span className={`hud-pill ${card.tone}`}>
-                          {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' ? 'caution' : card.tone}
-                        </span>
                       </article>
                     ))}
                   </div>
-                </section>
+                  </div>
 
-                <HudVisuals
-                  show={true}
-                  hud={{ angle: hudMetrics.hud.angle, rawAngle: hudMetrics.hud.rawAngle, output: hudMetrics.hud.output, voltageRaw: hudMetrics.hud.voltageRaw }}
-                  angleDelta={hudMetrics.angleDelta}
-                  outputDelta={hudMetrics.outputDelta}
-                  angleDialPct={hudMetrics.angleDialPct}
-                  rawAngleDialPct={hudMetrics.rawAngleDialPct}
-                  outputDialPct={hudMetrics.outputDialPct}
-                  voltageDialPct={hudMetrics.voltageDialPct}
-                  chartPointsRaw={hudMetrics.chartPointsRaw}
-                  chartPointsKf={hudMetrics.chartPointsKf}
-                  chartPointsRef={hudMetrics.chartPointsRef}
-                  imuHistory={imuHistory}
-                  chartBounds={hudMetrics.chartBounds}
-                />
+                  <HudVisuals
+                    show={true}
+                    hud={{ angle: hudMetrics.hud.angle, rawAngle: hudMetrics.hud.rawAngle }}
+                    angleDelta={hudMetrics.angleDelta}
+                    angleDialPct={hudMetrics.angleDialPct}
+                    rawAngleDialPct={hudMetrics.rawAngleDialPct}
+                    chartPointsRaw={hudMetrics.chartPointsRaw}
+                    chartPointsKf={hudMetrics.chartPointsKf}
+                    chartPointsRef={hudMetrics.chartPointsRef}
+                    imuHistory={imuHistory}
+                    chartBounds={hudMetrics.chartBounds}
+                  />
+                </section>
               </aside>
             </div>
-          )}
+          </TabPanelSurface>
 
-          {activeTab === 'ide' && (
-            <div className="ide-view-grid">
+          <TabPanelSurface id="ide" activeTab={activeTab} keepAlive={tabKeepAlive.ide}>
+            <div className="ide-view-grid ide-theme-zone">
               <WorkbenchPanel
                 workbenchTab={workbenchTab}
                 setWorkbenchTab={setWorkbenchTab}
@@ -2214,6 +2497,8 @@ export default function App() {
                 fwCfg={fwCfg}
                 setFwCfg={setFwCfg}
                 boardScan={boardScan}
+                sketchFolders={sketchFolders}
+                pickSketchFolder={pickSketchFolder}
                 runFirmwareCompile={runFirmwareCompile}
                 runFirmwareUpload={runFirmwareUpload}
                 runFirmwareUploadGuarded={runFirmwareUploadGuarded}
@@ -2230,19 +2515,29 @@ export default function App() {
                 serialDiag={serialHealth}
                 refreshSerialDiag={refreshSerialDiag}
                 lines={lines}
-                insertKalmanTemplate={insertKalmanTemplate}
                 ideMode={true}
               />
 
-              <section className="panel input-hud-panel input-hud-panel-compact" aria-label="Compact input HUDs">
+              <section className="panel telemetry-section telemetry-section-input input-hud-panel input-hud-panel-compact" aria-label="Compact input HUDs">
                 <div className="tool-panel-head">
                   <h3>{strings.hud.title}</h3>
-                  <span className="workflow-label">{strings.ide.subtitle}</span>
                 </div>
-                <div className="input-hud-grid input-hud-grid-compact">
-                  {hudMetrics.cards.map((card) => (
-                    <article key={`${card.id}-compact`} className="input-hud-card">
-                      <span className="input-hud-label">{card.label}</span>
+                <div className="input-hud-grid-wrap">
+                  <div aria-hidden="true" className="depth-sep-v depth-sep-minor hud-grid-sep-v" />
+                  <div aria-hidden="true" className="depth-sep-h depth-sep-minor hud-grid-sep-h" />
+                  <div className="input-hud-grid input-hud-grid-compact">
+                    {hudMetrics.cards.filter((card) => card.id !== 'innovation').map((card) => (
+                      <article
+                        key={`${card.id}-compact`}
+                        className={`input-hud-card telemetry-metric-card ${card.id === 'filteredAngle' || card.id === 'rawAngle' ? 'angle-pair-card' : ''}`}
+                      >
+                      <span className="input-hud-label">
+                        {card.id === 'filteredAngle'
+                          ? 'TRUE FILTERED ANGLE'
+                          : card.id === 'rawAngle'
+                            ? 'TRUE RAW ANGLE'
+                            : card.label}
+                      </span>
                       {card.id === 'gyroRate' && (
                         <div className="hud-bidir-slider" role="img" aria-label="Gyro rate bidirectional slider">
                           <span className="hud-bidir-center" />
@@ -2280,17 +2575,21 @@ export default function App() {
                           source decay: {hudMetrics.telemetryDecayMs != null ? `${hudMetrics.telemetryDecayMs.toFixed(0)} ms` : 'n/a'} | effective decay: {hudMetrics.perceivedDecayMs != null ? `${hudMetrics.perceivedDecayMs.toFixed(0)} ms` : 'n/a'}
                         </span>
                       )}
+                      {card.id === 'clampState' && card.detail && (
+                        <span className="loop-feed-stats">{card.detail}</span>
+                      )}
                       {card.id === 'output' && hudMetrics.outputAlertLevel === 'caution' && (
                         <span className="output-caution-text">CAUTION</span>
                       )}
-                    </article>
-                  ))}
+                      </article>
+                    ))}
+                  </div>
                 </div>
               </section>
             </div>
-          )}
+          </TabPanelSurface>
 
-          {activeTab === 'playground' && (
+          <TabPanelSurface id="playground" activeTab={activeTab} keepAlive={tabKeepAlive.playground}>
             <IterationPlaygroundPage
               bridgeOnline={bridgeOnline}
               status={status}
@@ -2299,20 +2598,20 @@ export default function App() {
               refreshBridge={refreshBridge}
               setMsg={setMsg}
             />
-          )}
+          </TabPanelSurface>
         </section>
       </main>
 
       {preflightOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Guarded flash preflight checklist">
-          <div className="preflight-modal">
+        <div className="modal-backdrop modal-backdrop-dock" role="dialog" aria-modal="true" aria-label="Guarded flash preflight checklist">
+          <div className="preflight-modal surface-dock">
             <h3>{strings.modal.title}</h3>
             <p className="wizard-subtitle">{strings.modal.subtitle}</p>
             <label className="check-item"><input type="checkbox" checked={preflightChecks.ide_closed} onChange={(e) => setPreflightChecks((p) => ({ ...p, ide_closed: e.target.checked }))} />{strings.modal.ideClosed}</label>
             <label className="check-item"><input type="checkbox" checked={preflightChecks.bot_safe} onChange={(e) => setPreflightChecks((p) => ({ ...p, bot_safe: e.target.checked }))} />{strings.modal.botSafe}</label>
             <label className="check-item"><input type="checkbox" checked={preflightChecks.correct_port} onChange={(e) => setPreflightChecks((p) => ({ ...p, correct_port: e.target.checked }))} />{strings.modal.portCorrectPrefix} ({fwCfg.port || 'not set'})</label>
             <label className="check-item"><input type="checkbox" checked={preflightChecks.power_expected} onChange={(e) => setPreflightChecks((p) => ({ ...p, power_expected: e.target.checked }))} />{strings.modal.powerExpected}</label>
-            <div className="row">
+            <div className="row preflight-actions">
               <button className="btn-secondary" onClick={() => setPreflightOpen(false)}>{strings.modal.cancel}</button>
               <button className="btn-primary btn-lg" disabled={!Object.values(preflightChecks).every(Boolean) || fw.running} onClick={() => void executeGuardedFlash()}>{strings.modal.start}</button>
             </div>
@@ -2322,7 +2621,7 @@ export default function App() {
 
       {overwatchOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Overwatch integrity diagnostics" onClick={() => setOverwatchOpen(false)}>
-          <div className="preflight-modal overwatch-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="preflight-modal overwatch-modal surface-dock" onClick={(e) => e.stopPropagation()}>
             <div className="firmware-docs-head">
               <h3>Overwatch Diagnostics</h3>
               <button className="firmware-docs-close" aria-label="Close Overwatch diagnostics" onClick={() => setOverwatchOpen(false)}>
@@ -2388,7 +2687,7 @@ export default function App() {
         onChange={(e) => { void onProfileImportFile(e); }}
       />
 
-      <footer className="statusbar" ref={statusbarRef}>
+      <footer className="statusbar glass-surface glass-surface-strong" ref={statusbarRef}>
         <div className="statusbar-meta">
           <span>{statusMsg}</span>
           <span>State: {mode}</span>

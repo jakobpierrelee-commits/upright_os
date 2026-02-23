@@ -14,7 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from control_math import PidState, balance_control_step
+try:
+    from app.bridge.control_math import PidState, balance_control_step
+except ImportError:
+    from control_math import PidState, balance_control_step
 
 
 @dataclass
@@ -40,7 +43,9 @@ def _rmse(values: List[float]) -> float:
     return math.sqrt(sum(v * v for v in values) / len(values))
 
 
-def _as_float(row: Dict[str, str], keys: List[str], default: Optional[float] = None) -> float:
+def _as_float(
+    row: Dict[str, str], keys: List[str], default: Optional[float] = None
+) -> float:
     for key in keys:
         if key in row and row[key] not in ("", None):
             return float(row[key])
@@ -128,8 +133,12 @@ def replay_trace(
         )
 
         cmd_err = pred.command - curr.cmd_measured
-        pid_err = pred.angle_out - (curr.pid_measured if curr.pid_measured is not None else 0.0)
-        mot_err = pred.motion_out - (curr.motion_measured if curr.motion_measured is not None else 0.0)
+        pid_err = pred.angle_out - (
+            curr.pid_measured if curr.pid_measured is not None else 0.0
+        )
+        mot_err = pred.motion_out - (
+            curr.motion_measured if curr.motion_measured is not None else 0.0
+        )
 
         cmd_errors.append(cmd_err)
         pid_errors.append(pid_err)
@@ -142,9 +151,13 @@ def replay_trace(
                 "command_measured": curr.cmd_measured,
                 "command_error": cmd_err,
                 "pid_pred": pred.angle_out,
-                "pid_measured": curr.pid_measured if curr.pid_measured is not None else 0.0,
+                "pid_measured": curr.pid_measured
+                if curr.pid_measured is not None
+                else 0.0,
                 "motion_pred": pred.motion_out,
-                "motion_measured": curr.motion_measured if curr.motion_measured is not None else 0.0,
+                "motion_measured": curr.motion_measured
+                if curr.motion_measured is not None
+                else 0.0,
             }
         )
 
@@ -216,8 +229,12 @@ def replay_file(
     cmd_abs_max: float = 20.0,
 ) -> Dict[str, Any]:
     samples = load_trace_csv(trace_path)
-    replay = replay_trace(samples, i_limit=i_limit, out_limit=out_limit, cmd_vel=cmd_vel)
-    verdict = evaluate_replay(replay, cmd_rmse_max=cmd_rmse_max, cmd_abs_max=cmd_abs_max)
+    replay = replay_trace(
+        samples, i_limit=i_limit, out_limit=out_limit, cmd_vel=cmd_vel
+    )
+    verdict = evaluate_replay(
+        replay, cmd_rmse_max=cmd_rmse_max, cmd_abs_max=cmd_abs_max
+    )
     return {
         "trace": str(trace_path),
         "result": verdict,

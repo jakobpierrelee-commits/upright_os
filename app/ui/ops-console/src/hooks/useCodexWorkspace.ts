@@ -14,6 +14,7 @@ import {
   authLogin,
   authLogout,
   authMe,
+  authOpenAiStatus,
   authRequestPasswordReset,
   authRegister,
   authSetOpenAiKey,
@@ -101,7 +102,10 @@ function attachAssistantApply(
   return next;
 }
 
-export function useCodexWorkspace(onMessage: (text: string) => void) {
+export function useCodexWorkspace(
+  onMessage: (text: string) => void,
+  hardwareContext: Record<string, unknown> | null,
+) {
   const [state, dispatch] = useReducer(codexReducer, initialCodexState);
 
   const setAuthMode = useCallback((mode: 'login' | 'register') => dispatch({ type: 'set_auth_mode', payload: mode }), []);
@@ -119,7 +123,22 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
   const refreshAi = useCallback(async () => {
     try {
       const r = await aiStatus();
-      dispatch({ type: 'set_ai', payload: r.ai });
+      let aiResolved = r.ai;
+      if (r.ai.configured) {
+        try {
+          const keyStatus = await authOpenAiStatus();
+          aiResolved = {
+            ...r.ai,
+            configured: Boolean(keyStatus.runtime_has_key ?? keyStatus.configured),
+            model: keyStatus.model ?? r.ai.model,
+          };
+        } catch {
+          // Keep chat availability on transient status-check failures.
+          // Runtime-verified state will be applied on the next successful check.
+          aiResolved = r.ai;
+        }
+      }
+      dispatch({ type: 'set_ai', payload: aiResolved });
       dispatch({ type: 'set_ai_history', payload: r.history });
       dispatch({ type: 'set_ai_threads', payload: r.threads });
       dispatch({ type: 'set_ai_active_thread', payload: r.ai.active_thread_id ?? null });
@@ -197,7 +216,16 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       }
       const model = state.openAiModelInput.trim() || 'gpt-5-mini';
       const out = await authSetOpenAiKey(key, model);
-      dispatch({ type: 'set_ai', payload: { ...state.ai, configured: out.configured, model: out.model } });
+      let runtimeConfigured = false;
+      let runtimeModel: string | null = out.model;
+      try {
+        const verified = await authOpenAiStatus();
+        runtimeConfigured = Boolean(verified.runtime_has_key ?? verified.configured);
+        runtimeModel = verified.model ?? runtimeModel;
+      } catch {
+        // Strict mode: if runtime verification fails, keep key as not-synced until verified.
+      }
+      dispatch({ type: 'set_ai', payload: { ...state.ai, configured: runtimeConfigured, model: runtimeModel ?? out.model } });
       dispatch({ type: 'patch_auth_user', payload: { openai_configured: out.configured, openai_model: out.model } });
       dispatch({ type: 'set_openai_key_input', payload: '' });
       dispatch({ type: 'set_auth_alert', payload: { tone: 'ok', text: `OpenAI key saved (${out.model})` } });
@@ -212,7 +240,16 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
   const clearUserOpenAiKey = useCallback(async () => {
     try {
       const out = await authDeleteOpenAiKey();
-      dispatch({ type: 'set_ai', payload: { ...state.ai, configured: out.configured, model: out.model ?? state.ai.model } });
+      let runtimeConfigured = Boolean(out.configured);
+      let runtimeModel: string | null = out.model ?? state.ai.model;
+      try {
+        const verified = await authOpenAiStatus();
+        runtimeConfigured = Boolean(verified.runtime_has_key ?? verified.configured);
+        runtimeModel = verified.model ?? runtimeModel;
+      } catch {
+        // keep delete result if runtime verification endpoint is unavailable
+      }
+      dispatch({ type: 'set_ai', payload: { ...state.ai, configured: runtimeConfigured, model: runtimeModel ?? state.ai.model } });
       dispatch({ type: 'patch_auth_user', payload: { openai_configured: out.configured, openai_model: out.model } });
       dispatch({ type: 'set_auth_alert', payload: { tone: 'ok', text: 'OpenAI key deleted' } });
       onMessage('OpenAI key deleted');
@@ -273,6 +310,7 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       let r = await aiChatWithTools(message, {
         threadId: state.aiActiveThreadId ?? undefined,
         enableTools: true,
+        hardwareContext: hardwareContext ?? undefined,
       });
       let toolCalls: import('../api').ToolCallResult[] = r.tool_calls ?? [];
       let iterations = r.iterations ?? 1;
@@ -281,7 +319,7 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       // Keep chat functional even when bridge tool support is temporarily unavailable.
       if (!r.reply && !r.history.length) {
         dispatch({ type: 'set_ai_busy_detail', payload: 'Tool mode unavailable. Retrying with standard chat...' });
-        const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined);
+        const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined, hardwareContext ?? undefined);
         r = {
           ...fallback,
           tool_calls: [],
@@ -317,7 +355,7 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       if (errMsg.includes('tool_support_not_available')) {
         try {
           dispatch({ type: 'set_ai_busy_detail', payload: 'Tool support unavailable. Falling back to standard chat...' });
-          const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined);
+          const fallback = await aiChat(message, state.aiActiveThreadId ?? undefined, hardwareContext ?? undefined);
           const doneAt = Date.now();
           const timed = attachAssistantTiming(fallback.history, sentAt, doneAt, null);
           dispatch({ type: 'set_ai_history', payload: timed });
@@ -352,7 +390,7 @@ export function useCodexWorkspace(onMessage: (text: string) => void) {
       dispatch({ type: 'set_ai_busy', payload: false });
       dispatch({ type: 'set_ai_busy_detail', payload: null });
     }
-  }, [onMessage, refreshAi, state.aiActiveThreadId, state.aiHistory, state.aiInput]);
+  }, [hardwareContext, onMessage, refreshAi, state.aiActiveThreadId, state.aiHistory, state.aiInput]);
 
   const refreshThreads = useCallback(async () => {
     const r = await aiThreads();

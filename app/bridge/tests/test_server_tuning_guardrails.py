@@ -42,7 +42,9 @@ def test_guard_pid_apply_blocks_large_balancing_delta() -> None:
 
 def test_guard_limits_apply_rejects_invalid_range() -> None:
     with pytest.raises(RuntimeError, match="invalid_tuning_value:tip_deg"):
-        _guard_limits_apply({"mode": "SAFE_IDLE"}, out_max=180.0, tip_deg=120.0, i_max=70.0)
+        _guard_limits_apply(
+            {"mode": "SAFE_IDLE"}, out_max=180.0, tip_deg=120.0, i_max=70.0
+        )
 
 
 def test_validate_recommendation_contract_flags_missing_fields() -> None:
@@ -80,7 +82,10 @@ def test_preflight_store_validates_signature_and_mismatch() -> None:
     assert "preflight_id" in node
     store.validate(node["preflight_id"], sig)
     with pytest.raises(RuntimeError, match="preflight_mismatch"):
-        store.validate(node["preflight_id"], _build_tuning_apply_signature("pid", {"kp": 35.0, "ki": 0.05, "kd": 1.05}))
+        store.validate(
+            node["preflight_id"],
+            _build_tuning_apply_signature("pid", {"kp": 35.0, "ki": 0.05, "kd": 1.05}),
+        )
 
 
 def test_enforce_preflight_requires_id_when_high_impact() -> None:
@@ -134,9 +139,65 @@ def test_compute_action_gates_allows_nominal_arm_prepare() -> None:
 def test_compute_action_gates_block_arm_confirm_until_prepared() -> None:
     gates = _compute_action_gates(
         connected=True,
-        status={"mode": "SAFE_IDLE", "ang": "0.0", "raw": "0.0", "gyro": "0.0", "out": "0.0", "kp": "31.0", "ki": "0.05", "kd": "1.05", "set": "0.0"},
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
         control_snapshot={"arm_prepared": False, "estop_latched": False},
         session_fresh=True,
     )
     assert gates["arm_confirm"]["ok"] is False
     assert "arm_not_prepared" in gates["arm_confirm"]["reasons"]
+
+
+def test_compute_action_gates_block_arm_when_prearm_safety_required() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+        prearm_safety={"required": True, "passed": False},
+    )
+    assert gates["arm_prepare"]["ok"] is False
+    assert "prearm_safety_check_required" in gates["arm_prepare"]["reasons"]
+    assert gates["arm"]["ok"] is False
+    assert "prearm_safety_check_required" in gates["arm"]["reasons"]
+
+
+def test_compute_action_gates_allow_arm_when_prearm_safety_passed() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+        prearm_safety={"required": False, "passed": True},
+    )
+    assert gates["arm_prepare"]["ok"] is True
+    assert gates["arm"]["ok"] is True

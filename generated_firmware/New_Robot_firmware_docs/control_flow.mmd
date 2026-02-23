@@ -1,0 +1,21 @@
+flowchart TB
+  S0["Setup"] --> S1["Init serial and sensors"]
+  S1 --> S2["Load config"]
+  S2 --> S3["Enter SAFE_IDLE"]
+  S3 --> L0["Loop tick"]
+
+  L0 --> L1["Read IMU"]
+  L1 --> L2["Fuse tilt to ang raw gyro"]
+  L2 --> L3["Publish STATUS telemetry"]
+  L3 --> L4["Parse serial commands"]
+  L4 --> L5["Evaluate mode and guards"]
+
+  L5 --> M0["SAFE_IDLE path motors off"]
+  L5 --> M1["BALANCING path compute and drive"]
+  L5 --> M2["Fault path latch stop"]
+
+  M0 --> L0
+  M1 --> L0
+  M2 --> L0
+
+%% sketch-evidence: setup_found=true loop_found=true

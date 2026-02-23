@@ -4,11 +4,8 @@ Validation tests for codex_agent.py - Phase D Agent Integration
 Run with: python3 app/bridge/tests/test_codex_agent.py
 """
 
-import json
-import os
 import sys
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -75,7 +72,9 @@ def test_tool_executor_creation():
 def test_rag_context_injection():
     """Test RAG context injection with mock."""
     mock_rag = MagicMock()
-    mock_rag.get_context_for_query.return_value = "Relevant doc content about PID tuning."
+    mock_rag.get_context_for_query.return_value = (
+        "Relevant doc content about PID tuning."
+    )
 
     agent = CodexAgent(rag=mock_rag)
 
@@ -142,19 +141,21 @@ def test_extract_tool_calls():
 
     # Response with tool calls
     response_with_tools = {
-        "choices": [{
-            "message": {
-                "tool_calls": [
-                    {
-                        "id": "call_123",
-                        "function": {
-                            "name": "execute_command",
-                            "arguments": '{"cmd": "PID 18 0.1 0.6"}',
-                        },
-                    }
-                ],
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "id": "call_123",
+                            "function": {
+                                "name": "execute_command",
+                                "arguments": '{"cmd": "PID 18 0.1 0.6"}',
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     tool_calls = agent._extract_tool_calls(response_with_tools)
@@ -163,11 +164,13 @@ def test_extract_tool_calls():
 
     # Response without tool calls
     response_no_tools = {
-        "choices": [{
-            "message": {
-                "content": "Here is my answer.",
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "Here is my answer.",
+                },
+            }
+        ],
     }
 
     tool_calls = agent._extract_tool_calls(response_no_tools)
@@ -185,11 +188,13 @@ def test_extract_text_content():
     agent = CodexAgent()
 
     response = {
-        "choices": [{
-            "message": {
-                "content": "  Here is the answer.  ",
-            },
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "  Here is the answer.  ",
+                },
+            }
+        ],
     }
 
     text = agent._extract_text_content(response)
@@ -223,6 +228,7 @@ def test_factory_function():
     try:
         # Patch the default DB path
         import codex_db
+
         original_path = codex_db.DEFAULT_DB_PATH
         codex_db.DEFAULT_DB_PATH = db_path
         codex_db._default_db = None  # Reset singleton
@@ -285,6 +291,48 @@ def test_chat_requires_message():
     print("✓ Chat requires message passed")
 
 
+def test_sketch_request_start_timeout_guard():
+    """Sketch generation requests should fail fast if generation never starts."""
+    agent = CodexAgent()
+    with patch("codex_agent.SKETCH_START_TIMEOUT_S", 0):
+        try:
+            agent.chat_with_tools(
+                message="Generate a new sketch for my robot",
+                context={},
+                api_key="test-key",
+                model="gpt-4",
+                system_prompt="test",
+            )
+            assert False, "Should raise sketch start timeout"
+        except RuntimeError as e:
+            assert "sketch_start_timeout" in str(e)
+
+    print("✓ Sketch start timeout guard passed")
+
+
+def test_call_openai_timeout_message_uses_custom_timeout():
+    """_call_openai should report the actual timeout value in the error message."""
+    agent = CodexAgent()
+
+    with patch("codex_agent.urlrequest.urlopen") as mock_urlopen:
+        mock_urlopen.side_effect = TimeoutError("Connection timed out")
+
+        try:
+            agent._call_openai(
+                messages=[{"role": "user", "content": "test"}],
+                api_key="test-key",
+                model="gpt-4",
+                timeout_s=12,
+            )
+            assert False, "Should raise timeout error"
+        except RuntimeError as e:
+            msg = str(e)
+            assert "openai_timeout" in msg
+            assert "12 seconds" in msg
+
+    print("✓ Custom timeout error message passed")
+
+
 def run_all_tests():
     """Run all validation tests."""
     print("\n" + "=" * 60)
@@ -304,6 +352,11 @@ def run_all_tests():
         ("Factory Function", test_factory_function),
         ("Chat Requires API Key", test_chat_requires_api_key),
         ("Chat Requires Message", test_chat_requires_message),
+        ("Sketch Start Timeout Guard", test_sketch_request_start_timeout_guard),
+        (
+            "Custom Timeout Message",
+            test_call_openai_timeout_message_uses_custom_timeout,
+        ),
     ]
 
     passed = 0
@@ -321,6 +374,7 @@ def run_all_tests():
             failed += 1
             print(f"✗ {name} failed with exception: {e}")
             import traceback
+
             traceback.print_exc()
 
     print("\n" + "=" * 60)

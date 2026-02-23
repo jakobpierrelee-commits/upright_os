@@ -2543,6 +2543,59 @@
           "deg": 20.0
         }
       }
+    },
+    {
+      "note": "",
+      "snapshot_id": "6o2rC2mXfdg",
+      "source": "/pid",
+      "status_before": {
+        "ang": "16.251",
+        "autorun": "0",
+        "axis": "Y",
+        "encL": "867",
+        "encR": "0",
+        "encmode": "LEFT",
+        "estop": "1",
+        "gyro": "-0.008",
+        "ipol": "1",
+        "kd": "0.000",
+        "ki": "0.000",
+        "kp": "14.000",
+        "kv": "0.0000",
+        "kx": "0.00000",
+        "mode": "SAFE_IDLE",
+        "mot": "0.00",
+        "mpol": "1",
+        "out": "0.00",
+        "pid": "0.00",
+        "raw": "43.373",
+        "set": "0.000",
+        "swap": "1",
+        "volRaw": "186",
+        "wpos": "867.0",
+        "wspd": "0.00",
+        "zero": "27.134"
+      },
+      "ts": 1771495384.3763561,
+      "values": {
+        "limits": {
+          "i_max": null,
+          "out_max": null,
+          "tip_deg": null
+        },
+        "motion": {
+          "kv": 0.0,
+          "kx": 0.0
+        },
+        "pid": {
+          "kd": 0.0,
+          "ki": 0.0,
+          "kp": 14.0
+        },
+        "setpoint": {
+          "deg": 0.0
+        }
+      }
     }
   ]
 }
