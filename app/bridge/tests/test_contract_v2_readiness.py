@@ -536,6 +536,9 @@ class TestProbeIntegration:
         assert "v1_ok" in result
         assert "v2_ready" in result
         assert "v2_missing_fields" in result
+        assert "phase2_missing_fields" in result
+        assert "phase2_present_fields" in result
+        assert "phase2_recommended_action" in result
         assert "v2_recommended_action" in result
         assert "readiness_checks" in result
 
@@ -564,8 +567,10 @@ class TestProbeIntegration:
 
         result = run_connect_probe(mock_gateway)
 
-        assert result["v2_recommended_action"] is not None
-        assert "calibration" in result["v2_recommended_action"].lower()
+        assert result["phase2_recommended_action"] is not None
+        assert "calibration" in str(result["phase2_recommended_action"]).lower()
+        # Migration window: legacy alias mirrors canonical phase field.
+        assert result["v2_recommended_action"] == result["phase2_recommended_action"]
 
     def test_connect_probe_no_action_when_v2_ready(self):
         """run_connect_probe should have no recommended action when v2 ready."""
@@ -597,6 +602,7 @@ class TestProbeIntegration:
         result = run_connect_probe(mock_gateway)
 
         assert result["v2_ready"] is True
+        assert result["phase2_recommended_action"] is None
         assert result["v2_recommended_action"] is None
 
 

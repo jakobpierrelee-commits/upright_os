@@ -17,7 +17,13 @@ def _targets() -> dict:
                     {"id": "new", "fqbn_suffix": ""},
                     {"id": "old", "fqbn_suffix": ":cpu=atmega328old"},
                 ],
-            }
+            },
+            {
+                "id": "teensy41",
+                "family": "teensy",
+                "fqbn_base": "teensy:avr:teensy41",
+                "bootloaders": [{"id": "default", "fqbn_suffix": ""}],
+            },
         ]
     }
 
@@ -224,3 +230,37 @@ def test_runtime_manifest_v1_rejects_invalid_mcu_topology() -> None:
         "mcu_topology.io_mcu.id_conflicts_with_control" in e for e in out["errors"]
     )
     assert any("mcu_topology.link.transport_invalid" in e for e in out["errors"])
+
+
+def test_runtime_manifest_v1_accepts_teensy41_reference_contract() -> None:
+    manifest = {
+        "version": "runtime_manifest_v1",
+        "board": {
+            "id": "teensy41",
+            "family": "teensy",
+            "fqbn": "teensy:avr:teensy41",
+        },
+        "interfaces": {
+            "imu": {"protocol": "i2c", "pins": {"sda": 18, "scl": 19}},
+            "encoders": {
+                "protocol": "spi",
+                "pins": {"miso": 12, "mosi": 11, "sck": 13, "cs": 10},
+            },
+            "actuator": {"protocol": "can", "pins": {"can_tx": 22, "can_rx": 23}},
+        },
+        "telemetry_fields": [
+            "mode",
+            "ang",
+            "raw",
+            "gyro",
+            "out",
+            "fault",
+            "estop",
+            "wpos",
+            "wspd",
+        ],
+        "commands": ["GET", "ARM", "DISARM", "PID", "SETPOINT", "LIMITS", "MOTION"],
+    }
+    out = _validate_runtime_manifest_v1(manifest, _targets())
+    assert out["ok"] is True
+    assert out["errors"] == []

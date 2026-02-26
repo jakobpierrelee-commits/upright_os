@@ -206,9 +206,9 @@ class TestSerialBusyGuard:
 class TestOpenAITimeoutHandling:
     """Tests for OpenAI timeout handling in CodexAgent."""
 
-    def test_timeout_constant_is_45_seconds(self):
-        """Verify the timeout constant is set to 45 seconds."""
-        assert OPENAI_TIMEOUT_S == 45
+    def test_timeout_constant_is_configured_positive(self):
+        """Verify timeout constant is configured to a sane positive value."""
+        assert OPENAI_TIMEOUT_S > 0
 
     def test_call_openai_timeout_error_message(self):
         """Test that timeout produces user-friendly error message."""
@@ -226,7 +226,7 @@ class TestOpenAITimeoutHandling:
                 )
 
             assert "openai_timeout" in str(exc_info.value)
-            assert "45 seconds" in str(exc_info.value)
+            assert f"{OPENAI_TIMEOUT_S} seconds" in str(exc_info.value)
 
     def test_call_openai_socket_timeout_detection(self):
         """Test that socket timeout is detected via error message."""

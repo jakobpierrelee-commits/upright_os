@@ -17,7 +17,13 @@ def _targets() -> dict:
                     {"id": "new", "fqbn_suffix": ""},
                     {"id": "old", "fqbn_suffix": ":cpu=atmega328old"},
                 ],
-            }
+            },
+            {
+                "id": "teensy41",
+                "family": "teensy",
+                "fqbn_base": "teensy:avr:teensy41",
+                "bootloaders": [{"id": "default", "fqbn_suffix": ""}],
+            },
         ]
     }
 
@@ -98,6 +104,30 @@ def test_manifest_profile_compat_warns_on_optional_profile_commands() -> None:
     assert any(str(w).startswith("commands_optional_missing:") for w in out["warnings"])
 
 
+def test_manifest_profile_compat_no_optional_warning_when_motion_declared() -> None:
+    active = {
+        "board": {"fqbn": "arduino:avr:nano"},
+        "probe": {"commands": ["GET", "ARM", "MOTION"]},
+    }
+    manifest = _manifest_validation_ok("arduino:avr:nano")
+    manifest["manifest"]["commands"] = [
+        "GET",
+        "ARM",
+        "DISARM",
+        "PID",
+        "SETPOINT",
+        "LIMITS",
+        "MOTION",
+    ]
+    out = _runtime_manifest_profile_compatibility(
+        manifest_validation=manifest,
+        active_profile=active,
+        targets=_targets(),
+    )
+    assert out["ok"] is True
+    assert not any(str(w).startswith("commands_optional_missing:") for w in out["warnings"])
+
+
 def test_manifest_profile_compat_warns_on_protocol_mismatch() -> None:
     active = {
         "board": {"fqbn": "arduino:avr:nano"},
@@ -121,3 +151,55 @@ def test_manifest_profile_compat_warns_on_protocol_mismatch() -> None:
     assert out["ok"] is True
     assert any(str(w).startswith("protocol_mismatch:") for w in out["warnings"])
     assert out["checks"]["protocols"]["ok"] is False
+
+
+def test_manifest_profile_compat_passes_teensy41_reference_profile() -> None:
+    active = {
+        "board": {"fqbn": "teensy:avr:teensy41"},
+        "parts": {
+            "imu": {"protocol": "i2c"},
+            "encoders": {"protocol": "spi"},
+            "motor_driver": {"protocol": "can"},
+        },
+        "pinmap": {
+            "imu_bus": {"protocol": "i2c"},
+            "encoders": {"protocol": "spi"},
+            "motor": {"protocol": "can"},
+        },
+        "probe": {"commands": ["GET", "ARM", "DISARM", "PID", "SETPOINT", "MOTION"]},
+    }
+    manifest = {
+        "ok": True,
+        "manifest": {
+            "version": "runtime_manifest_v1",
+            "board": {
+                "id": "teensy41",
+                "family": "teensy",
+                "fqbn": "teensy:avr:teensy41",
+            },
+            "interfaces": {
+                "imu": {"protocol": "i2c"},
+                "encoders": {"protocol": "spi"},
+                "actuator": {"protocol": "can"},
+            },
+            "telemetry_fields": [
+                "mode",
+                "ang",
+                "raw",
+                "gyro",
+                "out",
+                "fault",
+                "estop",
+                "set",
+            ],
+            "commands": ["GET", "ARM", "DISARM", "PID", "SETPOINT", "LIMITS", "MOTION"],
+        },
+    }
+    out = _runtime_manifest_profile_compatibility(
+        manifest_validation=manifest,
+        active_profile=active,
+        targets=_targets(),
+    )
+    assert out["ok"] is True
+    assert out["errors"] == []
+    assert out["checks"]["protocols"]["ok"] is True
