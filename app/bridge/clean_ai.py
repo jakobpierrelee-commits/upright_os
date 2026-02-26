@@ -109,6 +109,26 @@ def build_agent_status_payload(
     return {"ok": True, "agent": agent, "threads": threads, "ai": ai}
 
 
+def build_disambiguation_reply_payload(
+    *,
+    reply: str,
+    ai: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    threads: List[Dict[str, Any]],
+    thread_id: str,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "reply": reply,
+        "tool_calls": [],
+        "iterations": 0,
+        "ai": ai,
+        "history": history,
+        "threads": threads,
+        "thread_id": thread_id,
+    }
+
+
 def build_ai_threads_status_payload(
     *, threads: List[Dict[str, Any]], ai: Dict[str, Any]
 ) -> Dict[str, Any]:

@@ -261,6 +261,7 @@ try:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_disambiguation_reply_payload,
         build_openai_config_payload,
         build_session_heartbeat_payload,
     )
@@ -279,6 +280,7 @@ except ImportError:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_disambiguation_reply_payload,
         build_openai_config_payload,
         build_session_heartbeat_payload,
     )
@@ -13644,20 +13646,17 @@ def build_handler(
                             return _json(
                                 self,
                                 200,
-                                {
-                                    "ok": True,
-                                    "reply": reply,
-                                    "tool_calls": [],
-                                    "iterations": 0,
-                                    "ai": ai.status(
+                                build_disambiguation_reply_payload(
+                                    reply=reply,
+                                    ai=ai.status(
                                         configured=True,
                                         model=str(creds["model"] or "gpt-4"),
                                         session_key=skey,
                                     ),
-                                    "history": ai.history(skey, tid)[-80:],
-                                    "threads": ai.list_threads(skey),
-                                    "thread_id": tid,
-                                },
+                                    history=ai.history(skey, tid)[-80:],
+                                    threads=ai.list_threads(skey),
+                                    thread_id=tid,
+                                ),
                             )
                         result = codex_agent.chat_with_tools(
                             message=msg,
