@@ -3,11 +3,16 @@ import {
   cleanStatus,
   cleanFirmwareBoards,
   cleanFirmwareTargets,
+  cleanFirmwareSketchFolders,
+  cleanFirmwareReadSketch,
+  cleanFirmwareWriteSketch,
   cleanFirmwareCompile,
   cleanFirmwareStatus,
   cleanFirmwareUpload,
+  cleanFirmwareReleaseSerial,
   cleanFirmwareUploadPrecheck,
   cleanKnownGoodRecovery,
+  cleanRuntimeManifestCompatibility,
   cleanPreflightStream,
   cleanFailureDetailFromError,
   cleanFailureKindFromError,
@@ -15,6 +20,7 @@ import {
   type CleanFirmwareBoards,
   type CleanFirmwareTargets,
   type CleanFirmwareStatus,
+  type CleanRuntimeManifestCompatibility,
   type CleanMode,
 } from './cleanApi';
 
@@ -53,6 +59,7 @@ type FirmwareFlowStepId = 'detect' | 'compile' | 'upload' | 'reconnect' | 'verif
 type FirmwareFlowStepState = 'idle' | 'running' | 'pass' | 'fail';
 type FirmwareFlowStep = { state: FirmwareFlowStepState; detail: string };
 type FirmwareFlowMap = Record<FirmwareFlowStepId, FirmwareFlowStep>;
+type CompatBadgeTone = 'pass' | 'warn' | 'fail';
 
 type FirmwareTargetBoard = CleanFirmwareTargets['boards'][number];
 type FirmwareTargetFamily = CleanFirmwareTargets['families'][number];
@@ -258,14 +265,109 @@ function buildTargetRunbookGuide(
   return null;
 }
 
+function summarizeCompatErrorCode(
+  codeRaw: string,
+  manifestValidation?: { errors?: string[] },
+): string {
+  const code = String(codeRaw || '').trim();
+  if (!code) return 'Compatibility check failed.';
+  if (code === 'runtime_manifest_invalid') {
+    const detail = Array.isArray(manifestValidation?.errors) && manifestValidation.errors.length > 0
+      ? String(manifestValidation.errors[0])
+      : '';
+    return detail ? `Runtime manifest invalid: ${detail}` : 'Runtime manifest is invalid.';
+  }
+  if (code === 'runtime_manifest_missing') return 'Runtime manifest is missing.';
+  if (code === 'board_fqbn_mismatch') return 'Profile board and runtime board do not match.';
+  if (code === 'board_family_mismatch') return 'Profile board family and runtime family do not match.';
+  if (code.startsWith('commands_mismatch:')) {
+    const missing = code.split(':', 2)[1] || '';
+    return `Missing required commands in runtime manifest: ${missing || 'unknown'}.`;
+  }
+  if (code.startsWith('telemetry_mismatch:')) {
+    const missing = code.split(':', 2)[1] || '';
+    return `Missing required telemetry fields in runtime manifest: ${missing || 'unknown'}.`;
+  }
+  return code.replace(/_/g, ' ');
+}
+
+function summarizeCompatWarningCode(codeRaw: string): string {
+  const code = String(codeRaw || '').trim();
+  if (!code) return 'Compatibility warning.';
+  if (code === 'active_profile_missing') return 'No active hardware profile selected yet.';
+  if (code.startsWith('commands_optional_missing:')) {
+    const missing = code.split(':', 2)[1] || '';
+    return `Non-blocking warning: optional profile commands are not declared in runtime manifest: ${missing || 'unknown'}. Compile/upload can continue.`;
+  }
+  if (code.startsWith('protocol_mismatch:')) {
+    const mismatches = code.split(':', 2)[1] || '';
+    return `Interface protocol mismatch detected: ${mismatches || 'unknown'}.`;
+  }
+  return code.replace(/_/g, ' ');
+}
+
+function normalizeSketchFolderPath(raw: string): string {
+  const text = String(raw || '').trim().replace(/\/+$/, '');
+  if (!text) return '';
+  if (text.toLowerCase().endsWith('.ino')) {
+    const parts = text.split('/');
+    parts.pop();
+    return parts.join('/');
+  }
+  return text;
+}
+
+function sketchMainFileName(folder: string): string {
+  const clean = normalizeSketchFolderPath(folder);
+  if (!clean) return 'sketch.ino';
+  const parts = clean.split('/');
+  return `${parts[parts.length - 1] || 'sketch'}.ino`;
+}
+
+function joinSketchPath(folder: string, fileName: string): string {
+  const base = normalizeSketchFolderPath(folder);
+  const file = String(fileName || '').trim();
+  if (!base) return file;
+  return `${base}/${file}`;
+}
+
+function buildSketchDiff(original: string, current: string): string {
+  if (original === current) return 'No changes.';
+  const before = String(original || '').split('\n');
+  const after = String(current || '').split('\n');
+  const max = Math.max(before.length, after.length);
+  const lines: string[] = [];
+  let changes = 0;
+  for (let i = 0; i < max; i += 1) {
+    const a = before[i] ?? '';
+    const b = after[i] ?? '';
+    if (a === b) continue;
+    changes += 1;
+    lines.push(`- ${a}`);
+    lines.push(`+ ${b}`);
+    if (changes >= 80) {
+      lines.push('... diff truncated ...');
+      break;
+    }
+  }
+  return lines.join('\n');
+}
+
 export function CleanIdeFirmwarePanel(
   { mode, onGlobalStatus }: { mode: CleanMode; onGlobalStatus?: (evt: { level: IdeStatusLevel; summary: string; source: string; ts: number }) => void },
 ): JSX.Element {
   const didInitialStatusRefreshRef = useRef(false);
+  const firmwareOpStartedAtRef = useRef<number | null>(null);
   const [apiContractOk, setApiContractOk] = useState(true);
   const [apiContractDetail, setApiContractDetail] = useState('');
   const [busyAction, setBusyAction] = useState<'none' | 'compile' | 'upload' | 'preflight'>('none');
   const [statusLine, setStatusLine] = useState('Firmware tools ready');
+  const [firmwareProgress, setFirmwareProgress] = useState<{
+    action: 'compile' | 'upload';
+    phase: string;
+    elapsed_s: number;
+    latest_line: string;
+  } | null>(null);
   const [firmwareState, setFirmwareState] = useState<CleanFirmwareStatus | null>(null);
   const [boardHints, setBoardHints] = useState<CleanFirmwareBoards | null>(null);
   const [targetRegistry, setTargetRegistry] = useState<CleanFirmwareTargets | null>(null);
@@ -306,6 +408,27 @@ export function CleanIdeFirmwarePanel(
       return '';
     }
   });
+  const [sketchFolders, setSketchFolders] = useState<string[]>([]);
+  const [sketchFoldersBusy, setSketchFoldersBusy] = useState(false);
+  const [selectedSketchFolder, setSelectedSketchFolder] = useState<string>(() => {
+    try {
+      return normalizeSketchFolderPath(window.localStorage.getItem('clean.firmware.sketch_folder') ?? '');
+    } catch {
+      return '';
+    }
+  });
+  const [selectedSketchFile, setSelectedSketchFile] = useState<string>(() => {
+    try {
+      return String(window.localStorage.getItem('clean.firmware.sketch_file') ?? '').trim();
+    } catch {
+      return '';
+    }
+  });
+  const [sketchFileContent, setSketchFileContent] = useState<string>('');
+  const [sketchFileBaseline, setSketchFileBaseline] = useState<string>('');
+  const [sketchFileBusy, setSketchFileBusy] = useState(false);
+  const [sketchFileStatus, setSketchFileStatus] = useState('Sketch editor ready');
+  const [sketchDiffOpen, setSketchDiffOpen] = useState(false);
   const [opsLog, setOpsLog] = useState<Array<{ ts: number; text: string }>>([]);
   const [failureBanner, setFailureBanner] = useState<{ kind: string; detail: string } | null>(null);
   const [firmwareLastResult, setFirmwareLastResult] = useState<{
@@ -319,8 +442,22 @@ export function CleanIdeFirmwarePanel(
   const [logBusy, setLogBusy] = useState(false);
   const [runbookStatus, setRunbookStatus] = useState('');
   const [targetRunbook, setTargetRunbook] = useState<TargetRunbook | null>(null);
+  const [manifestCompat, setManifestCompat] = useState<CleanRuntimeManifestCompatibility | null>(null);
+  const [manifestCompatError, setManifestCompatError] = useState('');
+  const [runtimeIdentity, setRuntimeIdentity] = useState<{
+    mode: string;
+    runtimeVersion: string;
+    tuneVersion: string;
+    ident: string;
+  }>({
+    mode: '',
+    runtimeVersion: '',
+    tuneVersion: '',
+    ident: '',
+  });
   const [flow, setFlow] = useState<FirmwareFlowMap>(() => createInitialFlowMap());
   const lastGlobalKeyRef = useRef<string>('');
+  const loadedSketchKeyRef = useRef<string>('');
 
   const familyOptions = useMemo(() => familyOptionsFromTargets(targetRegistry), [targetRegistry]);
   const boardOptions = useMemo(
@@ -342,6 +479,14 @@ export function CleanIdeFirmwarePanel(
   const effectiveFqbn = useMemo(
     () => fqbnFromSelection(targetRegistry, selectedBoard?.id ?? boardId, selectedBootloaderId),
     [targetRegistry, selectedBoard?.id, boardId, selectedBootloaderId],
+  );
+  const sketchFileOptions = useMemo(() => {
+    if (!selectedSketchFolder) return [] as string[];
+    return [sketchMainFileName(selectedSketchFolder), 'runtime_manifest_v1.json'];
+  }, [selectedSketchFolder]);
+  const sketchDirty = useMemo(
+    () => sketchFileContent !== sketchFileBaseline,
+    [sketchFileBaseline, sketchFileContent],
   );
 
   const publishGlobalStatus = useCallback((level: IdeStatusLevel, summary: string, source: string): void => {
@@ -366,6 +511,39 @@ export function CleanIdeFirmwarePanel(
     const raw = `${statusLine}\n${failureBanner?.detail ?? ''}\n${tail}\n${firmwareLog}\nboard=${selectedBoard?.id ?? boardId}`;
     return buildUploadRetryGuide(raw, selectedBoard?.id ?? boardId, selectedBootloaderId);
   }, [boardId, failureBanner?.detail, firmwareLog, firmwareState?.log_tail, selectedBoard?.id, selectedBootloaderId, statusLine, targetRunbook]);
+
+  const compatTone = useMemo<CompatBadgeTone>(() => {
+    if (manifestCompatError) return 'fail';
+    if (!manifestCompat) return 'warn';
+    if (!Boolean(manifestCompat.compatibility?.ok)) return 'fail';
+    const warnings = Array.isArray(manifestCompat.compatibility?.warnings)
+      ? manifestCompat.compatibility.warnings
+      : [];
+    return warnings.length > 0 ? 'warn' : 'pass';
+  }, [manifestCompat, manifestCompatError]);
+
+  const compatPrimaryReason = useMemo(() => {
+    if (manifestCompatError) return `Compatibility check failed: ${manifestCompatError}`;
+    if (!manifestCompat) return 'Compatibility not checked yet.';
+    if (compatTone === 'fail') {
+      const errors = Array.isArray(manifestCompat.compatibility?.errors)
+        ? manifestCompat.compatibility.errors
+        : [];
+      if (errors.length === 0) return 'Compatibility gate failed.';
+      return summarizeCompatErrorCode(
+        String(errors[0]),
+        { errors: manifestCompat.manifest_validation?.errors },
+      );
+    }
+    if (compatTone === 'warn') {
+      const warnings = Array.isArray(manifestCompat.compatibility?.warnings)
+        ? manifestCompat.compatibility.warnings
+        : [];
+      if (warnings.length === 0) return 'Compatibility warning.';
+      return summarizeCompatWarningCode(String(warnings[0]));
+    }
+    return '';
+  }, [compatTone, manifestCompat, manifestCompatError]);
 
   const setFlowStep = useCallback((id: FirmwareFlowStepId, state: FirmwareFlowStepState, detail: string): void => {
     setFlow((prev) => ({ ...prev, [id]: { state, detail } }));
@@ -399,6 +577,75 @@ export function CleanIdeFirmwarePanel(
     setOpsLog((prev) => [{ ts: Date.now(), text }, ...prev].slice(0, 12));
   }, []);
 
+  const refreshSketchFolders = useCallback(async (): Promise<void> => {
+    setSketchFoldersBusy(true);
+    try {
+      const out = await cleanFirmwareSketchFolders();
+      const folders = Array.isArray(out.folders)
+        ? Array.from(new Set(out.folders.map((f) => normalizeSketchFolderPath(String(f || ''))).filter(Boolean)))
+        : [];
+      setSketchFolders(folders);
+      const defaultFolder = normalizeSketchFolderPath(
+        selectedSketchFolder
+        || String(out.default_folder || ''),
+      );
+      const fallback = folders[0] ? normalizeSketchFolderPath(folders[0]) : '';
+      const next = folders.includes(defaultFolder) ? defaultFolder : (defaultFolder || fallback);
+      if (next) setSelectedSketchFolder(next);
+      pushOpLog('sketch folders refreshed');
+    } catch (err) {
+      const em = String(err);
+      setSketchFileStatus(`Sketch folder load failed: ${em}`);
+      pushOpLog(`sketch folder load failed: ${em.slice(0, 120)}`);
+    } finally {
+      setSketchFoldersBusy(false);
+    }
+  }, [pushOpLog, selectedSketchFolder]);
+
+  const loadSketchFile = useCallback(async (folder: string, fileName: string): Promise<void> => {
+    const cleanFolder = normalizeSketchFolderPath(folder);
+    if (!cleanFolder) return;
+    const fullPath = joinSketchPath(cleanFolder, fileName);
+    setSketchFileBusy(true);
+    try {
+      const sketch = await cleanFirmwareReadSketch(fullPath);
+      setSelectedSketchFolder(cleanFolder);
+      setSelectedSketchFile(fileName);
+      setSketchFileContent(sketch.content);
+      setSketchFileBaseline(sketch.content);
+      setSketchFileStatus(`Loaded ${fileName}`);
+      pushOpLog(`loaded ${fileName}`);
+    } catch (err) {
+      const em = String(err);
+      setSelectedSketchFolder(cleanFolder);
+      setSelectedSketchFile(fileName);
+      setSketchFileContent('');
+      setSketchFileBaseline('');
+      setSketchFileStatus(`Load failed: ${em}`);
+      pushOpLog(`load failed (${fileName}): ${em.slice(0, 120)}`);
+    } finally {
+      setSketchFileBusy(false);
+    }
+  }, [pushOpLog]);
+
+  const saveSketchFile = useCallback(async (): Promise<void> => {
+    if (!selectedSketchFolder || !selectedSketchFile) return;
+    const targetPath = joinSketchPath(selectedSketchFolder, selectedSketchFile);
+    setSketchFileBusy(true);
+    try {
+      const out = await cleanFirmwareWriteSketch(sketchFileContent, targetPath);
+      setSketchFileBaseline(sketchFileContent);
+      setSketchFileStatus(`Saved ${selectedSketchFile} (${out.bytes} bytes)`);
+      pushOpLog(`saved ${selectedSketchFile}`);
+    } catch (err) {
+      const em = String(err);
+      setSketchFileStatus(`Save failed: ${em}`);
+      pushOpLog(`save failed (${selectedSketchFile}): ${em.slice(0, 120)}`);
+    } finally {
+      setSketchFileBusy(false);
+    }
+  }, [pushOpLog, selectedSketchFile, selectedSketchFolder, sketchFileContent]);
+
   const persistOverrides = useCallback((): void => {
     try {
       window.localStorage.setItem('clean.firmware.fqbn', effectiveFqbn);
@@ -409,10 +656,21 @@ export function CleanIdeFirmwarePanel(
       window.localStorage.removeItem('clean.firmware.board_target');
       window.localStorage.setItem('clean.firmware.board_profile', (selectedBoard?.id ?? boardId) === 'uno' ? 'uno' : 'nano');
       window.localStorage.setItem('clean.firmware.nano_bootloader', selectedBootloaderId === 'old' ? 'old' : 'new');
+      window.localStorage.setItem('clean.firmware.sketch_folder', selectedSketchFolder.trim());
+      window.localStorage.setItem('clean.firmware.sketch_file', selectedSketchFile.trim());
     } catch {
       // ignore storage failures
     }
-  }, [boardFamilyId, boardId, effectiveFqbn, selectedBoard?.id, selectedBootloaderId, selectedPort]);
+  }, [
+    boardFamilyId,
+    boardId,
+    effectiveFqbn,
+    selectedBoard?.id,
+    selectedBootloaderId,
+    selectedPort,
+    selectedSketchFolder,
+    selectedSketchFile,
+  ]);
 
   const refreshBoardHints = useCallback(async (markFlow = false): Promise<void> => {
     setDetectingBoards(true);
@@ -533,16 +791,36 @@ export function CleanIdeFirmwarePanel(
   const refreshStatus = useCallback(async () => {
     persistOverrides();
     try {
-      const [st, api] = await Promise.all([cleanFirmwareStatus(), cleanStatus(mode)]);
+      const [st, api, compatOut] = await Promise.all([
+        cleanFirmwareStatus(),
+        cleanStatus(mode),
+        cleanRuntimeManifestCompatibility(selectedSketchFolder || undefined).then(
+          (out) => ({ ok: true as const, out }),
+          (err) => ({ ok: false as const, error: String(err) }),
+        ),
+      ]);
       const version = Number(api.clean_api?.version ?? 0);
       const caps = api.clean_api?.capabilities ?? [];
       const hasPrecheck = caps.includes('firmware_upload_precheck');
       const contractOk = version >= 2 && hasPrecheck;
+      if (compatOut.ok) {
+        setManifestCompat(compatOut.out);
+        setManifestCompatError('');
+      } else {
+        setManifestCompat(null);
+        setManifestCompatError(compatOut.error);
+      }
       setApiContractOk(contractOk);
       setApiContractDetail(
         contractOk ? '' : `Bridge API outdated (version=${version || 0}). Restart bridge to load latest clean runtime.`,
       );
       setFirmwareState(st);
+      setRuntimeIdentity({
+        mode: String(api.status?.mode ?? '').trim(),
+        runtimeVersion: String(api.status?.runtime ?? api.status?.runtime_version ?? '').trim(),
+        tuneVersion: String(api.status?.tune ?? api.status?.tune_version ?? '').trim(),
+        ident: String(api.status?.ident ?? '').trim(),
+      });
       const activeOp = st.operation?.active;
       const opSuffix = activeOp
         ? ` lock=${String(activeOp.phase || '')}:${String(activeOp.op_id || '').slice(0, 8)}`
@@ -560,11 +838,22 @@ export function CleanIdeFirmwarePanel(
       setApiContractOk(false);
       setApiContractDetail('Bridge status unavailable. Restart bridge.');
       setStatusLine(`status error: ${em}`);
+      setManifestCompat(null);
+      setManifestCompatError(em);
       setFailureBanner(classifyFailure(em));
       pushOpLog(`firmware status error: ${em.slice(0, 120)}`);
       publishGlobalStatus('fail', 'Firmware status failed', 'ide');
     }
-  }, [classifyFailure, flow.upload.state, mode, persistOverrides, publishGlobalStatus, pushOpLog, setFlowStep]);
+  }, [
+    classifyFailure,
+    flow.upload.state,
+    mode,
+    persistOverrides,
+    publishGlobalStatus,
+    pushOpLog,
+    selectedSketchFolder,
+    setFlowStep,
+  ]);
 
   const verifyReconnectAfterUpload = useCallback(async (): Promise<boolean> => {
     setFlowStep('reconnect', 'running', 'waiting for bridge status...');
@@ -597,14 +886,86 @@ export function CleanIdeFirmwarePanel(
     void refreshBoardHints();
   }, [refreshBoardHints]);
   useEffect(() => {
+    void refreshSketchFolders();
+  }, [refreshSketchFolders]);
+  useEffect(() => {
     if (didInitialStatusRefreshRef.current) return;
     didInitialStatusRefreshRef.current = true;
     void refreshStatus();
   }, [refreshStatus]);
+  useEffect(() => {
+    const folder = normalizeSketchFolderPath(selectedSketchFolder);
+    if (!folder) return;
+    const file = selectedSketchFile || sketchMainFileName(folder);
+    const key = `${folder}|${file}`;
+    if (loadedSketchKeyRef.current === key) return;
+    loadedSketchKeyRef.current = key;
+    void loadSketchFile(folder, file);
+  }, [loadSketchFile, selectedSketchFile, selectedSketchFolder]);
+
+  useEffect(() => {
+    if (busyAction !== 'compile' && busyAction !== 'upload') {
+      setFirmwareProgress(null);
+      return;
+    }
+    const action = busyAction;
+    const startedAt = firmwareOpStartedAtRef.current ?? Date.now();
+    let cancelled = false;
+
+    const poll = async (): Promise<void> => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      try {
+        const st = await cleanFirmwareStatus();
+        if (cancelled) return;
+        setFirmwareState(st);
+        const latest = String((st.log_tail ?? []).slice(-1)[0] ?? '').trim();
+        const phase = String(st.operation?.active?.phase || st.phase || (st.running ? 'running' : 'idle')).trim();
+        setFirmwareProgress({
+          action,
+          phase: phase || 'running',
+          elapsed_s: elapsed,
+          latest_line: latest || `${action} in progress...`,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setFirmwareProgress({
+          action,
+          phase: 'waiting',
+          elapsed_s: elapsed,
+          latest_line: cleanFailureDetailFromError(action === 'compile' ? 'compile' : 'upload', String(err)),
+        });
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [busyAction]);
 
   const runCompile = useCallback(async () => {
     if (busyAction !== 'none') return;
+    if (sketchDirty) {
+      const em = 'Unsaved sketch changes. Save before compile.';
+      setStatusLine(em);
+      pushOpLog(em);
+      setFailureBanner({ kind: 'tool_failed', detail: em });
+      publishGlobalStatus('warn', 'Compile blocked (unsaved sketch)', 'firmware');
+      return;
+    }
     persistOverrides();
+    const startedAt = Date.now();
+    firmwareOpStartedAtRef.current = startedAt;
+    setFirmwareProgress({
+      action: 'compile',
+      phase: 'queued',
+      elapsed_s: 0,
+      latest_line: 'Compile requested',
+    });
     setBusyAction('compile');
     setFlowStep('compile', 'running', 'compiling...');
     resetFlowFrom('compile');
@@ -612,7 +973,7 @@ export function CleanIdeFirmwarePanel(
     pushOpLog('compile started');
     publishGlobalStatus('warn', 'Compile running', 'firmware');
     try {
-      const out = await cleanFirmwareCompile(undefined, effectiveFqbn || undefined);
+      const out = await cleanFirmwareCompile(selectedSketchFolder || undefined, effectiveFqbn || undefined);
       if (!out.ok) {
         const em = out.error ?? 'unknown';
         setStatusLine(`compile failed: ${em}`);
@@ -649,13 +1010,44 @@ export function CleanIdeFirmwarePanel(
       setFlowStep('compile', 'fail', plainFlowDetail('compile', em));
       publishGlobalStatus('fail', 'Compile error', 'firmware');
     } finally {
+      firmwareOpStartedAtRef.current = null;
       setBusyAction('none');
+      void refreshStatus();
     }
-  }, [busyAction, classifyFailure, effectiveFqbn, persistOverrides, publishGlobalStatus, pushOpLog, resetFlowFrom, setFlowStep, waitForFirmwareDone]);
+  }, [
+    busyAction,
+    classifyFailure,
+    effectiveFqbn,
+    persistOverrides,
+    publishGlobalStatus,
+    pushOpLog,
+    refreshStatus,
+    resetFlowFrom,
+    selectedSketchFolder,
+    sketchDirty,
+    setFlowStep,
+    waitForFirmwareDone,
+  ]);
 
   const runUpload = useCallback(async () => {
     if (busyAction !== 'none') return;
+    if (sketchDirty) {
+      const em = 'Unsaved sketch changes. Save before upload.';
+      setStatusLine(em);
+      pushOpLog(em);
+      setFailureBanner({ kind: 'tool_failed', detail: em });
+      publishGlobalStatus('warn', 'Upload blocked (unsaved sketch)', 'firmware');
+      return;
+    }
     persistOverrides();
+    const startedAt = Date.now();
+    firmwareOpStartedAtRef.current = startedAt;
+    setFirmwareProgress({
+      action: 'upload',
+      phase: 'queued',
+      elapsed_s: 0,
+      latest_line: 'Upload requested',
+    });
     setBusyAction('upload');
     setFlowStep('upload', 'running', 'upload precheck...');
     resetFlowFrom('upload');
@@ -667,6 +1059,7 @@ export function CleanIdeFirmwarePanel(
         const pre = await cleanFirmwareUploadPrecheck(
           selectedPort.trim() || undefined,
           effectiveFqbn || undefined,
+          selectedSketchFolder || undefined,
         );
         setTargetRunbook((pre.target_runbook as TargetRunbook | undefined) ?? null);
         if (!pre.ready) {
@@ -691,7 +1084,11 @@ export function CleanIdeFirmwarePanel(
       setStatusLine('upload started...');
       pushOpLog('upload started');
       publishGlobalStatus('warn', 'Upload running', 'firmware');
-      const out = await cleanFirmwareUpload(undefined, effectiveFqbn || undefined, selectedPort.trim() || undefined);
+      const out = await cleanFirmwareUpload(
+        selectedSketchFolder || undefined,
+        effectiveFqbn || undefined,
+        selectedPort.trim() || undefined,
+      );
       if (!out.ok) {
         const em = out.error ?? 'unknown';
         setStatusLine(`upload failed: ${em}`);
@@ -735,9 +1132,26 @@ export function CleanIdeFirmwarePanel(
       setFlowStep('upload', 'fail', plainFlowDetail('upload', em));
       publishGlobalStatus('fail', 'Upload error', 'firmware');
     } finally {
+      firmwareOpStartedAtRef.current = null;
       setBusyAction('none');
+      void refreshStatus();
     }
-  }, [busyAction, classifyFailure, effectiveFqbn, persistOverrides, publishGlobalStatus, pushOpLog, resetFlowFrom, selectedPort, setFlowStep, verifyReconnectAfterUpload, waitForFirmwareDone]);
+  }, [
+    busyAction,
+    classifyFailure,
+    effectiveFqbn,
+    persistOverrides,
+    publishGlobalStatus,
+    pushOpLog,
+    refreshStatus,
+    resetFlowFrom,
+    selectedPort,
+    selectedSketchFolder,
+    sketchDirty,
+    setFlowStep,
+    verifyReconnectAfterUpload,
+    waitForFirmwareDone,
+  ]);
 
   const runPreflight = useCallback(async () => {
     if (busyAction !== 'none') return;
@@ -745,6 +1159,16 @@ export function CleanIdeFirmwarePanel(
     const startedAt = Date.now();
     let doneChecks = 0;
     let totalChecks = 0;
+    let activeCheck: { id: string; index: number; total: number; startedAt: number } | null = null;
+    let tickHandle: number | null = null;
+    const renderActiveCheck = (): void => {
+      if (!activeCheck) return;
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      const checkElapsed = Math.max(0, Math.floor((Date.now() - activeCheck.startedAt) / 1000));
+      const detail = `running ${activeCheck.id} (${activeCheck.index}/${activeCheck.total}) · ${elapsed}s · check ${checkElapsed}s`;
+      setFlowStep('verify', 'running', detail);
+      setStatusLine(`preflight: ${detail}`);
+    };
     setFlowStep('verify', 'running', 'starting preflight...');
     setStatusLine('preflight started...');
     pushOpLog('preflight started');
@@ -756,15 +1180,17 @@ export function CleanIdeFirmwarePanel(
         },
         onCheckStart: ({ index, total, id }) => {
           totalChecks = Math.max(totalChecks, total);
-          const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-          const detail = `running ${id} (${index}/${total}) · ${elapsed}s`;
-          setFlowStep('verify', 'running', detail);
-          setStatusLine(`preflight: ${detail}`);
+          activeCheck = { id, index, total, startedAt: Date.now() };
+          renderActiveCheck();
+          if (tickHandle == null) {
+            tickHandle = window.setInterval(renderActiveCheck, 1000);
+          }
           pushOpLog(`preflight start ${id} (${index}/${total})`);
         },
         onCheckDone: ({ index, total, result }) => {
           doneChecks = Math.max(doneChecks, index);
           totalChecks = Math.max(totalChecks, total);
+          activeCheck = null;
           const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
           const mark = result.ok ? 'PASS' : 'FAIL';
           const detail = `completed ${result.id} ${mark} (${doneChecks}/${totalChecks}) · ${elapsed}s`;
@@ -798,6 +1224,9 @@ export function CleanIdeFirmwarePanel(
       setFlowStep('verify', 'fail', plainFlowDetail('verify', em));
       publishGlobalStatus('fail', 'Preflight error', 'preflight');
     } finally {
+      if (tickHandle != null) {
+        window.clearInterval(tickHandle);
+      }
       setBusyAction('none');
     }
   }, [busyAction, classifyFailure, mode, publishGlobalStatus, pushOpLog, setFlowStep]);
@@ -839,6 +1268,7 @@ export function CleanIdeFirmwarePanel(
         const pre = await cleanFirmwareUploadPrecheck(
           selectedPort.trim() || undefined,
           effectiveFqbn || undefined,
+          selectedSketchFolder || undefined,
         );
         setTargetRunbook((pre.target_runbook as TargetRunbook | undefined) ?? null);
         preReady = pre.ready;
@@ -874,7 +1304,7 @@ export function CleanIdeFirmwarePanel(
       setFlowStep('reconnect', 'fail', plainFlowDetail('reconnect', em));
       publishGlobalStatus('fail', 'Recovery check failed', 'runbook');
     }
-  }, [busyAction, effectiveFqbn, mode, publishGlobalStatus, pushOpLog, selectedPort, setFlowStep]);
+  }, [busyAction, effectiveFqbn, mode, publishGlobalStatus, pushOpLog, selectedPort, selectedSketchFolder, setFlowStep]);
 
   const runPortRedetect = useCallback(async (): Promise<void> => {
     if (busyAction !== 'none') return;
@@ -890,6 +1320,38 @@ export function CleanIdeFirmwarePanel(
     await runUpload();
   }, [busyAction, runUpload]);
 
+  const runReleaseSerialForIde = useCallback(async (): Promise<void> => {
+    if (busyAction !== 'none') return;
+    const confirmed = window.confirm(
+      'Release Serial will stop the bridge so Arduino IDE can own the port. Continue?',
+    );
+    if (!confirmed) {
+      setRunbookStatus('release serial canceled');
+      pushOpLog('release-serial canceled');
+      return;
+    }
+    setRunbookStatus('releasing serial for IDE upload...');
+    pushOpLog('release-serial requested');
+    try {
+      const out = await cleanFirmwareReleaseSerial();
+      if (!out.ok) {
+        const msg = out.error || 'release_serial_failed';
+        setRunbookStatus(`release serial failed: ${msg}`);
+        pushOpLog(`release serial failed: ${msg}`);
+        publishGlobalStatus('fail', 'Release serial failed', 'runbook');
+        return;
+      }
+      setRunbookStatus('serial released for IDE upload; bridge is stopping now');
+      pushOpLog('serial released for IDE upload');
+      publishGlobalStatus('ok', 'Serial released for IDE upload', 'runbook');
+    } catch (err) {
+      const em = String(err);
+      setRunbookStatus(`release serial error: ${em}`);
+      pushOpLog(`release serial error: ${em.slice(0, 120)}`);
+      publishGlobalStatus('fail', 'Release serial error', 'runbook');
+    }
+  }, [busyAction, publishGlobalStatus, pushOpLog]);
+
   const runKnownGoodRecovery = useCallback(async (): Promise<void> => {
     if (busyAction !== 'none') return;
     setFlowStep('reconnect', 'running', 'known-good running...');
@@ -899,6 +1361,7 @@ export function CleanIdeFirmwarePanel(
       const out = await cleanKnownGoodRecovery(
         selectedPort.trim() || undefined,
         effectiveFqbn || undefined,
+        selectedSketchFolder || undefined,
       );
       const rec = out.recovery;
       if (rec?.selected_port && rec.selected_port !== selectedPort) {
@@ -929,7 +1392,16 @@ export function CleanIdeFirmwarePanel(
       setFlowStep('reconnect', 'fail', plainFlowDetail('reconnect', em));
       publishGlobalStatus('fail', 'Known-good recovery error', 'runbook');
     }
-  }, [busyAction, effectiveFqbn, publishGlobalStatus, pushOpLog, refreshStatus, selectedPort, setFlowStep]);
+  }, [
+    busyAction,
+    effectiveFqbn,
+    publishGlobalStatus,
+    pushOpLog,
+    refreshStatus,
+    selectedPort,
+    selectedSketchFolder,
+    setFlowStep,
+  ]);
 
   const disableActions = busyAction !== 'none';
   const disableToolActions = disableActions || !apiContractOk;
@@ -937,8 +1409,8 @@ export function CleanIdeFirmwarePanel(
   const compileDone = flow.compile.state === 'pass';
   const uploadDone = flow.upload.state === 'pass';
   const reconnectDone = flow.reconnect.state === 'pass';
-  const compileLocked = disableToolActions || !detectDone;
-  const uploadLocked = disableToolActions || !compileDone || !selectedPort;
+  const compileLocked = disableToolActions || !detectDone || !selectedSketchFolder || sketchDirty;
+  const uploadLocked = disableToolActions || !compileDone || !selectedPort || !selectedSketchFolder || sketchDirty;
   const reconnectLocked = disableToolActions || !uploadDone;
   const verifyLocked = disableToolActions || !reconnectDone;
   const runningLabel = useMemo(() => (firmwareState?.running ? 'running' : 'idle'), [firmwareState?.running]);
@@ -957,9 +1429,11 @@ export function CleanIdeFirmwarePanel(
     return Array.from(merged);
   }, [detectedPortOptions, recommendedPort]);
   const activeSketchPath = useMemo(() => {
+    const selected = normalizeSketchFolderPath(selectedSketchFolder);
+    if (selected) return selected;
     const raw = String(firmwareState?.defaults?.sketch ?? '').trim();
     return raw || '(unknown)';
-  }, [firmwareState?.defaults?.sketch]);
+  }, [firmwareState?.defaults?.sketch, selectedSketchFolder]);
   return (
     <section className="clean-card clean-gradient clean-ide-card">
       <div className="clean-card-head">
@@ -996,8 +1470,149 @@ export function CleanIdeFirmwarePanel(
         </div>
       </div>
       <div className="clean-codex-meta">{statusLine}</div>
+      {firmwareProgress && (
+        <div className="clean-fw-progress" role="status" aria-live="polite">
+          <div className="clean-fw-progress-head">
+            <span className="clean-fw-progress-chip">{firmwareProgress.action.toUpperCase()}</span>
+            <span className="clean-fw-progress-phase">phase: {firmwareProgress.phase}</span>
+            <span className="clean-fw-progress-elapsed">{firmwareProgress.elapsed_s}s</span>
+          </div>
+          <div className="clean-fw-progress-bar" aria-hidden="true">
+            <span />
+          </div>
+          <div className="clean-fw-progress-line">{firmwareProgress.latest_line}</div>
+        </div>
+      )}
       <div className="clean-codex-meta">active sketch: {activeSketchPath}</div>
+      <div className="clean-codex-meta">
+        active file: {selectedSketchFile || sketchMainFileName(activeSketchPath === '(unknown)' ? '' : activeSketchPath)}
+      </div>
       <div className="clean-codex-meta">effective FQBN: {effectiveFqbn || '(none)'}</div>
+      <div className="clean-exec-context" aria-label="Active execution context">
+        <div className="clean-exec-context-head">Active Execution Context</div>
+        <div className="clean-exec-context-grid">
+          <span>sketch</span><span>{activeSketchPath}</span>
+          <span>board</span><span>{selectedBoard?.label ?? selectedBoard?.id ?? boardId}</span>
+          <span>bootloader</span><span>{bootloaderOptions.find((b) => b.id === selectedBootloaderId)?.label ?? selectedBootloaderId}</span>
+          <span>port</span><span>{selectedPort || '(none)'}</span>
+          <span>profile</span><span>{manifestCompat?.active_profile_id || '(none)'}</span>
+          <span>mode</span><span>{runtimeIdentity.mode || '(n/a)'}</span>
+          <span>runtime</span><span>{runtimeIdentity.runtimeVersion || '(n/a)'}</span>
+          <span>tune</span><span>{runtimeIdentity.tuneVersion || '(n/a)'}</span>
+          <span>ident</span><span>{runtimeIdentity.ident || '(n/a)'}</span>
+        </div>
+      </div>
+      <div className="clean-sketch-workspace" aria-label="Sketch tree and editor">
+        <div className="clean-sketch-tree">
+          <div className="clean-sketch-tree-head">
+            <span>Sketch Tree</span>
+            <button
+              className="clean-btn clean-btn-alt"
+              onClick={() => void refreshSketchFolders()}
+              disabled={disableToolActions || sketchFoldersBusy}
+            >
+              {sketchFoldersBusy ? 'Refreshing...' : 'Refresh Tree'}
+            </button>
+          </div>
+          <div className="clean-codex-meta">Select sketch target, then edit file content below.</div>
+          <div className="clean-sketch-folder-list">
+            {sketchFolders.length === 0 && <div className="clean-codex-meta">No sketch folders found.</div>}
+            {sketchFolders.map((folder) => {
+              const active = normalizeSketchFolderPath(folder) === normalizeSketchFolderPath(selectedSketchFolder);
+              return (
+                <button
+                  key={folder}
+                  className={`clean-sketch-folder ${active ? 'active' : ''}`}
+                  onClick={() => {
+                    loadedSketchKeyRef.current = '';
+                    setSelectedSketchFolder(normalizeSketchFolderPath(folder));
+                    setSelectedSketchFile(sketchMainFileName(folder));
+                    setSketchDiffOpen(false);
+                  }}
+                  disabled={disableToolActions}
+                  title={folder}
+                >
+                  {folder}
+                </button>
+              );
+            })}
+          </div>
+          {selectedSketchFolder && (
+            <div className="clean-sketch-file-list">
+              {sketchFileOptions.map((fileName) => {
+                const active = selectedSketchFile === fileName;
+                return (
+                  <button
+                    key={`${selectedSketchFolder}:${fileName}`}
+                    className={`clean-sketch-file ${active ? 'active' : ''}`}
+                    onClick={() => {
+                      loadedSketchKeyRef.current = '';
+                      setSelectedSketchFile(fileName);
+                      setSketchDiffOpen(false);
+                    }}
+                    disabled={disableToolActions}
+                  >
+                    {fileName}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="clean-sketch-editor">
+          <div className="clean-sketch-editor-head">
+            <span>{selectedSketchFile || '(select a sketch file)'}</span>
+            <span className={`clean-sketch-dirty ${sketchDirty ? 'dirty' : 'clean'}`}>
+              {sketchDirty ? 'Unsaved changes' : 'Saved'}
+            </span>
+          </div>
+          <div className="clean-codex-row">
+            <button
+              className="clean-btn clean-btn-alt"
+              onClick={() => {
+                loadedSketchKeyRef.current = '';
+                void loadSketchFile(selectedSketchFolder, selectedSketchFile || sketchMainFileName(selectedSketchFolder));
+              }}
+              disabled={disableToolActions || !selectedSketchFolder || sketchFileBusy}
+            >
+              Reload
+            </button>
+            <button
+              className="clean-btn clean-btn-alt"
+              onClick={() => void saveSketchFile()}
+              disabled={disableToolActions || !selectedSketchFolder || !selectedSketchFile || sketchFileBusy || !sketchDirty}
+            >
+              Save
+            </button>
+            <button
+              className="clean-btn clean-btn-alt"
+              onClick={() => setSketchDiffOpen((prev) => !prev)}
+              disabled={!selectedSketchFile}
+            >
+              {sketchDiffOpen ? 'Hide Diff' : 'Show Diff'}
+            </button>
+          </div>
+          <textarea
+            className="clean-sketch-editor-area"
+            value={sketchFileContent}
+            onChange={(e) => setSketchFileContent(e.target.value)}
+            disabled={!selectedSketchFile || sketchFileBusy}
+            placeholder="Select a sketch file to edit..."
+            spellCheck={false}
+          />
+          {sketchDiffOpen && (
+            <pre className="clean-sketch-diff-view">{buildSketchDiff(sketchFileBaseline, sketchFileContent)}</pre>
+          )}
+          <div className="clean-codex-meta">{sketchFileStatus}</div>
+        </div>
+      </div>
+      <div className="clean-compat-status" role="status" aria-live="polite">
+        <span className="label">profile/runtime compatibility</span>
+        <span className={`clean-compat-badge ${compatTone}`}>{compatTone.toUpperCase()}</span>
+      </div>
+      {compatTone !== 'pass' && (
+        <div className={`clean-compat-detail ${compatTone}`}>{compatPrimaryReason}</div>
+      )}
       {!apiContractOk && <div className="clean-codex-meta">bridge contract: {apiContractDetail}</div>}
       {failureBanner && (
         <div className="clean-failure-banner" role="status" aria-live="polite">
@@ -1090,16 +1705,21 @@ export function CleanIdeFirmwarePanel(
         >
           Refresh
         </button>
-        <button className="clean-btn clean-btn-alt" onClick={() => void runCompile()} disabled={compileLocked} title={!detectDone ? 'Run Detect first.' : undefined}>
+        <button
+          className="clean-btn clean-btn-alt"
+          onClick={() => void runCompile()}
+          disabled={compileLocked}
+          title={!detectDone ? 'Run Detect first.' : (!selectedSketchFolder ? 'Select a sketch folder.' : (sketchDirty ? 'Save sketch changes before compile.' : undefined))}
+        >
           {busyAction === 'compile' ? 'Compiling...' : 'Compile'}
         </button>
         <button
           className="clean-btn clean-btn-alt"
           onClick={() => void runUpload()}
           disabled={uploadLocked}
-          title={!compileDone ? 'Compile must pass before upload.' : (!selectedPort ? 'Select a serial port.' : undefined)}
+          title={!compileDone ? 'Compile must pass before upload.' : (!selectedPort ? 'Select a serial port.' : (!selectedSketchFolder ? 'Select a sketch folder.' : (sketchDirty ? 'Save sketch changes before upload.' : undefined)))}
         >
-          {busyAction === 'upload' ? 'Uploading...' : 'Upload'}
+          {busyAction === 'upload' ? 'Flashing...' : 'Guarded Flash'}
         </button>
         <button className="clean-btn" onClick={() => void runPreflight()} disabled={verifyLocked} title={!reconnectDone ? 'Reconnect/validate before verify.' : undefined}>
           {busyAction === 'preflight' ? 'Preflight...' : 'Preflight'}
@@ -1121,13 +1741,28 @@ export function CleanIdeFirmwarePanel(
           <button className="clean-btn clean-btn-alt" onClick={() => void runKnownGoodRecovery()} disabled={reconnectLocked} title={!uploadDone ? 'Upload must pass before reconnect checks.' : undefined}>Known-Good</button>
           <button className="clean-btn clean-btn-alt" onClick={() => void runRecoveryCheck()} disabled={reconnectLocked} title={!uploadDone ? 'Upload must pass before reconnect checks.' : undefined}>Check</button>
           <button className="clean-btn clean-btn-alt" onClick={() => void runPortRedetect()} disabled={disableToolActions}>Re-Detect Port</button>
-          <button className="clean-btn clean-btn-alt" onClick={() => void runUploadRetry()} disabled={uploadLocked} title={!compileDone ? 'Compile must pass before upload.' : (!selectedPort ? 'Select a serial port.' : undefined)}>Retry Upload</button>
+          <button
+            className="clean-btn clean-btn-alt"
+            onClick={() => void runUploadRetry()}
+            disabled={uploadLocked}
+            title={!compileDone ? 'Compile must pass before upload.' : (!selectedPort ? 'Select a serial port.' : (!selectedSketchFolder ? 'Select a sketch folder.' : (sketchDirty ? 'Save sketch changes before upload.' : undefined)))}
+          >
+            Retry Upload
+          </button>
           <button
             className="clean-btn clean-btn-alt"
             onClick={() => void copyText('./tools/restart_bridge.sh', 'Restart command')}
             disabled={disableToolActions}
           >
             Copy Restart Cmd
+          </button>
+          <button
+            className="clean-btn clean-btn-alt"
+            onClick={() => void runReleaseSerialForIde()}
+            disabled={disableToolActions}
+            title="Stops bridge so Arduino IDE can own the serial port for manual upload."
+          >
+            Release Serial (IDE)
           </button>
         </div>
         {runbookStatus && <div className="clean-runbook-status">{runbookStatus}</div>}

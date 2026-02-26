@@ -354,6 +354,30 @@ export type AgentStatus = {
   };
 };
 
+const CLEAN_AGENT_ALLOWED_MODES: AgentMode[] = ['app_dev', 'robot_dev', 'ops_debug'];
+
+function resolveAgentMode(mode?: AgentMode): AgentMode {
+  const raw = String(mode ?? '').trim() as AgentMode;
+  return CLEAN_AGENT_ALLOWED_MODES.includes(raw) ? raw : 'app_dev';
+}
+
+function buildCleanAgentStatus(
+  mode: AgentMode,
+  provider = 'codex_cli',
+  model = 'gpt-5-codex',
+  canChat = true,
+): AgentStatus {
+  return {
+    mode,
+    allowed_modes: CLEAN_AGENT_ALLOWED_MODES,
+    openai_configured: canChat,
+    openai_model: model,
+    openai_model_allowed: canChat,
+    provider,
+    codex_login: { logged_in: canChat, available: true, detail: canChat ? 'Logged in' : 'Not logged in' },
+  };
+}
+
 export type AgentAttachment = {
   id?: string;
   name: string;
@@ -461,6 +485,8 @@ export type V2Readiness = {
   v2_factory_missing_fields?: string[];
   v2_present_fields: string[];
   readiness_checks: ReadinessCheck[];
+  phase2_recommended_action?: string | null;
+  // Deprecated alias retained while migration is active.
   v2_recommended_action?: string | null;
 };
 
@@ -541,6 +567,8 @@ export type ConnectProbeReport = {
   v2_factory_missing_fields?: string[];
   v2_present_fields?: string[];
   readiness_checks?: ReadinessCheck[];
+  phase2_recommended_action?: string | null;
+  // Deprecated alias retained while migration is active.
   v2_recommended_action?: string | null;
 };
 
@@ -1127,21 +1155,28 @@ export async function agentChat(
   tool_calls?: ToolCallResult[];
   iterations?: number;
 }> {
+  const resolvedMode = resolveAgentMode(mode);
   const d = await req<{
     ok: true;
-    agent: AgentStatus;
     reply: string;
     thread_id?: string;
     history: AiHistoryItem[];
     threads?: AiThreadSummary[];
+    provider?: string;
+    executor?: string;
     tool_calls?: ToolCallResult[];
     iterations?: number;
-  }>('/agent/chat', {
+  }>('/agent/clean/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, mode, thread_id: threadId, enable_tools: true, attachments: attachments ?? [] }),
-  }, 45000);
+    body: JSON.stringify({ message, mode: resolvedMode, thread_id: threadId, attachments: attachments ?? [], auto_tools: false }),
+  }, 120000);
   return {
-    agent: d.agent,
+    agent: buildCleanAgentStatus(
+      resolvedMode,
+      String(d.provider ?? 'codex_cli'),
+      'gpt-5-codex',
+      String(d.executor ?? 'blocked') !== 'blocked',
+    ),
     reply: d.reply,
     thread_id: d.thread_id,
     history: d.history,
@@ -1181,29 +1216,20 @@ export async function agentChatStream(
   iterations?: number;
   provider?: string;
 }> {
-  const res = await fetch(`${BASE}/agent/chat/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
-    },
-    body: JSON.stringify({ message, mode, thread_id: threadId, enable_tools: true, attachments: attachments ?? [] }),
-    signal,
-  });
-
-  if (!res.ok || !res.body) {
-    let body = '';
-    try {
-      body = await res.text();
-    } catch {
-      body = '';
-    }
-    throw new Error(body || `${res.status}`);
+  const resolvedMode = resolveAgentMode(mode);
+  const streamController = new AbortController();
+  let timedOut = false;
+  const timeoutMs = 90000;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    streamController.abort();
+  }, timeoutMs);
+  const forwardAbort = () => streamController.abort();
+  if (signal) {
+    if (signal.aborted) forwardAbort();
+    else signal.addEventListener('abort', forwardAbort, { once: true });
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
   let donePayload: {
     agent: AgentStatus;
     reply: string;
@@ -1214,60 +1240,99 @@ export async function agentChatStream(
     iterations?: number;
     provider?: string;
   } | null = null;
+  try {
+    const res = await fetch(`${BASE}/agent/clean/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
+    },
+    body: JSON.stringify({ message, mode: resolvedMode, thread_id: threadId, attachments: attachments ?? [] }),
+    signal: streamController.signal,
+    });
 
-  const handleFrame = (frame: string): void => {
-    const lines = frame.split('\n');
-    let evt = 'message';
-    const dataLines: string[] = [];
-    for (const ln of lines) {
-      if (ln.startsWith('event:')) evt = ln.slice(6).trim();
-      else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim());
+    if (!res.ok || !res.body) {
+      let body = '';
+      try {
+        body = await res.text();
+      } catch {
+        body = '';
+      }
+      throw new Error(body || `${res.status}`);
     }
-    if (dataLines.length === 0) return;
-    const dataTxt = dataLines.join('\n');
-    const obj = JSON.parse(dataTxt) as Record<string, unknown>;
-    if (evt === 'start') {
-      handlers.onStart?.();
-      return;
-    }
-    if (evt === 'delta') {
-      handlers.onDelta?.(String(obj.text ?? ''));
-      return;
-    }
-    if (evt === 'done') {
-      donePayload = {
-        agent: obj.agent as AgentStatus,
-        reply: String(obj.reply ?? ''),
-        thread_id: obj.thread_id as string | undefined,
-        history: (obj.history as AiHistoryItem[]) ?? [],
-        threads: (obj.threads as AiThreadSummary[]) ?? [],
-        tool_calls: (obj.tool_calls as ToolCallResult[]) ?? [],
-        iterations: Number(obj.iterations ?? 1),
-        provider: String(obj.provider ?? ''),
-      };
-      handlers.onDone?.(donePayload);
-      return;
-    }
-    if (evt === 'error') {
-      throw new Error(String(obj.error ?? 'stream_error'));
-    }
-  };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    const handleFrame = (frame: string): void => {
+      const lines = frame.split('\n');
+      let evt = 'message';
+      const dataLines: string[] = [];
+      for (const ln of lines) {
+        if (ln.startsWith('event:')) evt = ln.slice(6).trim();
+        else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim());
+      }
+      if (dataLines.length === 0) return;
+      const dataTxt = dataLines.join('\n');
+      const obj = JSON.parse(dataTxt) as Record<string, unknown>;
+      if (evt === 'start') {
+        handlers.onStart?.();
+        return;
+      }
+      if (evt === 'delta') {
+        handlers.onDelta?.(String(obj.text ?? ''));
+        return;
+      }
+      if (evt === 'done') {
+        donePayload = {
+          agent: buildCleanAgentStatus(
+            resolvedMode,
+            String(obj.provider ?? 'codex_cli'),
+            'gpt-5-codex',
+            String(obj.executor ?? 'blocked') !== 'blocked',
+          ),
+          reply: String(obj.reply ?? ''),
+          thread_id: obj.thread_id as string | undefined,
+          history: (obj.history as AiHistoryItem[]) ?? [],
+          threads: (obj.threads as AiThreadSummary[]) ?? [],
+          tool_calls: (obj.tool_calls as ToolCallResult[]) ?? [],
+          iterations: Number(obj.iterations ?? 1),
+          provider: String(obj.provider ?? ''),
+        };
+        handlers.onDone?.(donePayload);
+        return;
+      }
+      if (evt === 'error') {
+        throw new Error(String(obj.error ?? 'stream_error'));
+      }
+    };
+
     while (true) {
-      const idx = buf.indexOf('\n\n');
-      if (idx < 0) break;
-      const frame = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      if (frame.trim()) handleFrame(frame);
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      while (true) {
+        const idx = buf.indexOf('\n\n');
+        if (idx < 0) break;
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (frame.trim()) handleFrame(frame);
+      }
     }
+    if (buf.trim()) handleFrame(buf);
+    if (!donePayload) throw new Error('stream_incomplete');
+    return donePayload;
+  } catch (err) {
+    const abortErr = (err as Error).name === 'AbortError';
+    if (abortErr && timedOut) {
+      throw new Error(`request_timeout_${timeoutMs}ms:/agent/clean/chat/stream`);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', forwardAbort);
   }
-  if (buf.trim()) handleFrame(buf);
-  if (!donePayload) throw new Error('stream_incomplete');
-  return donePayload;
 }
 
 export async function agentUploadFile(file: File): Promise<AgentAttachment> {
@@ -1276,7 +1341,7 @@ export async function agentUploadFile(file: File): Promise<AgentAttachment> {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
   const b64 = btoa(binary);
-  const d = await req<{ ok: true; attachment: AgentAttachment }>('/agent/file/upload', {
+  const d = await req<{ ok: true; attachment: AgentAttachment }>('/agent/clean/file/upload', {
     method: 'POST',
     body: JSON.stringify({
       name: file.name,
@@ -1288,9 +1353,14 @@ export async function agentUploadFile(file: File): Promise<AgentAttachment> {
 }
 
 export async function agentThreads(mode?: AgentMode): Promise<{ agent: AgentStatus; ai: AiStatus; threads: AiThreadSummary[] }> {
-  const qs = mode ? `?mode=${encodeURIComponent(mode)}` : '';
-  const d = await req<{ ok: true; agent: AgentStatus; ai: AiStatus; threads: AiThreadSummary[] }>(`/agent/threads${qs}`);
-  return { agent: d.agent, ai: d.ai, threads: d.threads ?? [] };
+  const resolvedMode = resolveAgentMode(mode);
+  const qs = `?mode=${encodeURIComponent(resolvedMode)}`;
+  const d = await req<{ ok: true; threads: AiThreadSummary[] }>(`/agent/clean/threads${qs}`);
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    ai: { configured: true, model: 'gpt-5-codex', history_len: 0 },
+    threads: d.threads ?? [],
+  };
 }
 
 export async function agentNewThread(mode?: AgentMode, title?: string): Promise<{
@@ -1299,17 +1369,22 @@ export async function agentNewThread(mode?: AgentMode, title?: string): Promise<
   threads: AiThreadSummary[];
   history: AiHistoryItem[];
 }> {
+  const resolvedMode = resolveAgentMode(mode);
   const d = await req<{
     ok: true;
-    agent: AgentStatus;
     thread: { id: string; title: string };
     threads: AiThreadSummary[];
     history: AiHistoryItem[];
-  }>('/agent/thread/new', {
+  }>('/agent/clean/thread/new', {
     method: 'POST',
-    body: JSON.stringify({ mode, title }),
+    body: JSON.stringify({ mode: resolvedMode, title }),
   });
-  return { agent: d.agent, thread: d.thread, threads: d.threads ?? [], history: d.history ?? [] };
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    thread: d.thread,
+    threads: d.threads ?? [],
+    history: d.history ?? [],
+  };
 }
 
 export async function agentSelectThread(mode: AgentMode | undefined, threadId: string): Promise<{
@@ -1318,17 +1393,22 @@ export async function agentSelectThread(mode: AgentMode | undefined, threadId: s
   threads: AiThreadSummary[];
   history: AiHistoryItem[];
 }> {
+  const resolvedMode = resolveAgentMode(mode);
   const d = await req<{
     ok: true;
-    agent: AgentStatus;
     thread: { id: string; title: string };
     threads: AiThreadSummary[];
     history: AiHistoryItem[];
-  }>('/agent/thread/select', {
+  }>('/agent/clean/thread/select', {
     method: 'POST',
-    body: JSON.stringify({ mode, thread_id: threadId }),
+    body: JSON.stringify({ mode: resolvedMode, thread_id: threadId }),
   });
-  return { agent: d.agent, thread: d.thread, threads: d.threads ?? [], history: d.history ?? [] };
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    thread: d.thread,
+    threads: d.threads ?? [],
+    history: d.history ?? [],
+  };
 }
 
 export async function aiChat(
@@ -1756,8 +1836,38 @@ export async function calZero(): Promise<{ status: Status; control?: ControlStat
   return { status: d.status, control: d.control };
 }
 
+export async function imuCalibrate(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/calibrate', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuLoad(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/load', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuSave(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/save', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuInfo(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/info', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
 export async function saveCfg(): Promise<void> {
   await req('/savecfg', { method: 'POST', body: '{}' });
+}
+
+export async function loadCfg(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/loadcfg', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function defaultCfg(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/defaultcfg', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
 }
 
 export type ConfigRevertResult = {

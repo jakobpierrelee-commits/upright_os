@@ -170,6 +170,17 @@ export type CleanFirmwareBoards = {
   error?: string;
 };
 
+export type CleanFirmwareSketch = {
+  path: string;
+  content: string;
+};
+
+export type CleanFirmwareSketchFolders = {
+  ok: boolean;
+  folders: string[];
+  default_folder?: string;
+};
+
 export type CleanFirmwareTargets = {
   ok: boolean;
   version: number;
@@ -263,6 +274,37 @@ export type CleanRuntimeManifestCompatibility = {
   manifest_validation: CleanRuntimeManifestValidation;
 };
 
+export type CleanDesignMemoryObservation = {
+  runtime_version?: string;
+  tune_version?: string;
+  ident?: string;
+  hash?: string;
+  sketch_hash?: string;
+  sketch_revision?: string;
+  profile_id?: string;
+  profile_label?: string;
+  fqbn?: string;
+  port?: string;
+  board_id?: string;
+  test_type?: string;
+};
+
+export type CleanDesignMemoryRow = {
+  design_id: string;
+  created_at?: number;
+  updated_at?: number;
+  last_session_key?: string;
+  event_score_raw?: number;
+  event_score?: number;
+  evidence_score?: number;
+  balance_score?: number;
+  score?: number;
+  success_count?: number;
+  failure_count?: number;
+  user_positive?: number;
+  user_negative?: number;
+};
+
 export type CleanFirmwareUploadPrecheck = {
   ok: boolean;
   ready: boolean;
@@ -304,6 +346,39 @@ export type CleanFirmwareUploadPrecheck = {
     warnings?: string[];
   };
 };
+
+export type CleanHostCaptureStatus = {
+  state: string;
+  delay_ms: number;
+  freq_hz?: number;
+  target_lines: number;
+  rows: number;
+  started_at?: number | null;
+  finished_at?: number | null;
+  latest_run?: string | null;
+  latest_summary?: Record<string, unknown> | null;
+  last_error?: string | null;
+  trigger_enabled?: boolean;
+  trigger_angle_deg?: number;
+  trigger_out_frac?: number;
+  trigger_runaway?: number;
+  post_trigger_lines?: number;
+  operator_outcome?: string;
+  operator_assisted?: boolean;
+  operator_notes?: string;
+  run_intent?: string;
+  changed_params?: string[];
+};
+
+export type CleanBurstStatus = {
+  state: string;
+  last_event?: string | null;
+  events_recent: string[];
+  csv_recent: number;
+  host_capture: CleanHostCaptureStatus;
+};
+
+export type CleanRunIntent = 'unassisted_tuning' | 'assisted_safety_catch' | 'bench_test';
 
 export type CleanKnownGoodRecovery = {
   ok: boolean;
@@ -630,10 +705,23 @@ export async function cleanFirmwareUpload(
   };
 }
 
-export async function cleanFirmwareUploadPrecheck(port?: string, fqbn?: string): Promise<CleanFirmwareUploadPrecheck> {
+export async function cleanFirmwareReleaseSerial(): Promise<{ ok: boolean; note?: string; error?: string }> {
+  const d = await req<{ ok: boolean; released?: boolean; note?: string; error?: string }>(
+    '/agent/clean/firmware/release-serial',
+    { method: 'POST', body: JSON.stringify({ confirm: 'I_UNDERSTAND_STOP_BRIDGE' }) },
+    12000,
+  );
+  return { ok: Boolean(d.ok), note: d.note, error: d.error };
+}
+
+export async function cleanFirmwareUploadPrecheck(
+  port?: string,
+  fqbn?: string,
+  sketch?: string,
+): Promise<CleanFirmwareUploadPrecheck> {
   const d = await req<CleanFirmwareUploadPrecheck>(
     '/agent/clean/firmware/upload/precheck',
-    { method: 'POST', body: JSON.stringify({ port, fqbn }) },
+    { method: 'POST', body: JSON.stringify({ port, fqbn, sketch }) },
     15000,
   );
   return d;
@@ -660,6 +748,173 @@ export async function cleanFirmwareBoards(): Promise<CleanFirmwareBoards> {
 export async function cleanFirmwareTargets(): Promise<CleanFirmwareTargets> {
   const d = await req<{ ok: true; targets: CleanFirmwareTargets }>('/firmware/targets', undefined, 20000);
   return d.targets;
+}
+
+export async function cleanBurstStatus(): Promise<CleanBurstStatus> {
+  const d = await req<{ ok: true; burst: CleanBurstStatus }>('/burst/status', undefined, 12000);
+  return d.burst;
+}
+
+export async function cleanBurstArm(
+  delayMs = 30000,
+  lines = 220,
+  freqHz = 25,
+  triggerEnabled = true,
+  prebufferLines = 80,
+  triggerAngleDeg = 3.0,
+  triggerOutFrac = 0.35,
+  triggerRunaway = 0.06,
+  postTriggerLines = 140,
+  runIntent: CleanRunIntent = 'unassisted_tuning',
+  changedParams: string[] = [],
+  operatorOutcome = '',
+  operatorAssisted = false,
+  operatorNotes = '',
+): Promise<CleanBurstStatus> {
+  const d = await req<{ ok: true; burst: CleanBurstStatus }>(
+    '/burst/arm',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        delay_ms: delayMs,
+        lines,
+        freq_hz: freqHz,
+        trigger_enabled: triggerEnabled,
+        prebuffer_lines: prebufferLines,
+        trigger_angle_deg: triggerAngleDeg,
+        trigger_out_frac: triggerOutFrac,
+        trigger_runaway: triggerRunaway,
+        post_trigger_lines: postTriggerLines,
+        run_intent: runIntent,
+        changed_params: changedParams,
+        operator_outcome: operatorOutcome,
+        operator_assisted: operatorAssisted,
+        operator_notes: operatorNotes,
+      }),
+    },
+    12000,
+  );
+  return d.burst;
+}
+
+export async function cleanBurstLabel(
+  operatorOutcome = '',
+  operatorAssisted = false,
+  operatorNotes = '',
+  runIntent = '',
+  changedParams: string[] | undefined = undefined,
+): Promise<CleanBurstStatus> {
+  const d = await req<{ ok: true; burst: CleanBurstStatus }>(
+    '/burst/label',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        operator_outcome: operatorOutcome,
+        operator_assisted: operatorAssisted,
+        operator_notes: operatorNotes,
+        run_intent: runIntent,
+        changed_params: changedParams,
+      }),
+    },
+    12000,
+  );
+  return d.burst;
+}
+
+export async function cleanRecoverRearm(): Promise<{
+  ok: boolean;
+  steps: Array<{ cmd: string; ok: boolean; detail: string }>;
+  arm_ok: boolean;
+}> {
+  const steps: Array<{ cmd: string; ok: boolean; detail: string }> = [];
+  for (const cmd of ['DISARM', 'FAULTCLR', 'ESTOP 0']) {
+    try {
+      const r = await req<{ ok: boolean; result?: { lines?: string[]; matched?: string } }>(
+        '/command',
+        {
+          method: 'POST',
+          body: JSON.stringify({ cmd, timeout: 1.5 }),
+        },
+        8000,
+      );
+      steps.push({
+        cmd,
+        ok: true,
+        detail: String(r?.result?.lines?.[0] ?? r?.result?.matched ?? 'ok'),
+      });
+    } catch (err) {
+      steps.push({ cmd, ok: false, detail: cleanFailureDetailFromError('generic', err) });
+      return { ok: false, steps, arm_ok: false };
+    }
+  }
+  try {
+    await req<{ ok: boolean }>(
+      '/arm',
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+      8000,
+    );
+    return { ok: true, steps, arm_ok: true };
+  } catch (err) {
+    steps.push({ cmd: 'ARM', ok: false, detail: cleanFailureDetailFromError('generic', err) });
+    return { ok: false, steps, arm_ok: false };
+  }
+}
+
+export async function cleanSetpointSave(deg: number): Promise<{
+  set: string;
+  set_eff: string;
+}> {
+  await req<{ ok: boolean; result?: { lines?: string[]; matched?: string } }>(
+    '/command',
+    {
+      method: 'POST',
+      body: JSON.stringify({ cmd: `SETPOINT ${deg}`, expect: 'OK SETPOINT', timeout: 2.0 }),
+    },
+    8000,
+  );
+  await req<{ ok: boolean; result?: { lines?: string[]; matched?: string } }>(
+    '/command',
+    {
+      method: 'POST',
+      body: JSON.stringify({ cmd: 'SAVECFG', expect: 'OK SAVECFG', timeout: 2.0 }),
+    },
+    8000,
+  );
+  const d = await req<{ status: Status }>('/status?mode=app_dev', undefined, 12000);
+  return {
+    set: String((d.status as unknown as Record<string, unknown>).set ?? ''),
+    set_eff: String((d.status as unknown as Record<string, unknown>).set_eff ?? ''),
+  };
+}
+
+export async function cleanFirmwareSketchFolders(): Promise<CleanFirmwareSketchFolders> {
+  const d = await req<{ ok: true; sketch_folders: CleanFirmwareSketchFolders }>(
+    '/firmware/sketch-folders',
+    undefined,
+    20000,
+  );
+  return d.sketch_folders;
+}
+
+export async function cleanFirmwareReadSketch(path?: string): Promise<CleanFirmwareSketch> {
+  const q = path ? `?path=${encodeURIComponent(path)}` : '';
+  const d = await req<{ ok: true; sketch: CleanFirmwareSketch }>(`/firmware/sketch${q}`, undefined, 20000);
+  return d.sketch;
+}
+
+export async function cleanFirmwareWriteSketch(content: string, path?: string): Promise<{ path: string; bytes: number }> {
+  const d = await req<{ ok: true; sketch: { path: string; bytes: number } }>(
+    '/firmware/sketch',
+    {
+      method: 'POST',
+      body: JSON.stringify({ content, path }),
+    },
+    20000,
+  );
+  return d.sketch;
 }
 
 export async function cleanHardwareProfileRegistry(): Promise<CleanHardwareProfileRegistry> {
@@ -887,4 +1142,38 @@ export async function cleanPreflightStream(
 
   if (!donePayload) throw new Error('preflight_stream_no_done');
   return donePayload;
+}
+
+export async function cleanDesignMemoryReportSuccess(input: {
+  session_key?: string;
+  source?: string;
+  note?: string;
+  success?: boolean;
+  profile_id?: string;
+  profile_label?: string;
+  sketch_revision?: string;
+  sketch_hash?: string;
+  test_type?: string;
+  observation?: CleanDesignMemoryObservation;
+}): Promise<{ design: CleanDesignMemoryRow }> {
+  const d = await req<{ ok: true; design: CleanDesignMemoryRow }>(
+    '/design-memory/report-success',
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    20000,
+  );
+  return { design: d.design };
+}
+
+export async function cleanDesignMemoryRate(input: {
+  session_key?: string;
+  design_id: string;
+  rating: 'positive' | 'negative';
+  note?: string;
+}): Promise<{ design: CleanDesignMemoryRow }> {
+  const d = await req<{ ok: true; design: CleanDesignMemoryRow }>(
+    '/design-memory/rate',
+    { method: 'POST', body: JSON.stringify(input) },
+    20000,
+  );
+  return { design: d.design };
 }

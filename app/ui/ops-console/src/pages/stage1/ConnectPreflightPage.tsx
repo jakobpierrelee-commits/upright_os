@@ -167,7 +167,7 @@ export function ConnectPreflightPage(props: Props) {
   const connectTone = !compatKnown ? 'unknown' : compatOk ? 'good' : 'bad';
   const kalmanTone = !compatKnown ? 'unknown' : kalmanStandardOk ? 'good' : 'bad';
   const phase1Ready = connectProbe?.phase1_ready ?? connectProbe?.v1_ok ?? false;
-  const phase2Ready = connectProbe?.phase2_ready ?? connectProbe?.v2_ready ?? false;
+  const phase2Ready = connectProbe?.phase2_ready ?? false;
   const readinessTone = !connectProbe ? 'unknown' : phase2Ready ? 'good' : phase1Ready ? 'warn' : 'bad';
   const requiredStatusFields = compat?.required_fields?.length ? compat.required_fields.join(', ') : 'n/a';
   const kalmanEvidence = kalmanMissing.length ? `missing ${kalmanMissing.join(', ')}` : 'ang/raw/gyro present';
@@ -178,21 +178,15 @@ export function ConnectPreflightPage(props: Props) {
     ? 'untested'
     : (connectProbe.phase2_missing_fields?.length
         ? connectProbe.phase2_missing_fields.join(', ')
-        : (connectProbe.v2_missing_fields?.length
-            ? connectProbe.v2_missing_fields.join(', ')
-            : (phase2Ready ? 'none' : 'awaiting telemetry')));
+        : (phase2Ready ? 'none' : 'awaiting telemetry'));
   const presentAdvancedText = !connectProbe
     ? 'untested'
     : (connectProbe.phase2_present_fields?.length
         ? connectProbe.phase2_present_fields.join(', ')
-        : (connectProbe.v2_present_fields?.length
-            ? connectProbe.v2_present_fields.join(', ')
-            : (phase2Ready ? 'none' : 'awaiting telemetry')));
+        : (phase2Ready ? 'none' : 'awaiting telemetry'));
   const phase2PresentEvidence = connectProbe?.phase2_present_fields?.length
     ? connectProbe.phase2_present_fields.join(', ')
-    : (connectProbe?.v2_present_fields?.length
-        ? connectProbe.v2_present_fields.join(', ')
-        : (phase2Ready ? 'none' : 'awaiting telemetry'));
+    : (phase2Ready ? 'none' : 'awaiting telemetry');
 
   const [docsPack, setDocsPack] = useState<FirmwareDocsPack | null>(null);
   const [docsSketchRevision, setDocsSketchRevision] = useState('');
@@ -974,12 +968,12 @@ export function ConnectPreflightPage(props: Props) {
 
   const onTestReadiness = async () => {
     if (connectProbe) {
-      const testedPhase2Ready = connectProbe.phase2_ready ?? connectProbe.v2_ready;
+      const testedPhase2Ready = connectProbe.phase2_ready ?? false;
       setReadinessTestNote(`Already tested: ${testedPhase2Ready ? strings.v2Readiness.pass : strings.v2Readiness.warn}`);
       return;
     }
     const out = await runConnectWizard();
-    const outPhase2Ready = out?.phase2_ready ?? out?.v2_ready;
+    const outPhase2Ready = out?.phase2_ready ?? false;
     setReadinessTestNote(`Manual test result: ${outPhase2Ready ? strings.v2Readiness.pass : strings.v2Readiness.warn}`);
   };
 

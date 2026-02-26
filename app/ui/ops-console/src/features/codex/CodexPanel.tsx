@@ -737,6 +737,20 @@ export function CodexPanel(_: Props): JSX.Element {
             <div className="agent-chat-head">
               <h3>Chat</h3>
               <div className="agent-chat-head-right">
+                <div className="agent-head-mode-picker" role="group" aria-label="Mission Mode Quick Switch">
+                  {allowedModes.map((m) => (
+                    <button
+                      key={`head-${m}`}
+                      type="button"
+                      className={`btn-sm agent-mode-segment ${m === mode ? 'active' : ''}`}
+                      disabled={busy}
+                      onClick={() => void applyMode(m)}
+                      title={`Switch to ${MODE_LABELS[m] ?? m}`}
+                    >
+                      {MODE_LABELS[m] ?? m}
+                    </button>
+                  ))}
+                </div>
                 <div className="agent-density-toggle" role="group" aria-label="Response Detail">
                   <button
                     type="button"
