@@ -107,3 +107,9 @@ def build_agent_status_payload(
     ai: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {"ok": True, "agent": agent, "threads": threads, "ai": ai}
+
+
+def build_ai_threads_status_payload(
+    *, threads: List[Dict[str, Any]], ai: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "threads": threads, "ai": ai}

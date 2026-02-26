@@ -256,6 +256,7 @@ try:
         build_ai_status_payload,
         build_ai_thread_payload,
         build_ai_threads_payload,
+        build_ai_threads_status_payload,
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
@@ -271,6 +272,7 @@ except ImportError:
         build_ai_status_payload,
         build_ai_thread_payload,
         build_ai_threads_payload,
+        build_ai_threads_status_payload,
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
@@ -11414,15 +11416,14 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "threads": ai.list_threads(skey),
-                            "ai": ai.status(
+                        build_ai_threads_status_payload(
+                            threads=ai.list_threads(skey),
+                            ai=ai.status(
                                 configured=bool(me.get("openai_configured")),
                                 model=str(me.get("openai_model") or "gpt-5-codex"),
                                 session_key=skey,
                             ),
-                        },
+                        ),
                     )
                 if u.path == "/ai/profiles":
                     tok = _extract_auth_token(self)
