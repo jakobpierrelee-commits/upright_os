@@ -12054,14 +12054,16 @@ def build_handler(
 
                 if u.path == "/firmware/check":
                     return _json(
-                        self, 200, {"ok": True, "firmware_check": firmware.check()}
+                        self, 200, build_firmware_check_payload(firmware_check=firmware.check())
                     )
 
                 if u.path == "/firmware/compile":
                     st = firmware.compile(
                         sketch=body.get("sketch"), fqbn=body.get("fqbn")
                     )
-                    return _json(self, 200, {"ok": True, "firmware": st})
+                    return _json(
+                        self, 200, build_firmware_result_payload(firmware=st)
+                    )
 
                 if u.path == "/firmware/upload":
                     st = firmware.upload(
@@ -12070,7 +12072,9 @@ def build_handler(
                         port=body.get("port"),
                     )
                     prearm_safety.require("firmware_upload")
-                    return _json(self, 200, {"ok": True, "firmware": st})
+                    return _json(
+                        self, 200, build_firmware_result_payload(firmware=st)
+                    )
 
                 if u.path == "/firmware/upload-guarded":
                     st = firmware.upload_guarded(
@@ -12080,11 +12084,15 @@ def build_handler(
                         port=body.get("port"),
                     )
                     prearm_safety.require("firmware_upload_guarded")
-                    return _json(self, 200, {"ok": True, "firmware": st})
+                    return _json(
+                        self, 200, build_firmware_result_payload(firmware=st)
+                    )
 
                 if u.path == "/firmware/install-cli":
                     st = firmware.install_cli()
-                    return _json(self, 200, {"ok": True, "firmware": st})
+                    return _json(
+                        self, 200, build_firmware_result_payload(firmware=st)
+                    )
 
                 if u.path == "/firmware/sketch":
                     content = str(body.get("content", ""))
