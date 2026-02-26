@@ -11,12 +11,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .codex_db import CodexDB
+try:
+    from app.bridge.codex_db import CodexDB
+except ImportError:
+    from codex_db import CodexDB  # type: ignore
 
 
 @dataclass
 class Checkpoint:
     """A tuning checkpoint."""
+
     id: int
     ts: float
     robot_id: str
@@ -33,7 +37,7 @@ class Checkpoint:
 class CheckpointManager:
     """
     Manages tuning checkpoint operations.
-    
+
     Provides save, restore, query, and comparison operations
     for tuning checkpoints.
     """
@@ -55,7 +59,7 @@ class CheckpointManager:
     ) -> int:
         """
         Save a new checkpoint.
-        
+
         Returns the checkpoint ID.
         """
         return self._db.save_checkpoint(
