@@ -18,11 +18,11 @@ import threading
 import time
 import traceback
 import faulthandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Optional
-from urllib.parse import parse_qs, urlparse
 
 try:
     import websockets
@@ -170,13 +170,11 @@ except ImportError:
 try:
     from app.bridge.clean_contracts import (
         validate_clean_preflight_response,
-        validate_firmware_targets_response,
         validate_prearm_precheck_response,
     )
 except ImportError:
     from clean_contracts import (  # type: ignore
         validate_clean_preflight_response,
-        validate_firmware_targets_response,
         validate_prearm_precheck_response,
     )
 try:
@@ -248,45 +246,18 @@ except ImportError:
 try:
     from app.bridge.clean_status import (
         build_agent_status_payload,
-        build_health_payload,
         build_clean_status_payload,
-        build_status_payload,
     )
 except ImportError:
     from clean_status import (  # type: ignore
         build_agent_status_payload,
         build_clean_status_payload,
     )
-try:
-    from app.bridge.clean_profiles import (
-        build_profiles_hardware_payload,
-        build_profiles_payload,
-        build_runtime_manifest_compat_payload,
-    )
-except ImportError:
-    from clean_profiles import (  # type: ignore
-        build_profiles_hardware_payload,
-        build_profiles_payload,
-        build_runtime_manifest_compat_payload,
-    )
-try:
-    from app.bridge.clean_firmware import (
-        build_firmware_artifacts_payload,
-        build_firmware_sketch_folders_payload,
-        build_firmware_status_payload,
-        build_runtime_manifest_validate_payload,
-    )
-except ImportError:
-    from clean_firmware import (  # type: ignore
-        build_firmware_artifacts_payload,
-        build_firmware_sketch_folders_payload,
-        build_firmware_status_payload,
-        build_runtime_manifest_validate_payload,
-    )
+# clean_profiles imports removed - all were unused
+# clean_firmware imports removed - all were unused
 try:
     from app.bridge.clean_safety import (
         build_arm_precheck_payload,
-        build_status_control_payload,
     )
 except ImportError:
     from clean_safety import (  # type: ignore
@@ -296,11 +267,8 @@ try:
     from app.bridge.clean_tuning import (
         build_burst_status_payload,
         build_commissioning_artifacts_payload,
-        build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
-        build_tuning_preflight_payload,
-        build_tuning_recommend_payload,
         build_tuning_result_payload,
     )
 except ImportError:
@@ -318,7 +286,6 @@ try:
         build_design_memory_payload,
         build_probe_payload,
         build_tooling_traces_payload,
-        build_tuning_capabilities_payload,
     )
 except ImportError:
     from clean_probe import (  # type: ignore
@@ -492,7 +459,6 @@ try:
         build_ai_profiles_payload,
         build_ai_status_payload,
         build_ai_thread_payload,
-        build_ai_threads_payload,
         build_ai_threads_status_payload,
         build_auth_openai_status_payload,
         build_auth_session_payload,
@@ -526,55 +492,31 @@ except ImportError:
 try:
     from app.bridge.clean_serial import (
         build_diag_serial_payload,
-        build_result_status_control_payload,
         build_telemetry_adapters_payload,
-        build_unified_schema_payload,
     )
 except ImportError:
     from clean_serial import (  # type: ignore
         build_diag_serial_payload,
         build_telemetry_adapters_payload,
-        build_unified_schema_payload,
     )
 try:
     from app.bridge.clean_misc import (
         build_action_payload,
-        build_active_profiles_payload,
         build_agent_state_payload,
         build_attempt_history_payload,
         build_attachment_payload,
-        build_boards_payload,
-        build_burst_label_payload,
         build_capabilities_payload,
-        build_command_result_payload,
-        build_control_payload,
         build_design_payload,
-        build_docs_pack_payload,
-        build_firmware_check_payload,
-        build_firmware_cmd_status_payload,
-        build_firmware_result_payload,
         build_overwatch_payload,
-        build_picked_payload,
         build_port_released_payload,
-        build_profiles_list_payload,
-        build_replay_payload,
         build_reset_payload,
-        build_result_control_payload,
         build_result_payload,
         build_revert_control_payload,
-        build_saved_profiles_payload,
-        build_sketch_payload,
-        build_sketch_write_payload,
         build_setup_check_payload,
         build_snapshots_payload,
         build_stats_payload,
-        build_sweep_payload,
-        build_targets_payload,
         build_tool_metrics_payload,
-        build_unified_payload,
         build_upload_confirm_success_payload,
-        build_surrogate_simulate_payload,
-        build_validation_payload,
     )
 except ImportError:
     from clean_misc import (  # type: ignore
@@ -582,20 +524,16 @@ except ImportError:
         build_agent_state_payload,
         build_attempt_history_payload,
         build_attachment_payload,
-        build_boards_payload,
         build_capabilities_payload,
         build_design_payload,
-        build_firmware_check_payload,
         build_overwatch_payload,
         build_port_released_payload,
         build_reset_payload,
         build_result_payload,
         build_revert_control_payload,
-        build_sketch_payload,
         build_setup_check_payload,
         build_snapshots_payload,
         build_stats_payload,
-        build_targets_payload,
         build_tool_metrics_payload,
         build_upload_confirm_success_payload,
     )
@@ -959,10 +897,22 @@ def _apply_tuning_plan(
         actions.append("setpoint")
         changed["setpoint"] = {"before": {"deg": curr_set}, "target": {"deg": deg}}
     if "limits" in plan:
-        l = plan["limits"]
-        out_max = _safe_float(l.get("out_max")) if isinstance(l, dict) else None
-        tip_deg = _safe_float(l.get("tip_deg")) if isinstance(l, dict) else None
-        i_max = _safe_float(l.get("i_max")) if isinstance(l, dict) else None
+        limits_cfg = plan["limits"]
+        out_max = (
+            _safe_float(limits_cfg.get("out_max"))
+            if isinstance(limits_cfg, dict)
+            else None
+        )
+        tip_deg = (
+            _safe_float(limits_cfg.get("tip_deg"))
+            if isinstance(limits_cfg, dict)
+            else None
+        )
+        i_max = (
+            _safe_float(limits_cfg.get("i_max"))
+            if isinstance(limits_cfg, dict)
+            else None
+        )
         if out_max is None:
             out_max = curr_out_max
         if tip_deg is None:
@@ -3842,7 +3792,6 @@ def detect_contract_readiness(status: Dict[str, Any]) -> Dict[str, Any]:
     # Calibration readiness
     has_gyro_bias = "gyro_bias" in status
     has_accel_offset = "accel_level_offset" in status
-    has_upright_trim = "upright_trim" in status
     calibration_ready = has_gyro_bias and has_accel_offset
 
     checks.append(
@@ -5655,7 +5604,9 @@ def build_handler(
                         ),
                     )
                 if u.path == "/firmware/unified-schema":
-                    code, payload = handle_firmware_unified_schema_get(firmware=firmware)
+                    code, payload = handle_firmware_unified_schema_get(
+                        firmware=firmware
+                    )
                     return _json(self, code, payload)
                 if u.path == "/ai/status":
                     tok = _extract_auth_token(self)
@@ -5942,7 +5893,9 @@ def build_handler(
                     )
                     return _json(self, code, payload)
                 if u.path == "/firmware/sketch-folders":
-                    code, payload = handle_firmware_sketch_folders_get(firmware=firmware)
+                    code, payload = handle_firmware_sketch_folders_get(
+                        firmware=firmware
+                    )
                     return _json(self, code, payload)
                 if u.path == "/probe/compat":
                     q = parse_qs(u.query)
