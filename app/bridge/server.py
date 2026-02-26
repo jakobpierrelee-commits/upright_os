@@ -254,6 +254,7 @@ try:
         build_ai_thread_payload,
         build_ai_threads_payload,
         build_auth_openai_status_payload,
+        build_auth_session_payload,
         build_auth_user_payload,
         build_session_heartbeat_payload,
     )
@@ -265,6 +266,7 @@ except ImportError:
         build_ai_thread_payload,
         build_ai_threads_payload,
         build_auth_openai_status_payload,
+        build_auth_session_payload,
         build_auth_user_payload,
         build_session_heartbeat_payload,
     )
@@ -11831,11 +11833,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "session_token": out["session_token"],
-                            "user": out["user"],
-                        },
+                        build_auth_session_payload(
+                            session_token=out["session_token"], user=out["user"]
+                        ),
                     )
 
                 if u.path == "/auth/login":
@@ -11845,11 +11845,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "session_token": out["session_token"],
-                            "user": out["user"],
-                        },
+                        build_auth_session_payload(
+                            session_token=out["session_token"], user=out["user"]
+                        ),
                     )
 
                 if u.path == "/auth/password-reset/request":

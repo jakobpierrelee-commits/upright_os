@@ -50,3 +50,9 @@ def build_ai_thread_payload(
         "ai": ai_status,
         "history": history,
     }
+
+
+def build_auth_session_payload(
+    *, session_token: str, user: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "session_token": session_token, "user": user}
