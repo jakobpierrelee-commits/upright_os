@@ -31,6 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from app.bridge.domains.firmware_lifecycle.tools import FirmwareTools
+from app.bridge.domains.tuning_intelligence.tools import TelemetryTools
+from app.bridge.domains.tuning_intelligence.simulation_tools import SimulationTools
+from app.bridge.domains.session_traceability.tools import SessionTools
+from app.bridge.domains.control_runtime.tools import ControlTools
+from app.bridge.domains.safety_prearm.tools import SafetyTools
+
 logger = logging.getLogger(__name__)
 
 
@@ -867,6 +874,40 @@ class CodexToolExecutor:
         self.board_fqbn = board_fqbn or "arduino:avr:nano"
         self.port = port
         self.host_capture = host_capture
+
+        # Initialize domain tool delegates
+        self._firmware_tools = FirmwareTools(
+            firmware_module=firmware_module,
+            repo_root=self.repo_root,
+            active_sketch_path=active_sketch_path,
+            board_fqbn=self.board_fqbn,
+            port=port,
+        )
+        self._telemetry_tools = TelemetryTools(
+            gateway=gateway,
+            db=db,
+            active_robot_id=self.active_robot_id,
+        )
+        self._simulation_tools = SimulationTools(
+            gateway=gateway,
+            db=db,
+            rag=rag,
+            observe_telemetry_fn=self._tool_observe_telemetry,
+        )
+        self._session_tools = SessionTools(
+            db=db,
+            rag=rag,
+            active_robot_id=self.active_robot_id,
+        )
+        self._control_tools = ControlTools(
+            gateway=gateway,
+        )
+        self._safety_tools = SafetyTools(
+            gateway=gateway,
+            db=db,
+            active_robot_id=self.active_robot_id,
+            observe_telemetry_fn=self._tool_observe_telemetry,
+        )
 
         # Pending upload confirmations: token -> request_data
         self._pending_uploads: Dict[str, Dict[str, Any]] = {}
@@ -2360,8 +2401,8 @@ class CodexToolExecutor:
         """
         compare_to = args.get("compare_to", "checkpoint")
         checkpoint_id = args.get("checkpoint_id")
-        snapshot_id = args.get("snapshot_id")
-        include_sketch = args.get("include_sketch", False)
+        _ = args.get("snapshot_id")  # Reserved for future use
+        _ = args.get("include_sketch", False)  # Reserved for future use
 
         # Get current config from gateway
         if not self.gateway:
@@ -3035,8 +3076,6 @@ class CodexToolExecutor:
         Simulate step response using simplified inverted pendulum dynamics.
         Returns settling time, overshoot, stability assessment.
         """
-        dt = ROBOT_DEFAULTS["loop_period_ms"] / 1000.0
-        steps = int(duration_s / dt)
         g = ROBOT_DEFAULTS["gravity"]
         L = ROBOT_DEFAULTS["height_m"]
 
@@ -3454,7 +3493,9 @@ class CodexToolExecutor:
             )
 
             # Generate annotation ID string
-            ann_id_str = f"ann_{time.strftime('%Y%m%d_%H%M%S', time.localtime(actual_ts))}"
+            ann_id_str = (
+                f"ann_{time.strftime('%Y%m%d_%H%M%S', time.localtime(actual_ts))}"
+            )
 
             return ToolResult(
                 ok=True,
