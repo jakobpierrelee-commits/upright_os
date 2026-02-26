@@ -2,37 +2,27 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import base64
 import collections
 import hashlib
-import hmac
 import json
 import logging
-import math
 import os
 import pathlib
 import re
-import select
 import signal
-import shutil
-import sqlite3
 import subprocess
 import secrets
-import ssl
 import sys
 import threading
 import time
 import traceback
-import uuid
 import faulthandler
 
 logger = logging.getLogger(__name__)
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
-from urllib import error as urlerror
-from urllib import request as urlrequest
 
 try:
     import websockets
@@ -54,7 +44,9 @@ try:
 except ImportError:
     from serial_gateway import NanoSerialGateway
 try:
-    from app.bridge.domains.tuning_intelligence.host_capture_manager import HostCaptureManager
+    from app.bridge.domains.tuning_intelligence.host_capture_manager import (
+        HostCaptureManager,
+    )
 except ImportError:
     from domains.tuning_intelligence.host_capture_manager import HostCaptureManager  # type: ignore
 try:
@@ -66,7 +58,9 @@ try:
 except ImportError:
     from domains.firmware_lifecycle.firmware_manager import FirmwareManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.mission_memory import MissionMemoryStore
+    from app.bridge.domains.session_traceability.mission_memory import (
+        MissionMemoryStore,
+    )
 except ImportError:
     from domains.session_traceability.mission_memory import MissionMemoryStore  # type: ignore
 try:
@@ -74,31 +68,49 @@ try:
 except ImportError:
     from domains.session_traceability.design_memory import DesignMemoryStore  # type: ignore
 try:
-    from app.bridge.domains.hardware_profile.hardware_context import HardwareContextStore
+    from app.bridge.domains.hardware_profile.hardware_context import (
+        HardwareContextStore,
+    )
 except ImportError:
     from domains.hardware_profile.hardware_context import HardwareContextStore  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.setup_attempt_history import SetupAttemptHistoryStore
+    from app.bridge.domains.session_traceability.setup_attempt_history import (
+        SetupAttemptHistoryStore,
+    )
 except ImportError:
-    from domains.session_traceability.setup_attempt_history import SetupAttemptHistoryStore  # type: ignore
+    from domains.session_traceability.setup_attempt_history import (
+        SetupAttemptHistoryStore,
+    )  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.config_history_manager import ConfigHistoryManager
+    from app.bridge.domains.session_traceability.config_history_manager import (
+        ConfigHistoryManager,
+    )
 except ImportError:
     from domains.session_traceability.config_history_manager import ConfigHistoryManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.ai_profile_manager import AIProfileManager
+    from app.bridge.domains.session_traceability.ai_profile_manager import (
+        AIProfileManager,
+    )
 except ImportError:
     from domains.session_traceability.ai_profile_manager import AIProfileManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.assistant_knowledge import AssistantKnowledgeManager
+    from app.bridge.domains.session_traceability.assistant_knowledge import (
+        AssistantKnowledgeManager,
+    )
 except ImportError:
-    from domains.session_traceability.assistant_knowledge import AssistantKnowledgeManager  # type: ignore
+    from domains.session_traceability.assistant_knowledge import (
+        AssistantKnowledgeManager,
+    )  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.agent_mission_manager import AgentMissionManager
+    from app.bridge.domains.session_traceability.agent_mission_manager import (
+        AgentMissionManager,
+    )
 except ImportError:
     from domains.session_traceability.agent_mission_manager import AgentMissionManager  # type: ignore
 try:
-    from app.bridge.domains.control_runtime.bridge_control_state import BridgeControlState
+    from app.bridge.domains.control_runtime.bridge_control_state import (
+        BridgeControlState,
+    )
 except ImportError:
     from domains.control_runtime.bridge_control_state import BridgeControlState  # type: ignore
 try:
@@ -106,11 +118,15 @@ try:
 except ImportError:
     from domains.control_runtime.telemetry_hub import TelemetryHub  # type: ignore
 try:
-    from app.bridge.domains.tuning_intelligence.commissioning_manager import CommissioningManager
+    from app.bridge.domains.tuning_intelligence.commissioning_manager import (
+        CommissioningManager,
+    )
 except ImportError:
     from domains.tuning_intelligence.commissioning_manager import CommissioningManager  # type: ignore
 try:
-    from app.bridge.domains.hardware_profile.robot_profiles_manager import RobotProfilesManager
+    from app.bridge.domains.hardware_profile.robot_profiles_manager import (
+        RobotProfilesManager,
+    )
 except ImportError:
     from domains.hardware_profile.robot_profiles_manager import RobotProfilesManager  # type: ignore
 try:
@@ -239,9 +255,7 @@ try:
 except ImportError:
     from clean_status import (  # type: ignore
         build_agent_status_payload,
-        build_health_payload,
         build_clean_status_payload,
-        build_status_payload,
     )
 try:
     from app.bridge.clean_profiles import (
@@ -277,7 +291,6 @@ try:
 except ImportError:
     from clean_safety import (  # type: ignore
         build_arm_precheck_payload,
-        build_status_control_payload,
     )
 try:
     from app.bridge.clean_tuning import (
@@ -294,11 +307,8 @@ except ImportError:
     from clean_tuning import (  # type: ignore
         build_burst_status_payload,
         build_commissioning_artifacts_payload,
-        build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
-        build_tuning_preflight_payload,
-        build_tuning_recommend_payload,
         build_tuning_result_payload,
     )
 try:
@@ -439,6 +449,16 @@ except ImportError:
         handle_savecfg,
     )
 try:
+    from app.bridge.routes_health import (
+        handle_health,
+        handle_status,
+    )
+except ImportError:
+    from routes_health import (  # type: ignore
+        handle_health,
+        handle_status,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -469,7 +489,6 @@ except ImportError:
         build_ai_profiles_payload,
         build_ai_status_payload,
         build_ai_thread_payload,
-        build_ai_threads_payload,
         build_ai_threads_status_payload,
         build_auth_openai_status_payload,
         build_auth_session_payload,
@@ -490,7 +509,6 @@ try:
 except ImportError:
     from clean_serial import (  # type: ignore
         build_diag_serial_payload,
-        build_result_status_control_payload,
         build_telemetry_adapters_payload,
         build_unified_schema_payload,
     )
@@ -537,42 +555,25 @@ try:
 except ImportError:
     from clean_misc import (  # type: ignore
         build_action_payload,
-        build_active_profiles_payload,
         build_agent_state_payload,
         build_attempt_history_payload,
         build_attachment_payload,
         build_boards_payload,
-        build_burst_label_payload,
         build_capabilities_payload,
-        build_command_result_payload,
-        build_control_payload,
         build_design_payload,
-        build_docs_pack_payload,
         build_firmware_check_payload,
-        build_firmware_cmd_status_payload,
-        build_firmware_result_payload,
         build_overwatch_payload,
-        build_picked_payload,
         build_port_released_payload,
-        build_profiles_list_payload,
-        build_replay_payload,
         build_reset_payload,
-        build_result_control_payload,
         build_result_payload,
         build_revert_control_payload,
-        build_saved_profiles_payload,
         build_sketch_payload,
-        build_sketch_write_payload,
         build_setup_check_payload,
         build_snapshots_payload,
         build_stats_payload,
-        build_sweep_payload,
         build_targets_payload,
         build_tool_metrics_payload,
-        build_unified_payload,
         build_upload_confirm_success_payload,
-        build_surrogate_simulate_payload,
-        build_validation_payload,
     )
 try:
     from app.bridge.clean_request_parsers import (
@@ -1122,9 +1123,6 @@ def _read_csv_tail(path: pathlib.Path, max_tail: int = 80) -> Dict[str, Any]:
 
 
 # HostCaptureManager moved to domains/tuning_intelligence/host_capture_manager.py
-
-
-
 
 
 def _commissioning_ai_context(commissioning: CommissioningManager) -> Dict[str, Any]:
@@ -5514,40 +5512,23 @@ def build_handler(
             try:
                 u = urlparse(self.path)
                 if u.path == "/health":
-                    return _json(
-                        self,
-                        200,
-                        build_health_payload(
-                            serial_health=gateway.health(),
-                            control_snapshot=control.snapshot(),
-                            prearm_snapshot=prearm_safety.snapshot(),
-                            telemetry_port=telemetry_port,
-                            telemetry_enabled=websockets is not None,
-                        ),
+                    code, payload = handle_health(
+                        gateway=gateway,
+                        control=control,
+                        prearm_safety=prearm_safety,
+                        telemetry_port=telemetry_port,
+                        telemetry_enabled=websockets is not None,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/status":
-                    # Keep /status non-blocking: return cached status only.
-                    # Serial worker drains spontaneous STATUS lines in background.
-                    st_raw = dict(gateway.health().get("last_status", {}))
-                    normalized = _normalize_status_for_hud(st_raw)
-                    st = dict(normalized.get("status", st_raw))
-                    return _json(
-                        self,
-                        200,
-                        build_status_payload(
-                            status=st,
-                            status_raw=st_raw,
-                            telemetry_adapter=normalized.get("adapter", {}),
-                            control_snapshot=control.snapshot(),
-                            prearm_snapshot=prearm_safety.snapshot(),
-                            action_gates=_resolve_action_gates(
-                                gateway,
-                                control,
-                                prearm_gate=prearm_safety,
-                                status_override=st,
-                            ),
-                        ),
+                    code, payload = handle_status(
+                        gateway=gateway,
+                        control=control,
+                        prearm_safety=prearm_safety,
+                        normalize_status_fn=_normalize_status_for_hud,
+                        resolve_action_gates_fn=_resolve_action_gates,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/telemetry/adapter-map":
                     st_raw = dict(gateway.health().get("last_status", {}))
                     normalized = _normalize_status_for_hud(st_raw)
@@ -6088,7 +6069,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        build_capabilities_payload(capabilities=caps, source="status_only"),
+                        build_capabilities_payload(
+                            capabilities=caps, source="status_only"
+                        ),
                     )
                 if u.path == "/overwatch/status":
                     q = parse_qs(u.query)
@@ -6139,9 +6122,7 @@ def build_handler(
                         connect=connect if isinstance(connect, dict) else None,
                     )
                     store_probe("overwatch", report)
-                    return _json(
-                        self, 200, build_overwatch_payload(overwatch=report)
-                    )
+                    return _json(self, 200, build_overwatch_payload(overwatch=report))
                 if u.path == "/v1/setup/attempt-history":
                     q = parse_qs(u.query)
                     limit = int((q.get("limit", ["40"]) or ["40"])[0] or 40)
@@ -6298,7 +6279,9 @@ def build_handler(
                     token = str(body.get("token", ""))
                     new_password = str(body.get("new_password", ""))
                     auth.reset_password(email, token, new_password)
-                    return _json(self, 200, build_result_payload(result="password_reset"))
+                    return _json(
+                        self, 200, build_result_payload(result="password_reset")
+                    )
 
                 if u.path == "/auth/logout":
                     tok = _extract_auth_token(self, body)
@@ -6477,9 +6460,7 @@ def build_handler(
                         source=source,
                         note=note,
                     )
-                    return _json(
-                        self, 200, build_design_payload(design=row)
-                    )
+                    return _json(self, 200, build_design_payload(design=row))
 
                 if u.path == "/design-memory/rate":
                     session_key = (
@@ -6501,9 +6482,7 @@ def build_handler(
                         if err == "design_not_found":
                             return _json(self, 404, {"ok": False, "error": err})
                         return _json(self, 400, {"ok": False, "error": err})
-                    return _json(
-                        self, 200, build_design_payload(design=row)
-                    )
+                    return _json(self, 200, build_design_payload(design=row))
 
                 if u.path == "/commissioning/run":
                     code, payload = handle_commissioning_run(
@@ -6519,11 +6498,15 @@ def build_handler(
 
                 if u.path == "/firmware/check":
                     return _json(
-                        self, 200, build_firmware_check_payload(firmware_check=firmware.check())
+                        self,
+                        200,
+                        build_firmware_check_payload(firmware_check=firmware.check()),
                     )
 
                 if u.path == "/firmware/compile":
-                    code, payload = handle_firmware_compile(body=body, firmware=firmware)
+                    code, payload = handle_firmware_compile(
+                        body=body, firmware=firmware
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/upload":
@@ -6534,7 +6517,10 @@ def build_handler(
 
                 if u.path == "/firmware/upload-guarded":
                     code, payload = handle_firmware_upload_guarded(
-                        body=body, firmware=firmware, gateway=gateway, prearm_safety=prearm_safety
+                        body=body,
+                        firmware=firmware,
+                        gateway=gateway,
+                        prearm_safety=prearm_safety,
                     )
                     return _json(self, code, payload)
 
@@ -6543,19 +6529,27 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/sketch":
-                    code, payload = handle_firmware_sketch_write(body=body, firmware=firmware)
+                    code, payload = handle_firmware_sketch_write(
+                        body=body, firmware=firmware
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/sketch-folder/pick":
-                    code, payload = handle_firmware_sketch_folder_pick(firmware=firmware)
+                    code, payload = handle_firmware_sketch_folder_pick(
+                        firmware=firmware
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/generate-unified":
-                    code, payload = handle_firmware_generate_unified(body=body, firmware=firmware)
+                    code, payload = handle_firmware_generate_unified(
+                        body=body, firmware=firmware
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/generate-docs-pack":
-                    code, payload = handle_firmware_generate_docs_pack(body=body, firmware=firmware)
+                    code, payload = handle_firmware_generate_docs_pack(
+                        body=body, firmware=firmware
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/profiles/validate":
@@ -6715,7 +6709,9 @@ def build_handler(
                         self,
                         200,
                         build_setup_check_payload(
-                            check_key="overwatch_check", check_result=out, attempt=attempt
+                            check_key="overwatch_check",
+                            check_result=out,
+                            attempt=attempt,
                         ),
                     )
 
@@ -6724,7 +6720,9 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/profiles/activate":
-                    code, payload = handle_profiles_activate(body=body, profiles=profiles)
+                    code, payload = handle_profiles_activate(
+                        body=body, profiles=profiles
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/profiles/delete":
@@ -7365,9 +7363,7 @@ def build_handler(
                                     history=hist,
                                     threads=ai.list_threads(session_key),
                                     tool_calls=tool_out.get("tool_calls", []),
-                                    iterations=int(
-                                        tool_out.get("iterations", 1) or 1
-                                    ),
+                                    iterations=int(tool_out.get("iterations", 1) or 1),
                                     provider="openai_tools",
                                     executor=executor,
                                 ),
@@ -7613,9 +7609,7 @@ def build_handler(
                                     history=hist,
                                     threads=ai.list_threads(session_key),
                                     tool_calls=tool_out.get("tool_calls", []),
-                                    iterations=int(
-                                        tool_out.get("iterations", 1) or 1
-                                    ),
+                                    iterations=int(tool_out.get("iterations", 1) or 1),
                                     provider="openai_tools",
                                     executor=executor,
                                 ),
@@ -8575,7 +8569,9 @@ def build_handler(
                     code, payload = handle_imu_calibrate(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                            res, cmd_name=cmd
+                        ),
                     )
                     return _json(self, code, payload)
 
@@ -8583,7 +8579,9 @@ def build_handler(
                     code, payload = handle_imu_load(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                            res, cmd_name=cmd
+                        ),
                     )
                     return _json(self, code, payload)
 
@@ -8591,7 +8589,9 @@ def build_handler(
                     code, payload = handle_imu_save(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                            res, cmd_name=cmd
+                        ),
                     )
                     return _json(self, code, payload)
 
@@ -8599,7 +8599,9 @@ def build_handler(
                     code, payload = handle_imu_info(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                            res, cmd_name=cmd
+                        ),
                     )
                     return _json(self, code, payload)
 
