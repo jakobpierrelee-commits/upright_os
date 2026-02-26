@@ -25,5 +25,23 @@ def build_commissioning_run_payload(
     return {"ok": True, "commissioning": commissioning}
 
 
+def build_tuning_result_payload(
+    *,
+    result: str,
+    snapshot: Dict[str, Any],
+    status: Dict[str, Any],
+    control: Dict[str, Any],
+    preflight_id: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "result": result,
+        "snapshot": snapshot,
+        "status": status,
+        "control": control,
+        "preflight_id": preflight_id,
+    }
+
+
 def build_lines_payload(*, lines: List[str]) -> Dict[str, Any]:
     return {"ok": True, "lines": lines}

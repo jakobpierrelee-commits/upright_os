@@ -218,6 +218,7 @@ try:
         build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
+        build_tuning_result_payload,
     )
 except ImportError:
     from clean_tuning import (  # type: ignore
@@ -226,6 +227,7 @@ except ImportError:
         build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
+        build_tuning_result_payload,
     )
 try:
     from app.bridge.clean_probe import (
@@ -15241,14 +15243,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "snapshot": snap,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                            "preflight_id": preflight_used,
-                        },
+                        build_tuning_result_payload(
+                            result=res,
+                            snapshot=snap,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                            preflight_id=preflight_used,
+                        ),
                     )
 
                 return _json(self, 404, {"ok": False, "error": "not_found"})
