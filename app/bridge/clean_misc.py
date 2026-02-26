@@ -89,3 +89,7 @@ def build_result_control_payload(
     *, result: Dict[str, Any], control: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "result": result, "control": control}
+
+
+def build_sketch_write_payload(*, sketch: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "sketch": sketch}

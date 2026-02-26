@@ -297,6 +297,7 @@ try:
         build_result_control_payload,
         build_result_payload,
         build_sketch_payload,
+        build_sketch_write_payload,
         build_sweep_payload,
         build_targets_payload,
         build_unified_payload,
@@ -321,6 +322,7 @@ except ImportError:
         build_result_control_payload,
         build_result_payload,
         build_sketch_payload,
+        build_sketch_write_payload,
         build_sweep_payload,
         build_targets_payload,
         build_unified_payload,
@@ -12143,7 +12145,7 @@ def build_handler(
                         path=path,
                         profile=profile if isinstance(profile, dict) else None,
                     )
-                    return _json(self, 200, {"ok": True, "sketch": sk})
+                    return _json(self, 200, build_sketch_write_payload(sketch=sk))
                 if u.path == "/firmware/sketch-folder/pick":
                     picked = firmware.pick_sketch_folder()
                     return _json(self, 200, build_picked_payload(picked=picked))
