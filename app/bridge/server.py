@@ -13278,20 +13278,19 @@ def build_handler(
                             hist = ai.history(session_key, tid)[-80:]
                             send_evt(
                                 "done",
-                                {
-                                    "ok": True,
-                                    "agent": mode_state,
-                                    "reply": _normalize_reply_for_prompt(msg, answer),
-                                    "thread_id": tid,
-                                    "history": hist,
-                                    "threads": ai.list_threads(session_key),
-                                    "tool_calls": tool_out.get("tool_calls", []),
-                                    "iterations": int(
+                                build_agent_chat_reply_payload(
+                                    agent=mode_state,
+                                    reply=_normalize_reply_for_prompt(msg, answer),
+                                    thread_id=tid,
+                                    history=hist,
+                                    threads=ai.list_threads(session_key),
+                                    tool_calls=tool_out.get("tool_calls", []),
+                                    iterations=int(
                                         tool_out.get("iterations", 1) or 1
                                     ),
-                                    "provider": "openai_tools",
-                                    "executor": executor,
-                                },
+                                    provider="openai_tools",
+                                    executor=executor,
+                                ),
                             )
                             return
                         if executor == "codex_cli_exec":
@@ -13309,18 +13308,17 @@ def build_handler(
                             hist = ai.history(session_key, tid)[-80:] if tid else []
                             send_evt(
                                 "done",
-                                {
-                                    "ok": True,
-                                    "agent": mode_state,
-                                    "reply": _normalize_reply_for_prompt(msg, answer),
-                                    "thread_id": tid,
-                                    "history": hist,
-                                    "threads": ai.list_threads(session_key),
-                                    "tool_calls": [],
-                                    "iterations": 1,
-                                    "provider": "codex_cli",
-                                    "executor": executor,
-                                },
+                                build_agent_chat_reply_payload(
+                                    agent=mode_state,
+                                    reply=_normalize_reply_for_prompt(msg, answer),
+                                    thread_id=tid,
+                                    history=hist,
+                                    threads=ai.list_threads(session_key),
+                                    tool_calls=[],
+                                    iterations=1,
+                                    provider="codex_cli",
+                                    executor=executor,
+                                ),
                             )
                             return
 
@@ -13338,21 +13336,20 @@ def build_handler(
                         hist = ai.history(session_key, tid)[-80:] if tid else []
                         send_evt(
                             "done",
-                            {
-                                "ok": True,
-                                "agent": mode_state,
-                                "reply": _normalize_reply_for_prompt(
+                            build_agent_chat_reply_payload(
+                                agent=mode_state,
+                                reply=_normalize_reply_for_prompt(
                                     msg,
                                     str(out.get("answer", "")).strip() or "(no output)",
                                 ),
-                                "thread_id": tid,
-                                "history": hist,
-                                "threads": ai.list_threads(session_key),
-                                "tool_calls": [],
-                                "iterations": 1,
-                                "provider": "openai",
-                                "executor": "openai_chat",
-                            },
+                                thread_id=tid,
+                                history=hist,
+                                threads=ai.list_threads(session_key),
+                                tool_calls=[],
+                                iterations=1,
+                                provider="openai",
+                                executor="openai_chat",
+                            ),
                         )
                     except Exception as exc:
                         send_evt("error", {"ok": False, "error": str(exc)})
