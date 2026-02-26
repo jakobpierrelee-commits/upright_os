@@ -264,6 +264,7 @@ try:
         build_chat_with_tools_payload,
         build_disambiguation_reply_payload,
         build_openai_config_payload,
+        build_rag_index_payload,
         build_session_heartbeat_payload,
     )
 except ImportError:
@@ -284,6 +285,7 @@ except ImportError:
         build_chat_with_tools_payload,
         build_disambiguation_reply_payload,
         build_openai_config_payload,
+        build_rag_index_payload,
         build_session_heartbeat_payload,
     )
 try:
@@ -13897,13 +13899,12 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "docs": doc_stats,
-                                "sketches": sketch_stats,
-                                "elapsed_ms": round(elapsed_ms, 2),
-                                "ts": time.time(),
-                            },
+                            build_rag_index_payload(
+                                docs=doc_stats,
+                                sketches=sketch_stats,
+                                elapsed_ms=round(elapsed_ms, 2),
+                                ts=time.time(),
+                            ),
                         )
                     except Exception as exc:
                         logger.warning(f"RAG index error: {exc}")

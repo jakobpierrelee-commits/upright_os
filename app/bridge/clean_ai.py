@@ -151,6 +151,22 @@ def build_chat_with_tools_payload(
     }
 
 
+def build_rag_index_payload(
+    *,
+    docs: Dict[str, Any],
+    sketches: Dict[str, Any],
+    elapsed_ms: float,
+    ts: float,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "docs": docs,
+        "sketches": sketches,
+        "elapsed_ms": elapsed_ms,
+        "ts": ts,
+    }
+
+
 def build_ai_threads_status_payload(
     *, threads: List[Dict[str, Any]], ai: Dict[str, Any]
 ) -> Dict[str, Any]:
