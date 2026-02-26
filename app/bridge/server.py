@@ -11928,7 +11928,9 @@ def build_handler(
                     api_key = str(body.get("api_key", ""))
                     model = str(body.get("model", "gpt-5-codex"))
                     out = auth.set_openai_key(int(me["id"]), api_key, model)
-                    return _json(self, 200, {"ok": True, "openai": out})
+                    return _json(
+                        self, 200, build_auth_openai_status_payload(openai=out)
+                    )
 
                 if u.path == "/auth/openai-key/delete":
                     tok = _extract_auth_token(self, body)
@@ -11938,7 +11940,9 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     out = auth.clear_openai_key(int(me["id"]))
-                    return _json(self, 200, {"ok": True, "openai": out})
+                    return _json(
+                        self, 200, build_auth_openai_status_payload(openai=out)
+                    )
 
                 if u.path == "/session/heartbeat":
                     return _json(
