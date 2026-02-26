@@ -7,6 +7,7 @@ from clean_ai import (
     build_ai_knowledge_payload,
     build_ai_profiles_payload,
     build_ai_status_payload,
+    build_ai_thread_payload,
     build_ai_threads_payload,
     build_auth_openai_status_payload,
     build_auth_user_payload,
@@ -66,3 +67,17 @@ def test_build_session_heartbeat_payload_shape() -> None:
     )
     assert payload["ok"] is True
     assert payload["control"]["session_fresh"] is True
+
+
+def test_build_ai_thread_payload_shape() -> None:
+    payload = build_ai_thread_payload(
+        thread={"id": "t1", "title": "Test Thread"},
+        threads=[{"id": "t1"}, {"id": "t2"}],
+        ai_status={"configured": True, "model": "gpt-5"},
+        history=[{"role": "user", "content": "hello"}],
+    )
+    assert payload["ok"] is True
+    assert payload["thread"]["id"] == "t1"
+    assert len(payload["threads"]) == 2
+    assert payload["ai"]["configured"] is True
+    assert len(payload["history"]) == 1

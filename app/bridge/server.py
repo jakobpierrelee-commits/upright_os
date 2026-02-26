@@ -247,6 +247,7 @@ try:
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
+        build_ai_thread_payload,
         build_ai_threads_payload,
         build_auth_openai_status_payload,
         build_auth_user_payload,
@@ -257,6 +258,9 @@ except ImportError:
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
+        build_ai_thread_payload,
+        build_ai_threads_payload,
+        build_auth_openai_status_payload,
         build_auth_user_payload,
         build_session_heartbeat_payload,
     )
@@ -11842,15 +11846,12 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "thread": created,
-                            "threads": ai.list_threads(skey),
-                            "ai": st,
-                            "history": ai.history(skey, st.get("active_thread_id"))[
-                                -80:
-                            ],
-                        },
+                        build_ai_thread_payload(
+                            thread=created,
+                            threads=ai.list_threads(skey),
+                            ai_status=st,
+                            history=ai.history(skey, st.get("active_thread_id"))[-80:],
+                        ),
                     )
 
                 if u.path == "/ai/thread/select":
@@ -11875,13 +11876,12 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "thread": selected,
-                            "threads": ai.list_threads(skey),
-                            "ai": st,
-                            "history": ai.history(skey, thread_id)[-80:],
-                        },
+                        build_ai_thread_payload(
+                            thread=selected,
+                            threads=ai.list_threads(skey),
+                            ai_status=st,
+                            history=ai.history(skey, thread_id)[-80:],
+                        ),
                     )
 
                 if u.path == "/ai/profile/save":

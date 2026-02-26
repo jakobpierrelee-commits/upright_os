@@ -34,3 +34,19 @@ def build_auth_openai_status_payload(*, openai: Dict[str, Any]) -> Dict[str, Any
 
 def build_session_heartbeat_payload(*, control: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "control": control}
+
+
+def build_ai_thread_payload(
+    *,
+    thread: Dict[str, Any],
+    threads: List[Dict[str, Any]],
+    ai_status: Dict[str, Any],
+    history: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "thread": thread,
+        "threads": threads,
+        "ai": ai_status,
+        "history": history,
+    }
