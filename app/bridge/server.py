@@ -401,6 +401,7 @@ try:
     from app.bridge.routes_arm import (
         handle_arm,
         handle_arm_confirm,
+        handle_arm_precheck,
         handle_arm_prepare,
         handle_command,
         handle_disarm,
@@ -411,6 +412,7 @@ except ImportError:
     from routes_arm import (  # type: ignore
         handle_arm,
         handle_arm_confirm,
+        handle_arm_precheck,
         handle_arm_prepare,
         handle_command,
         handle_disarm,
@@ -8418,45 +8420,16 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/arm/precheck":
-                    report = _run_prearm_hardware_check(gateway, control, body)
-                    if bool(report.get("ok", False)):
-                        prearm = prearm_safety.mark_pass(report)
-                    else:
-                        prearm = prearm_safety.require("prearm_failed")
-                    try:
-                        _report_design_observation(
-                            session_key=(
-                                str(body.get("session_key", "")).strip()
-                                or "local:prearm"
-                            ),
-                            success=bool(report.get("ok", False)),
-                            source="prearm_check",
-                            note=(
-                                str(report.get("summary", "")).strip()
-                                or str(report.get("error", "")).strip()
-                            ),
-                            profile_id=str(body.get("profile_id", "")).strip(),
-                            profile_label=str(body.get("profile_label", "")).strip(),
-                            sketch_revision=str(
-                                body.get("sketch_revision", "")
-                            ).strip(),
-                            test_type="prearm",
-                        )
-                    except Exception:
-                        pass
-                    payload = build_arm_precheck_payload(
-                        report=report,
-                        prearm_safety=prearm,
-                        action_gates=_resolve_action_gates(
-                            gateway, control, prearm_gate=prearm_safety
-                        ),
+                    code, payload = handle_arm_precheck(
+                        body=body,
+                        gateway=gateway,
+                        control=control,
+                        prearm_safety=prearm_safety,
+                        run_prearm_hardware_check_fn=_run_prearm_hardware_check,
+                        report_design_observation_fn=_report_design_observation,
+                        resolve_action_gates_fn=_resolve_action_gates,
                     )
-                    validate_prearm_precheck_response(payload)
-                    return _json(
-                        self,
-                        200 if bool(report.get("ok", False)) else 409,
-                        payload,
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/arm/confirm":
                     _require_action_allowed(

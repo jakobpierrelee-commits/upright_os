@@ -1,7 +1,7 @@
 """
-Arm/disarm route handlers extracted from server.py (Phase C).
+Arm/disarm route handlers extracted from server.py (Phase B/C).
 
-These handlers manage arm, disarm, estop, and command operations.
+These handlers manage arm, disarm, estop, precheck, and command operations.
 """
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -10,13 +10,21 @@ try:
         build_control_payload,
         build_result_control_payload,
     )
-    from app.bridge.clean_safety import build_status_control_payload
+    from app.bridge.clean_safety import (
+        build_arm_precheck_payload,
+        build_status_control_payload,
+    )
+    from app.bridge.clean_contracts import validate_prearm_precheck_response
 except ImportError:
     from clean_misc import (  # type: ignore
         build_control_payload,
         build_result_control_payload,
     )
-    from clean_safety import build_status_control_payload  # type: ignore
+    from clean_safety import (  # type: ignore
+        build_arm_precheck_payload,
+        build_status_control_payload,
+    )
+    from clean_contracts import validate_prearm_precheck_response  # type: ignore
 
 
 def handle_command(
@@ -148,3 +156,55 @@ def handle_estop_reset(
         status=gateway.get_status(),
         control=control.reset_estop(),
     )
+
+
+def handle_arm_precheck(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    prearm_safety: Any,
+    run_prearm_hardware_check_fn: Callable[..., Dict[str, Any]],
+    report_design_observation_fn: Callable[..., None],
+    resolve_action_gates_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /arm/precheck POST request.
+
+    Returns (status_code, payload).
+    Safety-critical: validates hardware state before allowing arm.
+    """
+    report = run_prearm_hardware_check_fn(gateway, control, body)
+    if bool(report.get("ok", False)):
+        prearm = prearm_safety.mark_pass(report)
+    else:
+        prearm = prearm_safety.require("prearm_failed")
+
+    try:
+        report_design_observation_fn(
+            session_key=(
+                str(body.get("session_key", "")).strip() or "local:prearm"
+            ),
+            success=bool(report.get("ok", False)),
+            source="prearm_check",
+            note=(
+                str(report.get("summary", "")).strip()
+                or str(report.get("error", "")).strip()
+            ),
+            profile_id=str(body.get("profile_id", "")).strip(),
+            profile_label=str(body.get("profile_label", "")).strip(),
+            sketch_revision=str(body.get("sketch_revision", "")).strip(),
+            test_type="prearm",
+        )
+    except Exception:
+        pass
+
+    payload = build_arm_precheck_payload(
+        report=report,
+        prearm_safety=prearm,
+        action_gates=resolve_action_gates_fn(
+            gateway, control, prearm_gate=prearm_safety
+        ),
+    )
+    validate_prearm_precheck_response(payload)
+    return (200 if bool(report.get("ok", False)) else 409), payload
