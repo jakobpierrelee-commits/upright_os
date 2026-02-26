@@ -39,3 +39,31 @@ def build_reset_payload(*, reset: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_targets_payload(*, targets: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"ok": True, "targets": targets}
+
+
+def build_picked_payload(*, picked: str) -> Dict[str, Any]:
+    return {"ok": True, "picked": picked}
+
+
+def build_unified_payload(*, unified: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "unified": unified}
+
+
+def build_docs_pack_payload(*, docs_pack: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "docs_pack": docs_pack}
+
+
+def build_validation_payload(*, validation: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "validation": validation}
+
+
+def build_attachment_payload(*, attachment: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "attachment": attachment}
+
+
+def build_replay_payload(*, replay: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "replay": replay}
+
+
+def build_sweep_payload(*, sweep: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "sweep": sweep}

@@ -280,27 +280,41 @@ except ImportError:
     )
 try:
     from app.bridge.clean_misc import (
+        build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
         build_design_payload,
+        build_docs_pack_payload,
         build_firmware_check_payload,
         build_firmware_result_payload,
         build_overwatch_payload,
+        build_picked_payload,
+        build_replay_payload,
         build_reset_payload,
         build_sketch_payload,
+        build_sweep_payload,
         build_targets_payload,
+        build_unified_payload,
+        build_validation_payload,
     )
 except ImportError:
     from clean_misc import (  # type: ignore
+        build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
         build_design_payload,
+        build_docs_pack_payload,
         build_firmware_check_payload,
         build_firmware_result_payload,
         build_overwatch_payload,
+        build_picked_payload,
+        build_replay_payload,
         build_reset_payload,
         build_sketch_payload,
+        build_sweep_payload,
         build_targets_payload,
+        build_unified_payload,
+        build_validation_payload,
     )
 try:
     from app.bridge.clean_request_parsers import (
@@ -12122,7 +12136,7 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "sketch": sk})
                 if u.path == "/firmware/sketch-folder/pick":
                     picked = firmware.pick_sketch_folder()
-                    return _json(self, 200, {"ok": True, "picked": picked})
+                    return _json(self, 200, build_picked_payload(picked=picked))
 
                 if u.path == "/firmware/generate-unified":
                     profile = body.get("profile")
@@ -12135,7 +12149,7 @@ def build_handler(
                         profile=profile,
                         sketch_name=str(sketch_name) if sketch_name else None,
                     )
-                    return _json(self, 200, {"ok": True, "unified": out})
+                    return _json(self, 200, build_unified_payload(unified=out))
 
                 if u.path == "/firmware/generate-docs-pack":
                     profile = body.get("profile")
@@ -12158,7 +12172,7 @@ def build_handler(
                         else None,
                         force_regenerate=force_regenerate,
                     )
-                    return _json(self, 200, {"ok": True, "docs_pack": out})
+                    return _json(self, 200, build_docs_pack_payload(docs_pack=out))
 
                 if u.path == "/profiles/validate":
                     duration_s = float(body.get("duration_s", 12.0))
@@ -12168,7 +12182,7 @@ def build_handler(
                         duration_s=duration_s,
                         sample_interval_s=sample_interval_s,
                     )
-                    return _json(self, 200, {"ok": True, "validation": report})
+                    return _json(self, 200, build_validation_payload(validation=report))
 
                 if u.path == "/firmware/runtime-manifest/validate":
                     sketch = str(body.get("sketch", "")).strip() or None
@@ -12380,7 +12394,9 @@ def build_handler(
                         return _json(self, 400, {"ok": False, "error": str(exc)})
                     except Exception as exc:
                         return _json(self, 500, {"ok": False, "error": str(exc)})
-                    return _json(self, 200, {"ok": True, "attachment": attachment})
+                    return _json(
+                        self, 200, build_attachment_payload(attachment=attachment)
+                    )
 
                 if u.path == "/agent/clean/file/upload":
                     try:
@@ -12389,7 +12405,9 @@ def build_handler(
                         return _json(self, 400, {"ok": False, "error": str(exc)})
                     except Exception as exc:
                         return _json(self, 500, {"ok": False, "error": str(exc)})
-                    return _json(self, 200, {"ok": True, "attachment": attachment})
+                    return _json(
+                        self, 200, build_attachment_payload(attachment=attachment)
+                    )
 
                 if u.path == "/agent/clean/firmware/compile":
                     inputs = resolve_clean_upload_inputs(
@@ -14081,7 +14099,7 @@ def build_handler(
                         cmd_rmse_max=float(body.get("cmd_rmse_max", 6.0)),
                         cmd_abs_max=float(body.get("cmd_abs_max", 20.0)),
                     )
-                    return _json(self, 200, {"ok": True, "replay": out})
+                    return _json(self, 200, build_replay_payload(replay=out))
 
                 if u.path == "/tooling/param-sweep":
                     if (
@@ -14124,7 +14142,7 @@ def build_handler(
                         )
                         runner = ParameterSweepRunner(gateway)
                         report = runner.run(cfg)
-                        return _json(self, 200, {"ok": True, "sweep": report})
+                        return _json(self, 200, build_sweep_payload(sweep=report))
                     except Exception as exc:
                         return _json(
                             self,
