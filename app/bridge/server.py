@@ -316,6 +316,7 @@ try:
         build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
+        build_setup_check_payload,
         build_snapshots_payload,
         build_stats_payload,
         build_sweep_payload,
@@ -348,6 +349,7 @@ except ImportError:
         build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
+        build_setup_check_payload,
         build_snapshots_payload,
         build_stats_payload,
         build_sweep_payload,
@@ -12269,7 +12271,11 @@ def build_handler(
                     except Exception:
                         pass
                     return _json(
-                        self, 200, {"ok": True, "compat_test": out, "attempt": attempt}
+                        self,
+                        200,
+                        build_setup_check_payload(
+                            check_key="compat_test", check_result=out, attempt=attempt
+                        ),
                     )
 
                 if u.path == "/v1/setup/smoke-check":
@@ -12310,7 +12316,11 @@ def build_handler(
                     except Exception:
                         pass
                     return _json(
-                        self, 200, {"ok": True, "smoke_check": out, "attempt": attempt}
+                        self,
+                        200,
+                        build_setup_check_payload(
+                            check_key="smoke_check", check_result=out, attempt=attempt
+                        ),
                     )
 
                 if u.path == "/v1/setup/overwatch-check":
@@ -12353,7 +12363,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "overwatch_check": out, "attempt": attempt},
+                        build_setup_check_payload(
+                            check_key="overwatch_check", check_result=out, attempt=attempt
+                        ),
                     )
 
                 if u.path == "/profiles/save":

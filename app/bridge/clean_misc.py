@@ -139,3 +139,9 @@ def build_tool_metrics_payload(
 
 def build_stats_payload(*, stats: Dict[str, Any], ts: float) -> Dict[str, Any]:
     return {"ok": True, "stats": stats, "ts": ts}
+
+
+def build_setup_check_payload(
+    *, check_key: str, check_result: Dict[str, Any], attempt: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, check_key: check_result, "attempt": attempt}
