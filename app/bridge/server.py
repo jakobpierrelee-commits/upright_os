@@ -502,6 +502,10 @@ except ImportError:
         handle_auth_register,
     )
 try:
+    from app.bridge.routes_design import handle_design_memory_rate
+except ImportError:
+    from routes_design import handle_design_memory_rate  # type: ignore
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -6305,26 +6309,11 @@ def build_handler(
                     return _json(self, 200, build_design_payload(design=row))
 
                 if u.path == "/design-memory/rate":
-                    session_key = (
-                        str(body.get("session_key", "")).strip() or "local:app_dev"
+                    code, payload = handle_design_memory_rate(
+                        body=body,
+                        design_memory=design_memory,
                     )
-                    design_id = str(body.get("design_id", "")).strip()
-                    rating = str(body.get("rating", "")).strip().lower()
-                    note = str(body.get("note", "")).strip()
-                    try:
-                        row = design_memory.rate(
-                            design_id=design_id,
-                            rating=rating,
-                            note=note,
-                            source="user_rating",
-                            session_key=session_key,
-                        )
-                    except RuntimeError as exc:
-                        err = str(exc)
-                        if err == "design_not_found":
-                            return _json(self, 404, {"ok": False, "error": err})
-                        return _json(self, 400, {"ok": False, "error": err})
-                    return _json(self, 200, build_design_payload(design=row))
+                    return _json(self, code, payload)
 
                 if u.path == "/commissioning/run":
                     code, payload = handle_commissioning_run(
