@@ -334,6 +334,7 @@ try:
         build_targets_payload,
         build_tool_metrics_payload,
         build_unified_payload,
+        build_upload_confirm_success_payload,
         build_validation_payload,
     )
 except ImportError:
@@ -372,6 +373,7 @@ except ImportError:
         build_targets_payload,
         build_tool_metrics_payload,
         build_unified_payload,
+        build_upload_confirm_success_payload,
         build_validation_payload,
     )
 try:
@@ -13784,17 +13786,12 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "action": "approved",
-                                "upload_result": {
-                                    "ok": True,
-                                    "sketch": result.data.get("sketch"),
-                                    "board": result.data.get("board"),
-                                    "port": result.data.get("port"),
-                                    "output": result.data.get("output", ""),
-                                },
-                            },
+                            build_upload_confirm_success_payload(
+                                sketch=result.data.get("sketch"),
+                                board=result.data.get("board"),
+                                port=result.data.get("port"),
+                                output=result.data.get("output", ""),
+                            ),
                         )
                     else:
                         # Check for specific error types

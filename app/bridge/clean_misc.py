@@ -192,3 +192,19 @@ def build_command_result_payload(
     *, result: str, status: Dict[str, Any], control: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "result": result, "status": status, "control": control}
+
+
+def build_upload_confirm_success_payload(
+    *, sketch: str, board: str, port: str, output: str
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "approved",
+        "upload_result": {
+            "ok": True,
+            "sketch": sketch,
+            "board": board,
+            "port": port,
+            "output": output,
+        },
+    }
