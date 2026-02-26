@@ -252,6 +252,23 @@ class CodexDB:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_audit_ts ON tool_audit(ts)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_audit_tool ON tool_audit(tool)")
 
+                # Session annotations table (for learning and recall)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS session_annotations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts REAL NOT NULL,
+                        session_id TEXT NOT NULL DEFAULT '',
+                        robot_id TEXT NOT NULL DEFAULT '',
+                        note TEXT NOT NULL,
+                        tags_json TEXT NOT NULL DEFAULT '[]',
+                        severity TEXT NOT NULL DEFAULT 'info',
+                        config_json TEXT NOT NULL DEFAULT '{}'
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_annotations_ts ON session_annotations(ts)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_annotations_session ON session_annotations(session_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_annotations_robot ON session_annotations(robot_id)")
+
             self._initialized = True
             logger.info(f"CodexDB schema initialized at {self.db_path}")
 
@@ -771,6 +788,100 @@ class CodexDB:
         with self._cursor() as cur:
             cur.execute("DELETE FROM tool_audit WHERE ts < ?", (cutoff_ts,))
             return cur.rowcount
+
+    # -------------------------------------------------------------------------
+    # Session Annotations Methods
+    # -------------------------------------------------------------------------
+
+    def save_annotation(
+        self,
+        note: str,
+        tags: List[str],
+        severity: str = "info",
+        related_config: Optional[Dict[str, Any]] = None,
+        ts: Optional[float] = None,
+        session_id: str = "",
+        robot_id: str = "",
+    ) -> int:
+        """
+        Save a session annotation.
+        Returns the inserted annotation ID.
+        """
+        actual_ts = ts if ts is not None else time.time()
+        tags_json = json.dumps(tags) if tags else "[]"
+        config_json = json.dumps(related_config) if related_config else "{}"
+
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO session_annotations
+                (ts, session_id, robot_id, note, tags_json, severity, config_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (actual_ts, session_id, robot_id, note, tags_json, severity, config_json),
+            )
+            return cur.lastrowid or 0
+
+    def query_annotations(
+        self,
+        session_id: Optional[str] = None,
+        robot_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        severity: Optional[str] = None,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query session annotations with optional filters.
+        Returns list of annotation dicts.
+        """
+        query = "SELECT * FROM session_annotations WHERE 1=1"
+        params: List[Any] = []
+
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        if robot_id:
+            query += " AND robot_id = ?"
+            params.append(robot_id)
+        if severity:
+            query += " AND severity = ?"
+            params.append(severity)
+        if start_ts is not None:
+            query += " AND ts >= ?"
+            params.append(start_ts)
+        if end_ts is not None:
+            query += " AND ts <= ?"
+            params.append(end_ts)
+
+        query += " ORDER BY ts DESC LIMIT ?"
+        params.append(limit)
+
+        with self._cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+        results = []
+        for row in rows:
+            ann = {
+                "id": row["id"],
+                "ts": row["ts"],
+                "session_id": row["session_id"],
+                "robot_id": row["robot_id"],
+                "note": row["note"],
+                "tags": json.loads(row["tags_json"]) if row["tags_json"] else [],
+                "severity": row["severity"],
+                "related_config": json.loads(row["config_json"]) if row["config_json"] else {},
+            }
+            # Filter by tags if specified
+            if tags:
+                ann_tags = set(ann["tags"])
+                if not any(t in ann_tags for t in tags):
+                    continue
+            results.append(ann)
+
+        return results
 
     def close(self) -> None:
         """Close the database connection for this thread."""

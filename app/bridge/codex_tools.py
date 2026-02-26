@@ -781,6 +781,42 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "annotate_session",
+            "description": "Add annotation to current session timeline. Useful for marking experiments, observations, and learnings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "Annotation text. What happened, what was learned.",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tags for categorization: 'oscillation', 'breakthrough', 'failed_experiment', etc.",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "success", "warning", "failure"],
+                        "description": "Annotation severity/type.",
+                        "default": "info",
+                    },
+                    "related_config": {
+                        "type": "object",
+                        "description": "Config snapshot to associate with this annotation.",
+                    },
+                    "ts": {
+                        "type": "number",
+                        "description": "Timestamp to annotate. Default is now.",
+                    },
+                },
+                "required": ["note"],
+            },
+        },
+    },
 ]
 
 
@@ -3344,6 +3380,104 @@ class CodexToolExecutor:
             s["rank"] = i + 1
 
         return suggestions
+
+    def _tool_annotate_session(self, args: Dict[str, Any]) -> ToolResult:
+        """
+        Add annotation to current session timeline.
+        Stores in session_annotations table for learning and recall.
+        """
+        note = str(args.get("note", "")).strip()
+        if not note:
+            return ToolResult(
+                ok=False,
+                tool="annotate_session",
+                error="note is required",
+                data={"message": "Annotation note cannot be empty"},
+            )
+
+        tags = args.get("tags", [])
+        if not isinstance(tags, list):
+            tags = [str(tags)] if tags else []
+        tags = [str(t).strip() for t in tags if str(t).strip()]
+
+        severity = str(args.get("severity", "info")).strip().lower()
+        if severity not in ("info", "success", "warning", "failure"):
+            severity = "info"
+
+        related_config = args.get("related_config")
+        if related_config and not isinstance(related_config, dict):
+            related_config = None
+
+        ts = args.get("ts")
+        if ts is not None:
+            try:
+                ts = float(ts)
+            except (TypeError, ValueError):
+                ts = None
+
+        # Generate session ID based on current date
+        session_id = f"session_{time.strftime('%Y%m%d')}"
+
+        # If no related_config provided, capture current state
+        if related_config is None and self.gateway:
+            try:
+                status = self.gateway.get_status()
+                related_config = {
+                    "kp": status.get("kp"),
+                    "ki": status.get("ki"),
+                    "kd": status.get("kd"),
+                    "setpoint": status.get("setpoint"),
+                    "mode": status.get("mode"),
+                }
+            except Exception:
+                related_config = {}
+
+        # Save to database
+        if not self.db:
+            return ToolResult(
+                ok=False,
+                tool="annotate_session",
+                error="database_not_configured",
+                data={"message": "Database required for annotations"},
+            )
+
+        try:
+            actual_ts = ts if ts is not None else time.time()
+            annotation_id = self.db.save_annotation(
+                note=note,
+                tags=tags,
+                severity=severity,
+                related_config=related_config,
+                ts=actual_ts,
+                session_id=session_id,
+                robot_id=self.active_robot_id or "",
+            )
+
+            # Generate annotation ID string
+            ann_id_str = f"ann_{time.strftime('%Y%m%d_%H%M%S', time.localtime(actual_ts))}"
+
+            return ToolResult(
+                ok=True,
+                tool="annotate_session",
+                data={
+                    "annotation_id": ann_id_str,
+                    "db_id": annotation_id,
+                    "ts": actual_ts,
+                    "note": note,
+                    "tags": tags,
+                    "severity": severity,
+                    "session_id": session_id,
+                    "related_config": related_config or {},
+                },
+            )
+        except Exception as e:
+            logger.error(f"Failed to save annotation: {e}")
+            return ToolResult(
+                ok=False,
+                tool="annotate_session",
+                error=f"save_failed: {e}",
+                data={"message": str(e)},
+            )
 
 
 def get_tool_definitions() -> List[Dict[str, Any]]:

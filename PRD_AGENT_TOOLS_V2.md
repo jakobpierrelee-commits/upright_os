@@ -1,11 +1,11 @@
 # PRD: CodexAgent Tools v2 — Advanced Tuning Intelligence
 
-**Status:** Implemented (T3 partial)  
+**Status:** ✅ Implemented (Complete)  
 **Priority:** High  
 **Depends on:** PR1-4 (Tool UI, Upload UX, Failure Handling, RAG Indexing)
 
-> **Implementation Note (2026-02-26):** T1 and T2 complete. T3 ships with 2/3 tools.
-> `annotate_session` deferred to v2.1 — requires new DB table and session tracking infrastructure.
+> **Implementation Note (2026-02-26):** All 8 PRD tools implemented. T1, T2, T3 complete.
+> `execute_shell` added as approved utility extension (9 total tools).
 
 ---
 
@@ -36,7 +36,7 @@ Add 8 new tools in 3 tiers:
 | **T2** | `safe_rollback` | Structured testing | **wrapper** | Wraps `query_checkpoints` + `execute_command` |
 | **T3** | `simulate_pid_response` | ML/prediction | **new capability** | — |
 | **T3** | `suggest_next_step` | ML/prediction | **new capability** | — |
-| **T3** | `annotate_session` | ML/prediction | **deferred v2.1** | — |
+| **T3** | `annotate_session` | ML/prediction | **new capability** | `session_annotations` table |
 | **Utility** | `execute_shell` | Build/test workflows | **approved extension** | Terminal command execution in workspace |
 
 ### Integration Mode Legend

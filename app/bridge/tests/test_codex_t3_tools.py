@@ -456,5 +456,124 @@ class TestT3Integration:
         mock_gateway.command.assert_not_called()
 
 
+# ============================================================================
+# annotate_session Tests
+# ============================================================================
+
+class TestAnnotateSession:
+    """Tests for annotate_session tool."""
+
+    def _make_executor_with_db(self, gateway=None):
+        """Create executor with mocked DB."""
+        mock_db = MagicMock()
+        mock_db.save_annotation.return_value = 42  # Return a mock annotation ID
+        return CodexToolExecutor(gateway=gateway, db=mock_db), mock_db
+
+    def test_annotate_success_returns_annotation_data(self):
+        """annotate_session with valid note returns annotation details."""
+        executor, mock_db = self._make_executor_with_db()
+        result = executor.execute("annotate_session", {
+            "note": "Kp=22 caused oscillation. Reduced to 18.",
+            "tags": ["oscillation", "pid_tuning"],
+            "severity": "success",
+        })
+
+        assert result.ok
+        assert result.tool == "annotate_session"
+        assert "annotation_id" in result.data
+        assert "ts" in result.data
+        assert result.data["note"] == "Kp=22 caused oscillation. Reduced to 18."
+        assert result.data["tags"] == ["oscillation", "pid_tuning"]
+        assert result.data["severity"] == "success"
+        assert "session_id" in result.data
+
+        # Verify DB was called
+        mock_db.save_annotation.assert_called_once()
+
+    def test_annotate_empty_note_fails(self):
+        """annotate_session with empty note fails."""
+        executor, _ = self._make_executor_with_db()
+        result = executor.execute("annotate_session", {
+            "note": "",
+        })
+
+        assert not result.ok
+        assert result.error == "note is required"
+
+    def test_annotate_without_db_fails(self):
+        """annotate_session without database fails gracefully."""
+        executor = CodexToolExecutor(db=None)
+        result = executor.execute("annotate_session", {
+            "note": "Test annotation",
+        })
+
+        assert not result.ok
+        assert "database" in result.error.lower()
+
+    def test_annotate_invalid_severity_defaults_to_info(self):
+        """annotate_session with invalid severity defaults to info."""
+        executor, mock_db = self._make_executor_with_db()
+        result = executor.execute("annotate_session", {
+            "note": "Test annotation",
+            "severity": "invalid_severity",
+        })
+
+        assert result.ok
+        assert result.data["severity"] == "info"
+
+    def test_annotate_with_custom_timestamp(self):
+        """annotate_session accepts custom timestamp."""
+        executor, mock_db = self._make_executor_with_db()
+        custom_ts = 1739922600.0
+        result = executor.execute("annotate_session", {
+            "note": "Historical annotation",
+            "ts": custom_ts,
+        })
+
+        assert result.ok
+        assert result.data["ts"] == custom_ts
+
+    def test_annotate_with_related_config(self):
+        """annotate_session stores related config."""
+        executor, mock_db = self._make_executor_with_db()
+        config = {"kp": 20, "ki": 0.1, "kd": 0.6}
+        result = executor.execute("annotate_session", {
+            "note": "Saved at this config",
+            "related_config": config,
+        })
+
+        assert result.ok
+        assert result.data["related_config"] == config
+
+    def test_annotate_captures_current_config_if_not_provided(self):
+        """annotate_session captures current config when not provided."""
+        mock_gateway = MagicMock()
+        mock_gateway.get_status.return_value = {
+            "kp": 18.0, "ki": 0.1, "kd": 0.6,
+            "setpoint": 0.0, "mode": "BALANCING",
+        }
+        executor, mock_db = self._make_executor_with_db(gateway=mock_gateway)
+
+        result = executor.execute("annotate_session", {
+            "note": "Auto-captured config",
+        })
+
+        assert result.ok
+        assert result.data["related_config"]["kp"] == 18.0
+        assert result.data["related_config"]["ki"] == 0.1
+
+    def test_annotate_all_severity_levels_accepted(self):
+        """annotate_session accepts all valid severity levels."""
+        executor, mock_db = self._make_executor_with_db()
+
+        for severity in ["info", "success", "warning", "failure"]:
+            result = executor.execute("annotate_session", {
+                "note": f"Test {severity}",
+                "severity": severity,
+            })
+            assert result.ok
+            assert result.data["severity"] == severity
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
