@@ -273,6 +273,28 @@ except ImportError:
         build_unified_schema_payload,
     )
 try:
+    from app.bridge.clean_misc import (
+        build_boards_payload,
+        build_capabilities_payload,
+        build_design_payload,
+        build_firmware_check_payload,
+        build_firmware_result_payload,
+        build_overwatch_payload,
+        build_reset_payload,
+        build_sketch_payload,
+    )
+except ImportError:
+    from clean_misc import (  # type: ignore
+        build_boards_payload,
+        build_capabilities_payload,
+        build_design_payload,
+        build_firmware_check_payload,
+        build_firmware_result_payload,
+        build_overwatch_payload,
+        build_reset_payload,
+        build_sketch_payload,
+    )
+try:
     from app.bridge.clean_request_parsers import (
         parse_clean_chat_request,
         parse_clean_preflight_request,
@@ -11414,11 +11436,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "sketch": firmware.read_sketch(path=path)},
+                        build_sketch_payload(sketch=firmware.read_sketch(path=path)),
                     )
                 if u.path == "/firmware/boards":
                     return _json(
-                        self, 200, {"ok": True, "boards": firmware.list_boards()}
+                        self, 200, build_boards_payload(boards=firmware.list_boards())
                     )
                 if u.path == "/firmware/targets":
                     payload = {"ok": True, "targets": firmware.list_targets()}
@@ -11575,7 +11597,7 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "capabilities": caps, "source": "status_only"},
+                        build_capabilities_payload(capabilities=caps, source="status_only"),
                     )
                 if u.path == "/overwatch/status":
                     q = parse_qs(u.query)
@@ -11585,7 +11607,9 @@ def build_handler(
                     if not force_refresh:
                         cached = cached_probe("overwatch")
                         if cached is not None:
-                            return _json(self, 200, {"ok": True, "overwatch": cached})
+                            return _json(
+                                self, 200, build_overwatch_payload(overwatch=cached)
+                            )
 
                     compat = cached_probe("compat")
                     if compat is None:
@@ -11624,7 +11648,9 @@ def build_handler(
                         connect=connect if isinstance(connect, dict) else None,
                     )
                     store_probe("overwatch", report)
-                    return _json(self, 200, {"ok": True, "overwatch": report})
+                    return _json(
+                        self, 200, build_overwatch_payload(overwatch=report)
+                    )
                 if u.path == "/v1/setup/attempt-history":
                     q = parse_qs(u.query)
                     limit = int((q.get("limit", ["40"]) or ["40"])[0] or 40)
