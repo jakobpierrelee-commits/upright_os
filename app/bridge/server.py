@@ -291,6 +291,7 @@ try:
         build_action_payload,
         build_active_profiles_payload,
         build_agent_state_payload,
+        build_attempt_history_payload,
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
@@ -320,6 +321,7 @@ except ImportError:
         build_action_payload,
         build_active_profiles_payload,
         build_agent_state_payload,
+        build_attempt_history_payload,
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
@@ -11714,12 +11716,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "attempts": page.get("attempts", []),
-                            "next_cursor": page.get("next_cursor", ""),
-                            "has_more": bool(page.get("has_more", False)),
-                        },
+                        build_attempt_history_payload(
+                            attempts=page.get("attempts", []),
+                            next_cursor=page.get("next_cursor", ""),
+                            has_more=bool(page.get("has_more", False)),
+                        ),
                     )
                 if u.path == "/profiles":
                     return _json(

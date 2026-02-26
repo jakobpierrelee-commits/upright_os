@@ -113,3 +113,9 @@ def build_active_profiles_payload(
 
 def build_snapshots_payload(*, snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"ok": True, "snapshots": snapshots}
+
+
+def build_attempt_history_payload(
+    *, attempts: List[Dict[str, Any]], next_cursor: str, has_more: bool
+) -> Dict[str, Any]:
+    return {"ok": True, "attempts": attempts, "next_cursor": next_cursor, "has_more": has_more}
