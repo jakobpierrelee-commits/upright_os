@@ -293,6 +293,28 @@ except ImportError:
         handle_commissioning_step,
     )
 try:
+    from app.bridge.routes_firmware import (
+        handle_firmware_compile,
+        handle_firmware_generate_docs_pack,
+        handle_firmware_generate_unified,
+        handle_firmware_install_cli,
+        handle_firmware_sketch_folder_pick,
+        handle_firmware_sketch_write,
+        handle_firmware_upload,
+        handle_firmware_upload_guarded,
+    )
+except ImportError:
+    from routes_firmware import (  # type: ignore
+        handle_firmware_compile,
+        handle_firmware_generate_docs_pack,
+        handle_firmware_generate_unified,
+        handle_firmware_install_cli,
+        handle_firmware_sketch_folder_pick,
+        handle_firmware_sketch_write,
+        handle_firmware_upload,
+        handle_firmware_upload_guarded,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -12157,91 +12179,40 @@ def build_handler(
                     )
 
                 if u.path == "/firmware/compile":
-                    st = firmware.compile(
-                        sketch=body.get("sketch"), fqbn=body.get("fqbn")
-                    )
-                    return _json(
-                        self, 200, build_firmware_result_payload(firmware=st)
-                    )
+                    code, payload = handle_firmware_compile(body=body, firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/upload":
-                    st = firmware.upload(
-                        sketch=body.get("sketch"),
-                        fqbn=body.get("fqbn"),
-                        port=body.get("port"),
+                    code, payload = handle_firmware_upload(
+                        body=body, firmware=firmware, prearm_safety=prearm_safety
                     )
-                    prearm_safety.require("firmware_upload")
-                    return _json(
-                        self, 200, build_firmware_result_payload(firmware=st)
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/upload-guarded":
-                    st = firmware.upload_guarded(
-                        gateway=gateway,
-                        sketch=body.get("sketch"),
-                        fqbn=body.get("fqbn"),
-                        port=body.get("port"),
+                    code, payload = handle_firmware_upload_guarded(
+                        body=body, firmware=firmware, gateway=gateway, prearm_safety=prearm_safety
                     )
-                    prearm_safety.require("firmware_upload_guarded")
-                    return _json(
-                        self, 200, build_firmware_result_payload(firmware=st)
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/install-cli":
-                    st = firmware.install_cli()
-                    return _json(
-                        self, 200, build_firmware_result_payload(firmware=st)
-                    )
+                    code, payload = handle_firmware_install_cli(firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/sketch":
-                    content = str(body.get("content", ""))
-                    path = body.get("path")
-                    profile = body.get("profile")
-                    sk = firmware.write_sketch(
-                        content=content,
-                        path=path,
-                        profile=profile if isinstance(profile, dict) else None,
-                    )
-                    return _json(self, 200, build_sketch_write_payload(sketch=sk))
+                    code, payload = handle_firmware_sketch_write(body=body, firmware=firmware)
+                    return _json(self, code, payload)
+
                 if u.path == "/firmware/sketch-folder/pick":
-                    picked = firmware.pick_sketch_folder()
-                    return _json(self, 200, build_picked_payload(picked=picked))
+                    code, payload = handle_firmware_sketch_folder_pick(firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/generate-unified":
-                    profile = body.get("profile")
-                    if not isinstance(profile, dict):
-                        return _json(
-                            self, 400, {"ok": False, "error": "profile_object_required"}
-                        )
-                    sketch_name = body.get("sketch_name")
-                    out = firmware.generate_unified(
-                        profile=profile,
-                        sketch_name=str(sketch_name) if sketch_name else None,
-                    )
-                    return _json(self, 200, build_unified_payload(unified=out))
+                    code, payload = handle_firmware_generate_unified(body=body, firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/generate-docs-pack":
-                    profile = body.get("profile")
-                    if not isinstance(profile, dict):
-                        return _json(
-                            self, 400, {"ok": False, "error": "profile_object_required"}
-                        )
-                    sketch_name = body.get("sketch_name")
-                    sketch_content = body.get("sketch_content")
-                    sketch_path = body.get("sketch_path")
-                    force_regenerate = bool(body.get("force_regenerate", False))
-                    out = firmware.generate_docs_pack(
-                        profile=profile,
-                        sketch_name=str(sketch_name) if sketch_name else None,
-                        sketch_content=str(sketch_content)
-                        if isinstance(sketch_content, str)
-                        else None,
-                        sketch_path=str(sketch_path)
-                        if isinstance(sketch_path, str)
-                        else None,
-                        force_regenerate=force_regenerate,
-                    )
-                    return _json(self, 200, build_docs_pack_payload(docs_pack=out))
+                    code, payload = handle_firmware_generate_docs_pack(body=body, firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/profiles/validate":
                     duration_s = float(body.get("duration_s", 12.0))
