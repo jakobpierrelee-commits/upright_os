@@ -248,6 +248,7 @@ except ImportError:
     )
 try:
     from app.bridge.clean_ai import (
+        build_agent_thread_state_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
@@ -260,6 +261,7 @@ try:
     )
 except ImportError:
     from clean_ai import (  # type: ignore
+        build_agent_thread_state_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
@@ -12810,15 +12812,14 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "agent": mode_state,
-                            "thread": thread,
-                            "threads": ai.list_threads(session_key),
-                            "history": ai.history(session_key, str(thread.get("id")))[
+                        build_agent_thread_state_payload(
+                            agent=mode_state,
+                            thread=thread,
+                            threads=ai.list_threads(session_key),
+                            history=ai.history(session_key, str(thread.get("id")))[
                                 -80:
                             ],
-                        },
+                        ),
                     )
 
                 if u.path == "/agent/thread/select":
@@ -12852,13 +12853,12 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "agent": mode_state,
-                            "thread": thread,
-                            "threads": ai.list_threads(session_key),
-                            "history": ai.history(session_key, thread_id)[-80:],
-                        },
+                        build_agent_thread_state_payload(
+                            agent=mode_state,
+                            thread=thread,
+                            threads=ai.list_threads(session_key),
+                            history=ai.history(session_key, thread_id)[-80:],
+                        ),
                     )
 
                 if u.path == "/agent/chat":
