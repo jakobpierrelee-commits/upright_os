@@ -103,3 +103,9 @@ def build_revert_control_payload(
 
 def build_control_payload(*, control: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "control": control}
+
+
+def build_active_profiles_payload(
+    *, active: Dict[str, Any], profiles: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    return {"ok": True, "active": active, "profiles": profiles}

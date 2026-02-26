@@ -283,6 +283,7 @@ except ImportError:
 try:
     from app.bridge.clean_misc import (
         build_action_payload,
+        build_active_profiles_payload,
         build_agent_state_payload,
         build_attachment_payload,
         build_boards_payload,
@@ -310,6 +311,7 @@ try:
 except ImportError:
     from clean_misc import (  # type: ignore
         build_action_payload,
+        build_active_profiles_payload,
         build_agent_state_payload,
         build_attachment_payload,
         build_boards_payload,
@@ -12382,7 +12384,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "active": out, "profiles": profiles.list()},
+                        build_active_profiles_payload(
+                            active=out, profiles=profiles.list()
+                        ),
                     )
 
                 if u.path == "/profiles/delete":
