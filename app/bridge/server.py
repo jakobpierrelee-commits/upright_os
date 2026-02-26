@@ -329,6 +329,26 @@ except ImportError:
         handle_profiles_validate,
     )
 try:
+    from app.bridge.routes_arm import (
+        handle_arm,
+        handle_arm_confirm,
+        handle_arm_prepare,
+        handle_command,
+        handle_disarm,
+        handle_estop_latch,
+        handle_estop_reset,
+    )
+except ImportError:
+    from routes_arm import (  # type: ignore
+        handle_arm,
+        handle_arm_confirm,
+        handle_arm_prepare,
+        handle_command,
+        handle_disarm,
+        handle_estop_latch,
+        handle_estop_reset,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -14126,35 +14146,13 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/command":
-                    cmd = str(body.get("cmd", "")).strip()
-                    if not cmd:
-                        return _json(self, 400, {"ok": False, "error": "missing cmd"})
-                    if control.snapshot()["estop_latched"] and _blocked_while_latched(
-                        cmd
-                    ):
-                        return _json(
-                            self,
-                            423,
-                            {
-                                "ok": False,
-                                "error": "estop_latched",
-                                "control": control.snapshot(),
-                            },
-                        )
-                    expect = body.get("expect")
-                    timeout = float(body.get("timeout", 2.0))
-                    res = (
-                        gateway.command(
-                            cmd, expect_contains=str(expect), timeout=timeout
-                        )
-                        if expect
-                        else gateway.command(cmd, timeout=timeout)
+                    code, payload = handle_command(
+                        body=body,
+                        gateway=gateway,
+                        control=control,
+                        blocked_while_latched_fn=_blocked_while_latched,
                     )
-                    return _json(
-                        self,
-                        200,
-                        build_result_control_payload(result=res, control=control.snapshot()),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/burst/arm":
                     _require_action_allowed(
@@ -14184,9 +14182,8 @@ def build_handler(
                     _require_action_allowed(
                         "arm_prepare", gateway, control, prearm_gate=prearm_safety
                     )
-                    return _json(
-                        self, 200, build_control_payload(control=control.prepare_arm())
-                    )
+                    code, payload = handle_arm_prepare(control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/arm/precheck":
                     report = _run_prearm_hardware_check(gateway, control, body)
@@ -14233,68 +14230,30 @@ def build_handler(
                     _require_action_allowed(
                         "arm_confirm", gateway, control, prearm_gate=prearm_safety
                     )
-                    control.consume_arm_prepare()
-                    gateway.command("ARM", timeout=1.0)
-                    return _json(
-                        self,
-                        200,
-                        build_status_control_payload(
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_arm_confirm(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/arm":
                     _require_action_allowed(
                         "arm", gateway, control, prearm_gate=prearm_safety
                     )
-                    gateway.command("ARM", timeout=1.0)
-                    control.clear_arm_prepare()
-                    return _json(
-                        self,
-                        200,
-                        build_status_control_payload(
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_arm(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/disarm":
                     _require_action_allowed(
                         "disarm", gateway, control, prearm_gate=prearm_safety
                     )
-                    gateway.command("DISARM", timeout=1.0)
-                    control.clear_arm_prepare()
-                    return _json(
-                        self,
-                        200,
-                        build_status_control_payload(
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_disarm(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/estop/latch":
-                    gateway.command("DISARM", timeout=1.0)
-                    return _json(
-                        self,
-                        200,
-                        build_status_control_payload(
-                            status=gateway.get_status(),
-                            control=control.latch_estop(),
-                        ),
-                    )
+                    code, payload = handle_estop_latch(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/estop/reset":
-                    gateway.command("DISARM", timeout=1.0)
-                    return _json(
-                        self,
-                        200,
-                        build_status_control_payload(
-                            status=gateway.get_status(),
-                            control=control.reset_estop(),
-                        ),
-                    )
+                    code, payload = handle_estop_reset(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/cal_zero":
                     _require_action_allowed("cal_zero", gateway, control)
