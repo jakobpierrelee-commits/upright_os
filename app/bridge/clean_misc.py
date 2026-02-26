@@ -67,3 +67,15 @@ def build_replay_payload(*, replay: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_sweep_payload(*, sweep: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "sweep": sweep}
+
+
+def build_profiles_list_payload(*, profiles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"ok": True, "profiles": profiles}
+
+
+def build_agent_state_payload(*, agent: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "agent": agent}
+
+
+def build_action_payload(*, action: str) -> Dict[str, Any]:
+    return {"ok": True, "action": action}

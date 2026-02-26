@@ -280,6 +280,8 @@ except ImportError:
     )
 try:
     from app.bridge.clean_misc import (
+        build_action_payload,
+        build_agent_state_payload,
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
@@ -289,6 +291,7 @@ try:
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
+        build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
         build_sketch_payload,
@@ -299,6 +302,8 @@ try:
     )
 except ImportError:
     from clean_misc import (  # type: ignore
+        build_action_payload,
+        build_agent_state_payload,
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
@@ -308,6 +313,7 @@ except ImportError:
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
+        build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
         build_sketch_payload,
@@ -12374,7 +12380,7 @@ def build_handler(
                             self, 400, {"ok": False, "error": "profile_id_required"}
                         )
                     out = profiles.delete(profile_id)
-                    return _json(self, 200, {"ok": True, "profiles": out})
+                    return _json(self, 200, build_profiles_list_payload(profiles=out))
 
                 if u.path == "/config/revert":
                     snapshot_id = str(body.get("snapshot_id", "")).strip() or None
@@ -12765,7 +12771,7 @@ def build_handler(
                                 },
                             )
                         raise
-                    return _json(self, 200, {"ok": True, "agent": state})
+                    return _json(self, 200, build_agent_state_payload(agent=state))
 
                 if u.path == "/agent/thread/new":
                     guard = _legacy_execution_guard(u.path)
@@ -13705,7 +13711,7 @@ def build_handler(
                             codex_agent.tool_executor._pending_uploads.pop(
                                 confirm_token, None
                             )
-                        return _json(self, 200, {"ok": True, "action": "rejected"})
+                        return _json(self, 200, build_action_payload(action="rejected"))
                     # Approve action - execute the upload
                     if codex_agent is None:
                         return _json(
