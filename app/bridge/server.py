@@ -11815,7 +11815,7 @@ def build_handler(
                 if u.path == "/auth/password-reset/request":
                     email = str(body.get("email", ""))
                     out = auth.request_password_reset(email)
-                    return _json(self, 200, {"ok": True, "reset": out})
+                    return _json(self, 200, build_reset_payload(reset=out))
 
                 if u.path == "/auth/password-reset/confirm":
                     email = str(body.get("email", ""))
