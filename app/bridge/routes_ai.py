@@ -7,13 +7,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     from app.bridge.clean_ai import (
+        build_ai_status_payload,
         build_ai_thread_payload,
         build_ai_profiles_payload,
+        build_ai_knowledge_payload,
     )
 except ImportError:
     from clean_ai import (  # type: ignore
+        build_ai_status_payload,
         build_ai_thread_payload,
         build_ai_profiles_payload,
+        build_ai_knowledge_payload,
     )
 
 
@@ -141,3 +145,48 @@ def handle_agent_file_upload(
     except Exception as exc:
         return 500, {"ok": False, "error": str(exc)}
     return 200, build_attachment_payload_fn(attachment=attachment)
+
+
+def handle_ai_status_get(
+    *,
+    me: Optional[Dict[str, Any]],
+    ai: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /ai/status GET request.
+
+    Returns (status_code, payload).
+    Works for both authenticated and unauthenticated users.
+    """
+    if not me:
+        return 200, build_ai_status_payload(
+            ai_status=ai.status(
+                configured=False,
+                model="gpt-5-codex",
+                session_key="anon",
+            ),
+            history=[],
+            threads=[],
+        )
+    model = str(me.get("openai_model") or "gpt-5-codex")
+    configured = bool(me.get("openai_configured"))
+    skey = f"user:{me['id']}"
+    st = ai.status(configured=configured, model=model, session_key=skey)
+    tid = st.get("active_thread_id")
+    return 200, build_ai_status_payload(
+        ai_status=st,
+        history=ai.history(skey, tid)[-80:],
+        threads=ai.list_threads(skey),
+    )
+
+
+def handle_ai_knowledge_get(
+    *,
+    knowledge: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /ai/knowledge GET request.
+
+    Returns (status_code, payload).
+    """
+    return 200, build_ai_knowledge_payload(knowledge=knowledge.context())

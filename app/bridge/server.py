@@ -456,18 +456,22 @@ except ImportError:
 try:
     from app.bridge.routes_ai import (
         handle_agent_file_upload,
+        handle_ai_knowledge_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
+        handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
         handle_agent_file_upload,
+        handle_ai_knowledge_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
+        handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
     )
@@ -5633,34 +5637,8 @@ def build_handler(
                 if u.path == "/ai/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
-                    if not me:
-                        return _json(
-                            self,
-                            200,
-                            build_ai_status_payload(
-                                ai_status=ai.status(
-                                    configured=False,
-                                    model="gpt-5-codex",
-                                    session_key="anon",
-                                ),
-                                history=[],
-                                threads=[],
-                            ),
-                        )
-                    model = str(me.get("openai_model") or "gpt-5-codex")
-                    configured = bool(me.get("openai_configured"))
-                    skey = f"user:{me['id']}"
-                    st = ai.status(configured=configured, model=model, session_key=skey)
-                    tid = st.get("active_thread_id")
-                    return _json(
-                        self,
-                        200,
-                        build_ai_status_payload(
-                            ai_status=st,
-                            history=ai.history(skey, tid)[-80:],
-                            threads=ai.list_threads(skey),
-                        ),
-                    )
+                    code, payload = handle_ai_status_get(me=me, ai=ai)
+                    return _json(self, code, payload)
                 if u.path == "/agent/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok) if tok else None
@@ -5843,11 +5821,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(
-                        self,
-                        200,
-                        build_ai_knowledge_payload(knowledge=knowledge.context()),
-                    )
+                    code, payload = handle_ai_knowledge_get(knowledge=knowledge)
+                    return _json(self, code, payload)
                 if u.path == "/auth/me":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
