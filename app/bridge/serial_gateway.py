@@ -14,9 +14,14 @@ import serial
 
 def parse_status_line(line: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
-    if not line.startswith("STATUS "):
+    payload = ""
+    if line.startswith("STATUS "):
+        payload = line[len("STATUS ") :]
+    elif line.startswith("S "):
+        payload = line[len("S ") :]
+    else:
         return out
-    for tok in line.split()[1:]:
+    for tok in payload.split():
         if "=" in tok:
             k, v = tok.split("=", 1)
             out[k] = v
@@ -184,11 +189,17 @@ class NanoSerialGateway:
 
     def get_status(self, timeout: float = 2.5, priority: int = 3) -> Dict[str, str]:
         try:
-            res = self.command("GET", expect_prefix="STATUS ", timeout=timeout, priority=priority)
-            line = res["matched"]
-            status = parse_status_line(line)
+            res = self.command("GET", timeout=timeout, priority=priority)
+            lines = list(res.get("lines", []))
+            status: Dict[str, str] = {}
+            for line in reversed(lines):
+                status = parse_status_line(str(line))
+                if status:
+                    break
             if not status:
-                raise RuntimeError(f"Failed to parse status from: {line}")
+                status = parse_status_line(str(res.get("matched", "")))
+            if not status:
+                raise RuntimeError(f"Failed to parse status from: {lines[-5:] if lines else []}")
             return status
         except Exception:
             with self._state_lock:
@@ -360,8 +371,9 @@ class NanoSerialGateway:
 
         with self._state_lock:
             self._recent_lines.append(line)
-            if line.startswith("STATUS "):
-                self._last_status = parse_status_line(line)
+            parsed = parse_status_line(line)
+            if parsed:
+                self._last_status = parsed
                 self._last_status_ts = time.monotonic()
         return line
 
