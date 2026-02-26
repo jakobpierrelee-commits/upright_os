@@ -11501,7 +11501,9 @@ def build_handler(
                     )
                     cached = cached_probe(cache_key)
                     if cached is not None:
-                        return _json(self, 200, {"ok": True, "compat": cached})
+                        return _json(
+                            self, 200, build_compat_probe_payload(compat=cached)
+                        )
                     # Throttle probe pressure when queue is already busy.
                     if int(gateway.health().get("queue_depth", 0) or 0) > 2:
                         fallback = {
