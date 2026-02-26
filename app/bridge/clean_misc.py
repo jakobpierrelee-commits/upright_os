@@ -79,3 +79,13 @@ def build_agent_state_payload(*, agent: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_action_payload(*, action: str) -> Dict[str, Any]:
     return {"ok": True, "action": action}
+
+
+def build_result_payload(*, result: str) -> Dict[str, Any]:
+    return {"ok": True, "result": result}
+
+
+def build_result_control_payload(
+    *, result: Dict[str, Any], control: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "result": result, "control": control}

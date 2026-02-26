@@ -294,6 +294,8 @@ try:
         build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
+        build_result_control_payload,
+        build_result_payload,
         build_sketch_payload,
         build_sweep_payload,
         build_targets_payload,
@@ -316,6 +318,8 @@ except ImportError:
         build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
+        build_result_control_payload,
+        build_result_payload,
         build_sketch_payload,
         build_sweep_payload,
         build_targets_payload,
@@ -11848,7 +11852,7 @@ def build_handler(
                     token = str(body.get("token", ""))
                     new_password = str(body.get("new_password", ""))
                     auth.reset_password(email, token, new_password)
-                    return _json(self, 200, {"ok": True, "result": "password_reset"})
+                    return _json(self, 200, build_result_payload(result="password_reset"))
 
                 if u.path == "/auth/logout":
                     tok = _extract_auth_token(self, body)
@@ -14660,7 +14664,7 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "result": res, "control": control.snapshot()},
+                        build_result_control_payload(result=res, control=control.snapshot()),
                     )
 
                 if u.path == "/burst/arm":
@@ -15038,7 +15042,7 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "result": res, "control": control.snapshot()},
+                        build_result_control_payload(result=res, control=control.snapshot()),
                     )
 
                 if u.path == "/loadcfg":
