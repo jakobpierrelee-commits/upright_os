@@ -25,3 +25,9 @@ def build_telemetry_adapters_payload(
 
 def build_unified_schema_payload(*, schema: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "schema": schema}
+
+
+def build_result_status_control_payload(
+    *, result: str, status: Dict[str, Any], control: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "result": result, "status": status, "control": control}

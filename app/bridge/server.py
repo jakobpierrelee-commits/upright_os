@@ -295,12 +295,14 @@ except ImportError:
 try:
     from app.bridge.clean_serial import (
         build_diag_serial_payload,
+        build_result_status_control_payload,
         build_telemetry_adapters_payload,
         build_unified_schema_payload,
     )
 except ImportError:
     from clean_serial import (  # type: ignore
         build_diag_serial_payload,
+        build_result_status_control_payload,
         build_telemetry_adapters_payload,
         build_unified_schema_payload,
     )
@@ -15071,12 +15073,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_result_status_control_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/defaultcfg":
@@ -15086,12 +15087,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_result_status_control_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/pid":
