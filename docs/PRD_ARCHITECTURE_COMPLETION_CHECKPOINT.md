@@ -77,18 +77,18 @@ app/bridge/domains/
 ### Phase B — Composition Root Slim-down
 
 | Deliverable | Status | Action Required |
-|-------------|--------|-----------------|
-| `server.py` reduced to composition/wiring only | 🔴 Not started | Extract business logic to domains |
-| Route registration only in server.py | 🔴 Not started | Move handlers to domain routes |
+|-------------|--------|------------------|
+| `server.py` reduced to composition/wiring only | � In Progress | 9,108 → 9,083 lines (route extraction ongoing) |
+| Route registration only in server.py | � In Progress | Handlers extracted to `routes_health.py`, `routes_profiles.py`, `routes_firmware.py` |
 | Parity tests for moved handlers | 🔴 Not started | Add tests |
 
 ### Phase C — Domain-Slice Refactor
 
 | Slice | Status | Priority |
 |-------|--------|----------|
-| health/status routes | 🔴 Not started | 1 (lowest risk) |
-| profiles/compat routes | 🔴 Not started | 2 |
-| firmware lifecycle routes | 🔴 Not started | 3 |
+| health/status routes | ✅ Complete | 1 — `routes_health.py` |
+| profiles/compat routes | ✅ Complete | 2 — `routes_profiles.py` |
+| firmware lifecycle routes | ✅ Complete | 3 — `routes_firmware.py` |
 | preflight/prearm safety wrappers | 🔴 Not started | 4 |
 | codex/chat route wrappers | 🔴 Not started | 5 |
 | tuning intelligence routes | 🔴 Not started | 6 (highest risk) |
