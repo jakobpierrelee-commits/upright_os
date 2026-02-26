@@ -199,7 +199,7 @@ Restart queue is frozen in this order for initial decomposition pass:
 | 1 | `health/status` routes | Low | ✅ Complete (routes_health.py) |
 | 2 | `profiles/compat` routes | Low | ✅ Complete (routes_profiles.py extended) |
 | 3 | `firmware lifecycle` routes | Medium | ✅ Complete (routes_firmware.py: 10 GET + 9 POST) |
-| 4 | `preflight/prearm` safety wrappers | Medium (no behavior drift) | 🔴 Not started |
+| 4 | `preflight/prearm` safety wrappers | Medium (no behavior drift) | ✅ Complete (handle_arm_precheck in routes_arm.py) |
 | 5 | `codex/chat` route wrappers | Medium | 🔴 Not started |
 | 6 | `tuning intelligence` routes | High (safety-adjacent) | 🔴 Not started |
 
