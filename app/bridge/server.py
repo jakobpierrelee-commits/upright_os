@@ -13844,13 +13844,12 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "since_hours": since_hours,
-                                "tool_metrics": tool_metrics,
-                                "db_stats": db_stats,
-                                "ts": time.time(),
-                            },
+                            build_tool_metrics_payload(
+                                since_hours=since_hours,
+                                tool_metrics=tool_metrics,
+                                db_stats=db_stats,
+                                ts=time.time(),
+                            ),
                         )
                     except Exception as exc:
                         logger.warning(f"Metrics fetch error: {exc}")
