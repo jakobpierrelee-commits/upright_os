@@ -17,8 +17,14 @@ How scoring works:
 
 - Sprint name: `Clean Lane Reliability + Execution Parity`
 - Owner: `Codex + JVKE`
-- Last updated: `2026-02-22`
-- Current sprint score: `34 / 35` (97%)
+- Last updated: `2026-02-24`
+- Current sprint score: `35 / 35` (100%)
+- Companion execution docs:
+  - `docs/STAGE_PLAN.md`
+  - `docs/RISK_REGISTER.md`
+  - `docs/DECISIONS.md`
+  - `docs/CHANGE_PROPOSAL_TEMPLATE.md`
+  - `docs/CLEANUP_MATRIX.md`
 
 ---
 
@@ -85,9 +91,11 @@ Section score: `7 / 7`
 - [x] `DONE` Add target-aware upload/runbook guidance for AVR/ESP32/RP2040/Teensy.
 - [x] `DONE` Add compatibility check between active bot profile and loaded runtime manifest.
 - [x] `DONE` Add CI acceptance test: manifest mismatch must fail preflight and block arm.
-- [ ] `IN PROGRESS` Add pre-arm hardware safety check gate for new firmware/session: wheel L/R pulse sanity + explicit E-STOP latch/unlatch verification before first ARM. Backend fail-closed gate + `/arm/precheck` endpoint implemented; awaiting hardware validation signoff.
+- [x] `DONE` Add pre-arm hardware safety check gate for new firmware/session: wheel L/R pulse sanity + explicit E-STOP latch/unlatch verification before first ARM.
+  - Hardware signoff evidence: `.runlogs/prearm_signoff/prearm_signoff_20260223_113423.json` (`phase=prearm_hardware_safety_rpc_v1`, `summary=prearm safety checks passed`, `PASS`).
+  - Re-validated hardware signoff evidence: `.runlogs/prearm_signoff/prearm_signoff_20260223_183652.json` (`phase=prearm_hardware_safety_rpc_v1`, `summary=prearm safety checks passed`, `PASS`).
 
-Section score: `10 / 11`
+Section score: `11 / 11`
 
 ---
 
@@ -100,7 +108,14 @@ Run with bridge up:
 ./tools/lean/check_clean_parity.sh
 ./tools/lean/check_clean_exec_intent.sh
 ./tools/lean/preflight_clean.sh
+BOT_ON_STAND_OK=1 ./tools/lean/check_prearm_signoff.sh
 ```
+
+Agent adaptability rule (for every functional agent test):
+
+1. After the functional/tool check, run a plain-English follow-up prompt.
+2. Use varied phrasing/style (not the same wording each run) to verify language adaptability.
+3. Pass criteria: response remains correct, concise, and context-aware despite wording changes.
 
 Compile sanity (optional):
 
@@ -149,32 +164,34 @@ Status key:
 2. `[DONE]` Add compact failure-class banner in clean panel (`timeout`, `quota`, `tool_failed`, `bridge_down`, `upload_failed`).
 3. `[DONE]` Add compact last-result row for firmware actions (action, pass/fail, return code, timestamp).
 4. `[DONE]` Validate guarded upload path end-to-end on real board and save one known-good run artifact.
-5. `[P0]` Keep clean lane as default and hard-gate legacy execution paths behind explicit dev flag.
+5. `[DONE]` Keep clean lane as default and hard-gate legacy execution paths behind explicit dev flag (`UPRIGHT_ALLOW_LEGACY_EXEC=1` override).
 6. `[DONE]` Increase context parity in clean agent prompts (recent tool calls, firmware outcomes, telemetry summary, mission facts).
 7. `[DONE]` Add minimal board/FQBN + port selectors in clean panel (default + override + persistence).
 8. `[DONE]` Complete two full burn-in sessions with no manual backend intervention; require green gates at session end.
-9. `[P2]` Define and normalize theme/style tokens for easy future UI edits (after reliability sprint closes).
-10. `[P2]` Optional chunk-size optimization pass (code splitting) once functional scope is stable.
-11. `[P1]` Add minimal in-app file tree for execution flow (select sketch, edit, diff, compile/upload from selected file).
-12. `[P1]` Add file change guardrails in UI (dirty-state warning, compile from unsaved file blocked, explicit save/apply path).
-13. `[P1]` Add "active execution context" header in Codex panel (active sketch, board, bootloader, port, profile).
-14. `[P1]` Add structured tool-output panel for agent actions (command, exit code, duration, key log tail).
+9. `[DONE]` Define and normalize theme/style tokens for easy future UI edits (after reliability sprint closes).
+10. `[DONE]` Optional chunk-size optimization pass (code splitting) once functional scope is stable.
+11. `[DONE]` Add minimal in-app file tree for execution flow (select sketch, edit, diff, compile/upload from selected file).
+12. `[DONE]` Add file change guardrails in UI (dirty-state warning, compile from unsaved file blocked, explicit save/apply path).
+13. `[DONE]` Add "active execution context" header in Codex panel (active sketch, board, bootloader, port, profile).
+14. `[DONE]` Add structured tool-output panel for agent actions (command, exit code, duration, key log tail).
 15. `[DONE]` Add command idempotency + lock semantics for compile/upload (prevent overlapping runs and stale retries).
 16. `[DONE]` Add persistent run artifacts per operation (compile/upload logs + metadata + timestamps) with backend listing endpoint (`GET /firmware/artifacts`) and `last_artifact` on firmware status.
 17. `[DONE]` Add "known-good recovery" one-click action (soft bridge recover + detect + precheck + status validation) via clean API + IDE Recovery button.
-18. `[P1]` Add fast hardware fingerprint snapshot (board VID/PID, selected port, detected runtime identity) to each run artifact.
-19. `[P1]` Add explicit profile/runtime compatibility status badge (pass/warn/fail) with blocking reason when fail.
-20. `[P1]` Add CI smoke test for `/profiles/hardware` + `/firmware/targets` contract stability.
-21. `[P0]` Add app-prompted pre-arm hardware check flow (minor wheel pulse tests + mandatory E-STOP verification) and block first ARM until pass.
-22. `[P1]` Add tuning-suggestion quality gate: validate agent tuning recommendations against telemetry evidence quality (inputs completeness, confidence, and actionability) before tuning phase.
-23. `[P1]` Add acceptance test pack for tuning recommendations (stable/oscillation/drift scenarios) to verify suggestion correctness and bounded safety deltas.
-24. `[P1]` Promote canonical Phase evidence contract in backend (`phase1_*`, `phase2_*`) and deprecate direct `v2_*` UI evidence references after migration validation.
-25. `[P1]` Add firmware progress UI during compile/upload (small status bar or popout with phase + elapsed time + latest log line) so operators see live forward motion.
-26. `[DONE]` Isolate legacy API-era agent paths from clean Codex runtime: extracted `arm/prearm` + `firmware_ops` slices into modules with parity/contract tests and CI checks; `codex_chat/routes` remains the next isolation slice.
-27. `[P1]` Add full cleanup matrix for high-risk files (not only Codex path): `server.py`, `codex_agent.py`, `codex_tools.py`, `serial_gateway.py`, `CleanApp.tsx`, and `styles.css/themes.css`; require owner, target module split, and pass/fail gates per file.
-28. `[P1]` Refactor UI composition boundaries: split `CleanApp.tsx` into domain panels/hooks (`telemetry`, `command rail`, `firmware`, `codex`) with no behavior change and parity tests/smoke checks.
-29. `[P1]` Refactor backend agent/tool boundaries: separate tool registry/execution (`codex_tools.py`) from orchestration/response logic (`codex_agent.py`) and enforce contract tests to prevent legacy coupling.
-30. `[P1]` Add module size/complexity guardrails in CI (lint/script thresholds + exceptions list) to stop re-accumulation of monolithic files after cleanup.
+18. `[DONE]` Add fast hardware fingerprint snapshot (board VID/PID, selected port, detected runtime identity) to each run artifact.
+19. `[DONE]` Add explicit profile/runtime compatibility status badge (pass/warn/fail) with blocking reason when fail.
+20. `[DONE]` Add CI smoke test for `/profiles/hardware` + `/firmware/targets` contract stability (`tools/lean/check_hardware_registry_contract.sh`, wired into live-gate CI path).
+21. `[DONE]` Add app-prompted pre-arm hardware check flow (minor wheel pulse tests + mandatory E-STOP verification) and block first ARM until pass.
+22. `[DONE]` Add tuning-suggestion quality gate: validate agent tuning recommendations against telemetry evidence quality (inputs completeness, confidence, and actionability) before tuning phase.
+23. `[DONE]` Add acceptance test pack for tuning recommendations (stable/oscillation/drift scenarios) to verify suggestion correctness and bounded safety deltas.
+24. `[DONE]` Promote canonical Phase evidence contract in backend (`phase1_*`, `phase2_*`) and deprecate direct `v2_*` UI evidence references after migration validation.
+25. `[DONE]` Add firmware progress UI during compile/upload (small status bar or popout with phase + elapsed time + latest log line) so operators see live forward motion.
+26. `[DONE]` Isolate legacy API-era agent paths from clean Codex runtime: extracted `arm/prearm`, `firmware_ops`, `preflight`, and `codex_chat/routes` slices into modules with parity/contract tests and CI checks.
+27. `[DONE]` Add full cleanup matrix for high-risk files (not only Codex path): `server.py`, `codex_agent.py`, `codex_tools.py`, `serial_gateway.py`, `CleanApp.tsx`, and `styles.css/themes.css`; require owner, target module split, and pass/fail gates per file.
+28. `[DONE]` Refactor UI composition boundaries: split `CleanApp.tsx` into domain panels/hooks (`telemetry`, `command rail`, `firmware`, `codex`) with no behavior change and parity tests/smoke checks.
+29. `[DONE]` Refactor backend agent/tool boundaries: separate tool registry/execution (`codex_tools.py`) from orchestration/response logic (`codex_agent.py`) and enforce contract tests to prevent legacy coupling.
+30. `[DONE]` Add module size/complexity guardrails in CI (lint/script thresholds + exceptions list) to stop re-accumulation of monolithic files after cleanup.
+31. `[DONE]` Wire a small Codex panel UI hook so operators can explicitly mark “this build worked well”, backed by `POST /design-memory/report-success` and `POST /design-memory/rate`.
+32. `[DONE]` UI polish pass for clean Codex in-flight indicators: render `user pending` and `waiting for first token` as subtle status rows (not assistant-style chat bubbles) with delayed display to reduce visual noise.
 
 ## Next 3 Steps
 
@@ -185,10 +202,20 @@ Status key:
 ## Next 5 (Manifest Track)
 
 1. `[DONE]` Build backend `/firmware/targets` registry and move UI board family/target options to that API.
-2. Define `runtime_manifest_v1.json` contract and add validator with fail-closed errors.
+2. `[DONE]` Define `runtime_manifest_v1.json` contract and add validator with fail-closed errors.
 3. `[DONE]` Wire agent sketch generation to emit/update `runtime_manifest_v1.json` alongside sketch writes.
-4. Add preflight checks for manifest validity + runtime-manifest compatibility.
-5. Add one reference non-AVR end-to-end profile (Teensy 4.1) with telemetry + arming contract.
+4. `[DONE]` Add preflight checks for manifest validity + runtime-manifest compatibility.
+5. `[DONE]` Add one reference non-AVR end-to-end profile (Teensy 4.1) with telemetry + arming contract.
+
+## Post-Closure Queue (Cross-Scorecard)
+
+- Overhaul sprint remains closed at `35 / 35`.
+- Next implementation tranche is tracked in `docs/SKILLS_TUNABILITY_SCORECARD.md` under `Queued Tranche (Do Next)`.
+- Trigger: begin immediately after one `VALID` Section 3 A/B run is captured (all run-validity gates pass).
+- Scope handoff:
+  - phase-gated clean workflow state machine,
+  - server-side run-validity enforcement for tuning scoring,
+  - calibration state contract + arm/capture gating.
 
 ---
 
@@ -228,3 +255,43 @@ Status key:
 - `2026-02-23`: Completed firmware-ops legacy-isolation slice: extracted clean firmware compile/upload/precheck/recovery route logic into `app/bridge/clean_firmware_ops.py` and rewired `server.py` handlers with no endpoint contract change.
 - `2026-02-23`: Added strict clean response contract validators in `app/bridge/clean_contracts.py` and enforced them for `/firmware/targets`, `/arm/precheck`, `/agent/clean/preflight`, and `/agent/clean/preflight/stream` done payloads.
 - `2026-02-23`: Added new contract tests (`app/bridge/tests/test_clean_contracts.py`, `app/bridge/tests/test_clean_firmware_ops.py`) plus CI guard `tools/lean/check_clean_sse_contract.sh` wired into `tools/lean/ci_clean_lane.sh`.
+- `2026-02-23`: Completed preflight route isolation slice: extracted clean preflight execution/gate logic into `app/bridge/clean_preflight.py`, rewired `server.py` preflight + preflight-stream routes to wrappers, added dedicated tests (`app/bridge/tests/test_clean_preflight.py`), and updated SSE contract CI guard to validate route + module ownership.
+- `2026-02-23`: Completed clean Codex chat route isolation slice: extracted `/agent/clean/chat` and `/agent/clean/chat/stream` execution logic into `app/bridge/clean_codex_chat.py`, rewired `server.py` routes to thin wrappers, and added dedicated contract/mapping tests (`app/bridge/tests/test_clean_codex_chat.py`) plus CI coverage.
+- `2026-02-23`: Completed clean route helper isolation slice: extracted clean helper logic (`auto tool trigger execution`, `clean context builder`, `clean system prompt`) into `app/bridge/clean_route_helpers.py`, rewired `server.py` helper wrappers, and added focused tests (`app/bridge/tests/test_clean_route_helpers.py`) with CI coverage.
+- `2026-02-23`: Completed clean auth helper isolation slice: extracted clean auth/login probe cache + attachment sanitization into `app/bridge/clean_auth_helpers.py`, rewired `server.py` helper wrappers (`_codex_cli_login_status`, `_sanitize_agent_attachments`), and added focused tests (`app/bridge/tests/test_clean_auth_helpers.py`) with CI coverage.
+- `2026-02-23`: Completed clean thread route isolation slice: extracted clean thread APIs (`/agent/clean/threads`, `/agent/clean/thread/new`, `/agent/clean/thread/select`) into `app/bridge/clean_threads.py`, rewired `server.py` handlers to thin wrappers, and added focused tests (`app/bridge/tests/test_clean_threads.py`) with CI coverage.
+- `2026-02-23`: Completed clean status payload isolation slice: extracted `/agent/status` and `/agent/clean/status` response assembly into `app/bridge/clean_status.py`, rewired `server.py` status handlers to thin wrappers, and added focused tests (`app/bridge/tests/test_clean_status.py`) with CI coverage.
+- `2026-02-23`: Completed clean request parsing isolation slice: extracted clean chat/preflight request parsing + login gate payload shaping into `app/bridge/clean_request_parsers.py`, rewired `server.py` clean route handlers to parser outputs, and added focused tests (`app/bridge/tests/test_clean_request_parsers.py`) with CI coverage.
+- `2026-02-23`: Completed clean SSE helper isolation slice: extracted clean stream header + emitter plumbing into `app/bridge/clean_sse.py`, rewired clean chat/preflight stream routes to shared SSE helpers, and added focused tests (`app/bridge/tests/test_clean_sse.py`) with CI coverage.
+- `2026-02-23`: Completed P0 legacy execution hard gate: added explicit env-flag override (`UPRIGHT_ALLOW_LEGACY_EXEC=1`) for legacy `/agent/*` execution routes (`/agent/threads`, `/agent/thread/new`, `/agent/thread/select`, `/agent/chat`, `/agent/chat/stream`); default path now fail-closed with operator guidance and CI/static checks (`tools/lean/check_legacy_exec_gate.sh`).
+- `2026-02-23`: Added one-page change proposal workflow gate (`docs/CHANGE_PROPOSAL_TEMPLATE.md`) and linked it from stage/decision flow to enforce requirement owner + delete-first + fail-closed + acceptance criteria before non-trivial scope changes.
+- `2026-02-23`: Added hardware signoff harness for pre-arm safety gate (`tools/lean/check_prearm_signoff.sh`) plus runbook (`docs/PREARM_HARDWARE_SIGNOFF.md`) to capture binary pass/fail evidence artifacts (`.runlogs/prearm_signoff/*.json`) before closing item 21.
+- `2026-02-23`: Added hardware registry contract smoke gate (`tools/lean/check_hardware_registry_contract.sh`) validating `/firmware/targets` and `/profiles/hardware` schema/consistency (families + boards cross-match), and wired it into live-gate CI execution.
+- `2026-02-23`: Completed P0 pre-arm hardware signoff on real hardware using `./tools/lean/check_prearm_signoff.sh`; evidence artifact `.runlogs/prearm_signoff/prearm_signoff_20260223_111605.json` reports `phase=prearm_hardware_safety_rpc_v1`, `summary=prearm safety checks passed`, and final `PASS`.
+- `2026-02-23`: Re-validated pre-arm signoff with latest artifact `.runlogs/prearm_signoff/prearm_signoff_20260223_113423.json` (`PASS`) to confirm repeatability.
+- `2026-02-23`: Added temporary clean-lane `Tuning` workspace tab (burst logging-focused) with backend-wired controls for `GET /burst/status` and `POST /burst/arm`; removed prompt-based runtime marker actions to avoid modal interruption during live testing.
+- `2026-02-23`: Captured evidence-grade full-loop run timeline in `.runlogs/full_loop_evidence_20260223_185712/timeline.jsonl` (250 samples) showing guarded upload pass + reconnect identity (`prv1a`), burst capture completion (`80/80`, `host_run_1771894525.csv`), and stable post-run `SAFE_IDLE` with `fault=0`.
+- `2026-02-23`: Completed clean Codex chat UX reliability slice: added explicit pending/send states (`user pending`, `waiting for first token`) plus send blocking reason (`request in progress`, offline, outdated API, empty input); manually validated in UI with active-request guard behavior.
+- `2026-02-23`: Completed Codex in-flight UI polish: moved pending/waiting indicators from assistant-style chat bubbles into subtle status rows, and delayed first-token waiting hint by 2s to reduce noise while preserving operator visibility.
+- `2026-02-23`: Closed backlog items 12/13/14 as implemented: sketch editor now enforces dirty-state compile/upload blocking with explicit save path; Codex panel shows active execution context (sketch/board/bootloader/port/profile/thread); Codex activity panel includes structured tool-output rows with status and execution time.
+- `2026-02-23`: Closed backlog item 9 by formalizing style-token usage guidance in `docs/UI_STYLE_TOKEN_GUIDE.md` and keeping clean-lane visual updates token-driven for safer future UI iteration.
+- `2026-02-23`: Closed backlog item 10 with safe code-splitting in clean entrypoint: legacy `App` is now lazy-loaded from `main.tsx` so heavy legacy dependencies are moved out of the default clean bundle; production build now emits `index` chunk at ~392 kB (was ~654 kB) with no >500 kB chunk warning.
+- `2026-02-23`: Validated App Dev arm-run stability after loop-overrun policy tuning: runtime remained `mode=SAFE_IDLE` with `fault=0` while overruns were tracked (`overrun=1604`, `missed=2405`, `loop_max_us=468872`) instead of latching `FAULT_LOOP_OVERRUN`.
+- `2026-02-23`: Captured third pre-arm hardware signoff artifact `.runlogs/prearm_signoff/prearm_signoff_20260223_183652.json` (`PASS`) to confirm post-patch repeatability.
+- `2026-02-23`: Completed run-artifact hardware fingerprinting: each firmware artifact now includes `hardware_fingerprint` (`selected_port`, `selected_fqbn`, board `VID/PID` when detected, and runtime identity snapshot from reconnect/status logs); covered by `app/bridge/tests/test_firmware_run_artifacts.py`.
+- `2026-02-23`: Completed Codex panel design-memory operator hook: clean panel now exposes “Mark Worked Well”, which calls `POST /design-memory/report-success` followed by `POST /design-memory/rate` (`positive`) using active execution context (mode/profile/board/port/runtime identity), with ops-log feedback.
+- `2026-02-23`: Completed profile/runtime compatibility badge in clean IDE panel: PASS/WARN/FAIL status now shown from `/firmware/runtime-manifest/compat`, with plain-English blocking reason on FAIL (and warning summary on WARN) in `app/ui/ops-console/src/clean/CleanIdeFirmwarePanel.tsx`.
+- `2026-02-23`: Completed tuning recommendation quality gate in backend (`_evaluate_tuning_recommendation_quality`) with structured dimensions (`completeness`, `confidence`, `actionability`) and enforced output in both `/tooling/tuning/recommend` and `/tooling/tuning/preflight`; added guardrail tests in `app/bridge/tests/test_server_tuning_guardrails.py`.
+- `2026-02-23`: Completed tuning acceptance test pack for recommendation correctness + bounded safety deltas across `stable`, `oscillation`, and `drift` scenarios (`app/bridge/tests/test_tuning_acceptance_pack.py`), and wired these tests into clean-lane CI (`tools/lean/ci_clean_lane.sh`).
+- `2026-02-23`: Completed canonical Phase evidence migration: Stage 1 readiness UI now reads `phase2_*` fields only (no direct `v2_*` evidence fallback), backend now emits canonical `phase2_recommended_action` with deprecated `v2_recommended_action` alias for compatibility, and integration tests validate both.
+- `2026-02-23`: Completed firmware live progress UI for compile/upload in clean IDE panel: added active progress strip with action chip, backend phase, elapsed seconds, and latest firmware log line (`app/ui/ops-console/src/clean/CleanIdeFirmwarePanel.tsx`, `app/ui/ops-console/src/styles.css`).
+- `2026-02-23`: Completed Manifest Track #5 with concrete non-AVR reference artifacts: added `teensy41_reference_v1` firmware template + `runtime_manifest_v1.json`, exposed reference pointers on hardware template `teensy_balancer_v1`, and added validation/compat/autogen tests for Teensy 4.1 contracts.
+- `2026-02-23`: Completed cleanup matrix definition for high-risk files in `docs/CLEANUP_MATRIX.md` with explicit owner, split targets, and pass/fail gates for `server.py`, `codex_agent.py`, `codex_tools.py`, `serial_gateway.py`, `CleanApp.tsx`, and `styles.css/themes.css`.
+- `2026-02-23`: Completed backend agent/tool boundary split: extracted tool-call orchestration into `app/bridge/codex_tool_orchestrator.py`, updated `app/bridge/codex_agent.py` to consume orchestration helpers instead of constructing tool results inline, and added contract tests (`app/bridge/tests/test_codex_tool_orchestrator.py`, `app/bridge/tests/test_codex_boundary_contract.py`) to prevent legacy coupling regressions.
+- `2026-02-23`: Completed CI module size/complexity guardrails: added `tools/lean/check_module_size_guardrails.sh` + threshold/exception config `tools/lean/module_size_guardrails.json`, and wired enforcement into `tools/lean/ci_clean_lane.sh` static checks.
+- `2026-02-23`: Completed UI composition boundary split for clean lane: `app/ui/ops-console/src/CleanApp.tsx` reduced to shell composition (`67` LOC) with state/effects moved to `app/ui/ops-console/src/clean/useCleanAppState.ts` and domain sections (`CleanTelemetryPanel`, `CleanCommandRail`, `CleanFirmwareSection`, `CleanCodexSection`); added parity boundary test `app/ui/ops-console/src/CleanApp.boundary.test.tsx` and validated with `npm --prefix app/ui/ops-console run test -- src/CleanApp.boundary.test.tsx` + `npm --prefix app/ui/ops-console run build`.
+- `2026-02-23`: Completed minimal in-app sketch tree/editor in clean IDE firmware panel: added folder/file tree (`/firmware/sketch-folders`), file read/write (`/firmware/sketch`), inline diff preview, and compile/upload/precheck/recovery targeting the selected sketch folder (`app/ui/ops-console/src/clean/CleanIdeFirmwarePanel.tsx`, `app/ui/ops-console/src/clean/cleanApi.ts`, `app/ui/ops-console/src/styles.css`); validated via `npm --prefix app/ui/ops-console run build` and `npm --prefix app/ui/ops-console run test -- src/CleanApp.boundary.test.tsx`.
+- `2026-02-23`: Added explicit firmware version-track contract for scaffold iteration: runtime manifests now carry `release.runtime_version` + `release.tune_version` + policy text, profiled runtime emits `runtime`/`tune` in `STATUS` and `IDENT`, and bridge runtime identity parsing now records these fields so runtime-code revisions are tracked separately from tuning-only changes.
+- `2026-02-23`: Added single-source release metadata flow for profiled runtime (`release.json` -> `release_version.h` + `runtime_manifest_v1.json`) with sync/check tooling (`tools/lean/sync_release_metadata.py`, `tools/lean/check_release_version_contract.sh`) and CI enforcement (`tools/lean/ci_clean_lane.sh`) so version-track drift fails closed.
+- `2026-02-23`: Added durable design-memory loop for best-known design iteration: backend `DesignMemoryStore` now auto-captures outcomes from setup checks + pre-arm checks, exposes query/rating endpoints (`GET /design-memory`, `GET /design-memory/best`, `POST /design-memory/report-success`, `POST /design-memory/rate`), and injects `best_known_design` into clean agent context for future recommendations.
+- `2026-02-24`: Added post-closure cross-scorecard handoff note pointing to Skills scorecard queued tranche for phase-gating + run-validity enforcement + calibration-state contract work; overhaul score remains closed and unchanged.
