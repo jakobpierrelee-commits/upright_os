@@ -6,6 +6,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from clean_tuning import (
     build_burst_status_payload,
     build_commissioning_artifacts_payload,
+    build_commissioning_run_payload,
     build_commissioning_status_payload,
     build_lines_payload,
 )
@@ -36,7 +37,14 @@ def test_build_commissioning_artifacts_payload_shape() -> None:
 
 
 def test_build_lines_payload_shape() -> None:
-    payload = build_lines_payload(lines=["STATUS mode=IDLE", "OK ARM"])
+    payload = build_lines_payload(lines=["line1", "line2", "line3"])
     assert payload["ok"] is True
-    assert len(payload["lines"]) == 2
-    assert "STATUS" in payload["lines"][0]
+    assert len(payload["lines"]) == 3
+
+
+def test_build_commissioning_run_payload_shape() -> None:
+    payload = build_commissioning_run_payload(
+        commissioning={"status": "running", "step": 1}
+    )
+    assert payload["ok"] is True
+    assert payload["commissioning"]["status"] == "running"

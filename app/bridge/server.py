@@ -215,6 +215,7 @@ try:
     from app.bridge.clean_tuning import (
         build_burst_status_payload,
         build_commissioning_artifacts_payload,
+        build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
     )
@@ -222,6 +223,7 @@ except ImportError:
     from clean_tuning import (  # type: ignore
         build_burst_status_payload,
         build_commissioning_artifacts_payload,
+        build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
     )
@@ -12047,7 +12049,9 @@ def build_handler(
                         out_dir=body.get("out_dir"),
                         auto_prompts=bool(body.get("auto_prompts", True)),
                     )
-                    return _json(self, 200, {"ok": True, "commissioning": st})
+                    return _json(
+                        self, 200, build_commissioning_run_payload(commissioning=st)
+                    )
 
                 if u.path == "/commissioning/step":
                     return _json(

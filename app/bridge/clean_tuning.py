@@ -19,5 +19,11 @@ def build_commissioning_artifacts_payload(
     return {"ok": True, "artifacts": artifacts}
 
 
+def build_commissioning_run_payload(
+    *, commissioning: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "commissioning": commissioning}
+
+
 def build_lines_payload(*, lines: List[str]) -> Dict[str, Any]:
     return {"ok": True, "lines": lines}
