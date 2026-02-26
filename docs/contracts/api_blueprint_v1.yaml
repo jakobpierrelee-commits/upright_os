@@ -1,0 +1,879 @@
+openapi: 3.1.0
+info:
+  title: UpRight.os Bridge API
+  version: 1.0.0
+  description: |
+    REST API for the UpRight.os robotics control bridge.
+    Organized by domain per PRD architecture.
+
+servers:
+  - url: http://localhost:8797
+    description: Local bridge server
+
+tags:
+  - name: health
+    description: Health and status endpoints
+  - name: control
+    description: Robot control (arm/disarm/estop)
+  - name: firmware
+    description: Firmware lifecycle management
+  - name: tuning
+    description: PID tuning and parameters
+  - name: profiles
+    description: Hardware profiles and compatibility
+  - name: ai
+    description: AI agent and chat
+  - name: telemetry
+    description: Telemetry and diagnostics
+  - name: session
+    description: Session and traceability
+
+paths:
+  # ============ HEALTH DOMAIN ============
+  /health:
+    get:
+      tags: [health]
+      summary: Bridge health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /status:
+    get:
+      tags: [health]
+      summary: Full robot status
+      operationId: getStatus
+      responses:
+        '200':
+          description: Robot status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+
+  # ============ CONTROL DOMAIN ============
+  /arm/prepare:
+    post:
+      tags: [control]
+      summary: Prepare arm sequence
+      operationId: armPrepare
+      responses:
+        '200':
+          description: Arm preparation result
+
+  /arm/precheck:
+    post:
+      tags: [control]
+      summary: Pre-arm safety check
+      operationId: armPrecheck
+      responses:
+        '200':
+          description: Precheck result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrecheckResponse'
+
+  /arm/confirm:
+    post:
+      tags: [control]
+      summary: Confirm arm (requires prepare first)
+      operationId: armConfirm
+      responses:
+        '200':
+          description: Arm confirmed
+
+  /arm:
+    post:
+      tags: [control]
+      summary: Direct arm command
+      operationId: arm
+      responses:
+        '200':
+          description: Arm result
+
+  /disarm:
+    post:
+      tags: [control]
+      summary: Disarm robot
+      operationId: disarm
+      responses:
+        '200':
+          description: Disarm result
+
+  /estop/latch:
+    post:
+      tags: [control]
+      summary: Emergency stop latch
+      operationId: estopLatch
+      responses:
+        '200':
+          description: E-stop latched
+
+  /estop/reset:
+    post:
+      tags: [control]
+      summary: Reset emergency stop
+      operationId: estopReset
+      responses:
+        '200':
+          description: E-stop reset
+
+  /cal_zero:
+    post:
+      tags: [control]
+      summary: Calibrate zero position
+      operationId: calZero
+      responses:
+        '200':
+          description: Calibration result
+
+  /command:
+    post:
+      tags: [control]
+      summary: Send raw command
+      operationId: postCommand
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cmd:
+                  type: string
+      responses:
+        '200':
+          description: Command result
+
+  # ============ TUNING DOMAIN ============
+  /pid:
+    post:
+      tags: [tuning]
+      summary: Set PID parameters
+      operationId: setPid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PidParams'
+      responses:
+        '200':
+          description: PID updated
+
+  /motion:
+    post:
+      tags: [tuning]
+      summary: Set motion parameters
+      operationId: setMotion
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MotionParams'
+      responses:
+        '200':
+          description: Motion updated
+
+  /setpoint:
+    post:
+      tags: [tuning]
+      summary: Set balance setpoint
+      operationId: setSetpoint
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                setpoint:
+                  type: number
+      responses:
+        '200':
+          description: Setpoint updated
+
+  /limits:
+    post:
+      tags: [tuning]
+      summary: Set safety limits
+      operationId: setLimits
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LimitsParams'
+      responses:
+        '200':
+          description: Limits updated
+
+  /savecfg:
+    post:
+      tags: [tuning]
+      summary: Save configuration to EEPROM
+      operationId: saveCfg
+      responses:
+        '200':
+          description: Config saved
+
+  /loadcfg:
+    post:
+      tags: [tuning]
+      summary: Load configuration from EEPROM
+      operationId: loadCfg
+      responses:
+        '200':
+          description: Config loaded
+
+  /defaultcfg:
+    post:
+      tags: [tuning]
+      summary: Reset to default configuration
+      operationId: defaultCfg
+      responses:
+        '200':
+          description: Config reset
+
+  /tooling/tuning/recommend:
+    post:
+      tags: [tuning]
+      summary: Get AI tuning recommendation
+      operationId: tuningRecommend
+      responses:
+        '200':
+          description: Tuning recommendation
+
+  /tooling/tuning/preflight:
+    post:
+      tags: [tuning]
+      summary: Tuning preflight check
+      operationId: tuningPreflight
+      responses:
+        '200':
+          description: Preflight result
+
+  /tooling/tuning/capabilities:
+    get:
+      tags: [tuning]
+      summary: Get tuning capabilities
+      operationId: tuningCapabilities
+      responses:
+        '200':
+          description: Capabilities list
+
+  # ============ FIRMWARE DOMAIN ============
+  /firmware/status:
+    get:
+      tags: [firmware]
+      summary: Firmware status
+      operationId: firmwareStatus
+      responses:
+        '200':
+          description: Firmware status
+
+  /firmware/artifacts:
+    get:
+      tags: [firmware]
+      summary: List firmware artifacts
+      operationId: firmwareArtifacts
+      responses:
+        '200':
+          description: Artifacts list
+
+  /firmware/boards:
+    get:
+      tags: [firmware]
+      summary: List available boards
+      operationId: firmwareBoards
+      responses:
+        '200':
+          description: Boards list
+
+  /firmware/targets:
+    get:
+      tags: [firmware]
+      summary: List firmware targets
+      operationId: firmwareTargets
+      responses:
+        '200':
+          description: Targets list
+
+  /firmware/sketch:
+    get:
+      tags: [firmware]
+      summary: Read current sketch
+      operationId: firmwareReadSketch
+      responses:
+        '200':
+          description: Sketch content
+
+  /firmware/sketch-folders:
+    get:
+      tags: [firmware]
+      summary: List sketch folders
+      operationId: firmwareSketchFolders
+      responses:
+        '200':
+          description: Folder list
+
+  /firmware/unified-schema:
+    get:
+      tags: [firmware]
+      summary: Get unified firmware schema
+      operationId: firmwareUnifiedSchema
+      responses:
+        '200':
+          description: Schema definition
+
+  /firmware/runtime-manifest/validate:
+    get:
+      tags: [firmware]
+      summary: Validate runtime manifest
+      operationId: firmwareManifestValidate
+      responses:
+        '200':
+          description: Validation result
+
+  /firmware/runtime-manifest/compat:
+    get:
+      tags: [firmware]
+      summary: Check manifest compatibility
+      operationId: firmwareManifestCompat
+      responses:
+        '200':
+          description: Compatibility result
+
+  # ============ PROFILES DOMAIN ============
+  /profiles:
+    get:
+      tags: [profiles]
+      summary: List robot profiles
+      operationId: profilesList
+      responses:
+        '200':
+          description: Profiles list
+
+  /profiles/hardware:
+    get:
+      tags: [profiles]
+      summary: Get hardware profile
+      operationId: profilesHardware
+      responses:
+        '200':
+          description: Hardware profile
+
+  /probe/compat:
+    get:
+      tags: [profiles]
+      summary: Probe hardware compatibility
+      operationId: probeCompat
+      responses:
+        '200':
+          description: Compatibility report
+
+  /probe/connect:
+    get:
+      tags: [profiles]
+      summary: Probe serial connection
+      operationId: probeConnect
+      responses:
+        '200':
+          description: Connection report
+
+  # ============ AI DOMAIN ============
+  /ai/status:
+    get:
+      tags: [ai]
+      summary: AI agent status
+      operationId: aiStatus
+      responses:
+        '200':
+          description: AI status
+
+  /ai/threads:
+    get:
+      tags: [ai]
+      summary: List AI conversation threads
+      operationId: aiThreads
+      responses:
+        '200':
+          description: Threads list
+
+  /ai/profiles:
+    get:
+      tags: [ai]
+      summary: List AI profiles
+      operationId: aiProfiles
+      responses:
+        '200':
+          description: Profiles list
+
+  /ai/knowledge:
+    get:
+      tags: [ai]
+      summary: Get AI knowledge base
+      operationId: aiKnowledge
+      responses:
+        '200':
+          description: Knowledge base
+
+  /ai/chat:
+    post:
+      tags: [ai]
+      summary: Send chat message
+      operationId: aiChat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+
+  /ai/chat/stream:
+    post:
+      tags: [ai]
+      summary: Stream chat response
+      operationId: aiChatStream
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: SSE stream
+
+  /ai/chat/tools:
+    post:
+      tags: [ai]
+      summary: Chat with tool use
+      operationId: aiChatTools
+      responses:
+        '200':
+          description: Tool response
+
+  /ai/rag/stats:
+    get:
+      tags: [ai]
+      summary: RAG statistics
+      operationId: aiRagStats
+      responses:
+        '200':
+          description: RAG stats
+
+  /ai/rag/index:
+    post:
+      tags: [ai]
+      summary: Index documents for RAG
+      operationId: aiRagIndex
+      responses:
+        '200':
+          description: Index result
+
+  /ai/metrics:
+    get:
+      tags: [ai]
+      summary: AI usage metrics
+      operationId: aiMetricsGet
+      responses:
+        '200':
+          description: Metrics
+    post:
+      tags: [ai]
+      summary: Update AI metrics
+      operationId: aiMetricsPost
+      responses:
+        '200':
+          description: Updated
+
+  # ============ AGENT DOMAIN ============
+  /agent/status:
+    get:
+      tags: [ai]
+      summary: Agent status
+      operationId: agentStatus
+      responses:
+        '200':
+          description: Agent status
+
+  /agent/clean/status:
+    get:
+      tags: [ai]
+      summary: Clean agent status
+      operationId: agentCleanStatus
+      responses:
+        '200':
+          description: Clean status
+
+  /agent/clean/threads:
+    get:
+      tags: [ai]
+      summary: Clean agent threads
+      operationId: agentCleanThreads
+      responses:
+        '200':
+          description: Threads
+
+  /agent/clean/preflight:
+    post:
+      tags: [ai]
+      summary: Agent preflight check
+      operationId: agentCleanPreflight
+      responses:
+        '200':
+          description: Preflight result
+
+  /agent/clean/preflight/stream:
+    post:
+      tags: [ai]
+      summary: Stream preflight check
+      operationId: agentCleanPreflightStream
+      responses:
+        '200':
+          description: SSE stream
+
+  /agent/mode:
+    post:
+      tags: [ai]
+      summary: Set agent mode
+      operationId: agentMode
+      responses:
+        '200':
+          description: Mode set
+
+  /agent/thread/new:
+    post:
+      tags: [ai]
+      summary: Create new thread
+      operationId: agentThreadNew
+      responses:
+        '200':
+          description: Thread created
+
+  /agent/thread/select:
+    post:
+      tags: [ai]
+      summary: Select thread
+      operationId: agentThreadSelect
+      responses:
+        '200':
+          description: Thread selected
+
+  /agent/chat:
+    post:
+      tags: [ai]
+      summary: Agent chat
+      operationId: agentChat
+      responses:
+        '200':
+          description: Chat response
+
+  /agent/chat/stream:
+    post:
+      tags: [ai]
+      summary: Stream agent chat
+      operationId: agentChatStream
+      responses:
+        '200':
+          description: SSE stream
+
+  # ============ TELEMETRY DOMAIN ============
+  /telemetry/adapter-map:
+    get:
+      tags: [telemetry]
+      summary: Get adapter map
+      operationId: telemetryAdapterMap
+      responses:
+        '200':
+          description: Adapter map
+
+  /diag/serial:
+    get:
+      tags: [telemetry]
+      summary: Serial diagnostics
+      operationId: diagSerial
+      responses:
+        '200':
+          description: Serial diag
+
+  /lines:
+    get:
+      tags: [telemetry]
+      summary: Get serial lines
+      operationId: getLines
+      responses:
+        '200':
+          description: Lines
+
+  /burst/status:
+    get:
+      tags: [telemetry]
+      summary: Burst capture status
+      operationId: burstStatus
+      responses:
+        '200':
+          description: Burst status
+
+  /burst/arm:
+    post:
+      tags: [telemetry]
+      summary: Arm burst capture
+      operationId: burstArm
+      responses:
+        '200':
+          description: Burst armed
+
+  /burst/label:
+    post:
+      tags: [telemetry]
+      summary: Label burst capture
+      operationId: burstLabel
+      responses:
+        '200':
+          description: Label set
+
+  /overwatch/status:
+    get:
+      tags: [telemetry]
+      summary: Overwatch status
+      operationId: overwatchStatus
+      responses:
+        '200':
+          description: Overwatch status
+
+  # ============ SESSION DOMAIN ============
+  /design-memory:
+    get:
+      tags: [session]
+      summary: Get design memory
+      operationId: designMemoryGet
+      responses:
+        '200':
+          description: Design memory
+
+  /design-memory/best:
+    get:
+      tags: [session]
+      summary: Get best design memory
+      operationId: designMemoryBest
+      responses:
+        '200':
+          description: Best design
+
+  /config/snapshots:
+    get:
+      tags: [session]
+      summary: Get config snapshots
+      operationId: configSnapshots
+      responses:
+        '200':
+          description: Snapshots
+
+  /v1/setup/attempt-history:
+    get:
+      tags: [session]
+      summary: Setup attempt history
+      operationId: setupAttemptHistory
+      responses:
+        '200':
+          description: History
+
+  /auth/me:
+    get:
+      tags: [session]
+      summary: Current auth info
+      operationId: authMe
+      responses:
+        '200':
+          description: Auth info
+
+  /auth/openai-key/status:
+    get:
+      tags: [session]
+      summary: OpenAI key status
+      operationId: authOpenaiKeyStatus
+      responses:
+        '200':
+          description: Key status
+
+  # ============ COMMISSIONING DOMAIN ============
+  /commissioning/status:
+    get:
+      tags: [firmware]
+      summary: Commissioning status
+      operationId: commissioningStatus
+      responses:
+        '200':
+          description: Status
+
+  /commissioning/artifacts:
+    get:
+      tags: [firmware]
+      summary: Commissioning artifacts
+      operationId: commissioningArtifacts
+      responses:
+        '200':
+          description: Artifacts
+
+  # ============ IMU DOMAIN ============
+  /imu/calibrate:
+    post:
+      tags: [control]
+      summary: Calibrate IMU
+      operationId: imuCalibrate
+      responses:
+        '200':
+          description: Calibration result
+
+  /imu/load:
+    post:
+      tags: [control]
+      summary: Load IMU calibration
+      operationId: imuLoad
+      responses:
+        '200':
+          description: Loaded
+
+  /imu/save:
+    post:
+      tags: [control]
+      summary: Save IMU calibration
+      operationId: imuSave
+      responses:
+        '200':
+          description: Saved
+
+  /imu/info:
+    get:
+      tags: [control]
+      summary: IMU info
+      operationId: imuInfo
+      responses:
+        '200':
+          description: IMU info
+
+  # ============ TOOLING DOMAIN ============
+  /tooling/traces:
+    get:
+      tags: [telemetry]
+      summary: List traces
+      operationId: toolingTraces
+      responses:
+        '200':
+          description: Traces
+
+  /tooling/trace-replay:
+    post:
+      tags: [telemetry]
+      summary: Replay trace
+      operationId: toolingTraceReplay
+      responses:
+        '200':
+          description: Replay result
+
+  /tooling/param-sweep:
+    post:
+      tags: [tuning]
+      summary: Parameter sweep
+      operationId: toolingParamSweep
+      responses:
+        '200':
+          description: Sweep result
+
+  /tooling/surrogate/simulate:
+    post:
+      tags: [tuning]
+      summary: Surrogate simulation
+      operationId: toolingSurrogateSimulate
+      responses:
+        '200':
+          description: Simulation result
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        port:
+          type: string
+        ts:
+          type: number
+
+    StatusResponse:
+      type: object
+      properties:
+        armed:
+          type: boolean
+        pitch:
+          type: number
+        kp:
+          type: number
+        ki:
+          type: number
+        kd:
+          type: number
+
+    PrecheckResponse:
+      type: object
+      properties:
+        safe:
+          type: boolean
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              passed:
+                type: boolean
+              message:
+                type: string
+
+    PidParams:
+      type: object
+      properties:
+        kp:
+          type: number
+        ki:
+          type: number
+        kd:
+          type: number
+
+    MotionParams:
+      type: object
+      properties:
+        kv:
+          type: number
+        kx:
+          type: number
+
+    LimitsParams:
+      type: object
+      properties:
+        out_max:
+          type: number
+        tip_deg:
+          type: number
+        i_max:
+          type: number
+
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        thread_id:
+          type: string
+        mode:
+          type: string
+          enum: [tuning, firmware, general]

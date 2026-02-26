@@ -1,9 +1,9 @@
 # Domain Map
 
-**Status:** Active  
-**Authority:** PRD: Architecture Foundation + Refactor Execution Protocol  
-**Version:** 1.0  
-**Created:** 2026-02-26  
+**Status:** Active
+**Authority:** PRD: Architecture Foundation + Refactor Execution Protocol
+**Version:** 1.0
+**Created:** 2026-02-26
 **Owner:** Mission Command (JVKE)
 
 ---
@@ -128,13 +128,48 @@ Per PRD §7.2, these tools enforce boundaries:
 
 ## Current State vs Target
 
-| Area | Current | Target | Gap |
-|------|---------|--------|-----|
-| server.py | Monolithic (~620KB) | Composition root only | High — Phase B work |
-| routes/ | Does not exist | Transport handlers | Phase B/C |
-| domains/ | Does not exist | Domain modules | Phase C |
-| adapters/ | Partial (serial_gateway) | Full adapter layer | Phase C |
-| UI features/ | Partial | Domain-aligned | Phase D |
+| Area | Current | Target | Status |
+|------|---------|--------|--------|
+| server.py | 9,106 lines (composition root + routes) | Composition root only | ✅ Phase B complete |
+| routes/ | Flat in bridge root as `routes_*.py` | Transport handlers | 🟡 Optional consolidation |
+| domains/ | 7 domains, 28 modules extracted | Domain modules | ✅ Phase B complete |
+| adapters/ | `serial_gateway.py` | Full adapter layer | 🟡 Partial |
+| UI features/ | CleanApp default, features/ partial | Domain-aligned | 🟡 Phase D in progress |
+| codex_tools.py | 3,485 lines | Extracted to domains | 🔴 Phase E.2 pending |
+| api.ts | 1,962 lines | Domain clients | 🔴 Phase D.2 pending |
+
+### Domain Module Inventory (as of 2026-02-26)
+
+```
+app/bridge/domains/
+├── control_runtime/
+│   ├── bridge_control_state.py
+│   ├── telemetry_hub.py
+│   └── watchdog.py
+├── firmware_lifecycle/
+│   └── firmware_manager.py
+├── hardware_profile/
+│   ├── hardware_context.py
+│   └── robot_profiles_manager.py
+├── safety_prearm/
+│   └── tuning_preflight.py
+├── tuning_intelligence/
+│   ├── commissioning_manager.py
+│   └── host_capture_manager.py
+├── session_traceability/
+│   ├── agent_mission_manager.py
+│   ├── ai_profile_manager.py
+│   ├── assistant_knowledge.py
+│   ├── auth_manager.py
+│   ├── checkpoint_manager.py
+│   ├── config_history.py
+│   ├── config_history_manager.py
+│   ├── design_memory.py
+│   ├── mission_memory.py
+│   └── setup_attempt_history.py
+└── ai_agent/
+    └── ai_manager.py
+```
 
 ---
 
