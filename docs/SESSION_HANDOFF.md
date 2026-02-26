@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `3aea6c5`
+**SHA:** `c4e30ec`
 
 ### Work Completed
 
@@ -19,7 +19,8 @@
 **Phase B — Composition Root Slim-down: IN PROGRESS**
 - Slice 1 ✅: Created `routes_health.py` with `handle_health()`, `handle_status()`
 - Slice 2 ✅: Extended `routes_profiles.py` with `handle_profiles_list()`, `handle_profiles_hardware()`
-- Slice 3 🟡: Firmware POST handlers already wired; GET handlers pending
+- Slice 3 ✅: Extended `routes_firmware.py` with 10 GET handlers + `handle_firmware_check_post()`
+- server.py reduced: 9108 → 9083 lines (-25 lines this slice)
 
 ### Files Changed
 - `docs/DOMAIN_MAP.md` — Updated inventory, added frozen restart queue
@@ -38,7 +39,7 @@ test_clean_status.py: 6/6 passing
 ```
 
 ### Next Recommended Task
-Continue Phase B slice 3: Extract firmware GET handlers (`/firmware/status`, `/firmware/boards`, `/firmware/targets`, etc.) to `routes_firmware.py`
+Continue Phase B slice 4: Extract preflight/prearm safety wrappers (medium risk, requires "no behavior drift" verification)
 
 ### Open Risks/Blockers
 - Pre-commit hooks fail on pre-existing linting issues in `server.py` (unused imports) — using `--no-verify` for commits
