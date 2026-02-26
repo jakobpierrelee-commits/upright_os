@@ -120,3 +120,24 @@ def handle_ai_profiles_get(
     Returns (status_code, payload).
     """
     return 200, build_ai_profiles_payload(profiles=ai_profiles.list())
+
+
+def handle_agent_file_upload(
+    *,
+    body: Dict[str, Any],
+    repo_root: str,
+    agent_upload_from_body_fn: Callable[..., Dict[str, Any]],
+    build_attachment_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/file/upload and /agent/clean/file/upload POST requests.
+
+    Returns (status_code, payload).
+    """
+    try:
+        attachment = agent_upload_from_body_fn(repo_root, body)
+    except RuntimeError as exc:
+        return 400, {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return 500, {"ok": False, "error": str(exc)}
+    return 200, build_attachment_payload_fn(attachment=attachment)

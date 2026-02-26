@@ -455,6 +455,7 @@ except ImportError:
     )
 try:
     from app.bridge.routes_ai import (
+        handle_agent_file_upload,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
@@ -463,6 +464,7 @@ try:
     )
 except ImportError:
     from routes_ai import (  # type: ignore
+        handle_agent_file_upload,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
@@ -6606,26 +6608,22 @@ def build_handler(
                     )
 
                 if u.path == "/agent/file/upload":
-                    try:
-                        attachment = _agent_upload_from_body(repo_root, body)
-                    except RuntimeError as exc:
-                        return _json(self, 400, {"ok": False, "error": str(exc)})
-                    except Exception as exc:
-                        return _json(self, 500, {"ok": False, "error": str(exc)})
-                    return _json(
-                        self, 200, build_attachment_payload(attachment=attachment)
+                    code, payload = handle_agent_file_upload(
+                        body=body,
+                        repo_root=repo_root,
+                        agent_upload_from_body_fn=_agent_upload_from_body,
+                        build_attachment_payload_fn=build_attachment_payload,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/file/upload":
-                    try:
-                        attachment = _agent_upload_from_body(repo_root, body)
-                    except RuntimeError as exc:
-                        return _json(self, 400, {"ok": False, "error": str(exc)})
-                    except Exception as exc:
-                        return _json(self, 500, {"ok": False, "error": str(exc)})
-                    return _json(
-                        self, 200, build_attachment_payload(attachment=attachment)
+                    code, payload = handle_agent_file_upload(
+                        body=body,
+                        repo_root=repo_root,
+                        agent_upload_from_body_fn=_agent_upload_from_body,
+                        build_attachment_payload_fn=build_attachment_payload,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/firmware/compile":
                     inputs = resolve_clean_upload_inputs(
