@@ -476,6 +476,28 @@ except ImportError:
         handle_ai_thread_select,
     )
 try:
+    from app.bridge.routes_auth import (
+        handle_auth_login,
+        handle_auth_logout,
+        handle_auth_me_get,
+        handle_auth_openai_key_delete,
+        handle_auth_openai_key_set,
+        handle_auth_password_reset_confirm,
+        handle_auth_password_reset_request,
+        handle_auth_register,
+    )
+except ImportError:
+    from routes_auth import (  # type: ignore
+        handle_auth_login,
+        handle_auth_logout,
+        handle_auth_me_get,
+        handle_auth_openai_key_delete,
+        handle_auth_openai_key_set,
+        handle_auth_password_reset_confirm,
+        handle_auth_password_reset_request,
+        handle_auth_register,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -5830,7 +5852,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(self, 200, build_auth_user_payload(user=me))
+                    code, payload = handle_auth_me_get(me=me)
+                    return _json(self, code, payload)
                 if u.path == "/auth/openai-key/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -6138,47 +6161,25 @@ def build_handler(
                 body = _read_json(self)
 
                 if u.path == "/auth/register":
-                    email = str(body.get("email", ""))
-                    password = str(body.get("password", ""))
-                    out = auth.register(email, password)
-                    return _json(
-                        self,
-                        200,
-                        build_auth_session_payload(
-                            session_token=out["session_token"], user=out["user"]
-                        ),
-                    )
+                    code, payload = handle_auth_register(body=body, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/login":
-                    email = str(body.get("email", ""))
-                    password = str(body.get("password", ""))
-                    out = auth.login(email, password)
-                    return _json(
-                        self,
-                        200,
-                        build_auth_session_payload(
-                            session_token=out["session_token"], user=out["user"]
-                        ),
-                    )
+                    code, payload = handle_auth_login(body=body, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/password-reset/request":
-                    email = str(body.get("email", ""))
-                    out = auth.request_password_reset(email)
-                    return _json(self, 200, build_reset_payload(reset=out))
+                    code, payload = handle_auth_password_reset_request(body=body, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/password-reset/confirm":
-                    email = str(body.get("email", ""))
-                    token = str(body.get("token", ""))
-                    new_password = str(body.get("new_password", ""))
-                    auth.reset_password(email, token, new_password)
-                    return _json(
-                        self, 200, build_result_payload(result="password_reset")
-                    )
+                    code, payload = handle_auth_password_reset_confirm(body=body, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/logout":
                     tok = _extract_auth_token(self, body)
-                    auth.logout(tok)
-                    return _json(self, 200, {"ok": True})
+                    code, payload = handle_auth_logout(tok=tok, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/ai/thread/new":
                     tok = _extract_auth_token(self, body)
@@ -6227,12 +6228,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    api_key = str(body.get("api_key", ""))
-                    model = str(body.get("model", "gpt-5-codex"))
-                    out = auth.set_openai_key(int(me["id"]), api_key, model)
-                    return _json(
-                        self, 200, build_auth_openai_status_payload(openai=out)
-                    )
+                    code, payload = handle_auth_openai_key_set(body=body, me=me, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/openai-key/delete":
                     tok = _extract_auth_token(self, body)
@@ -6241,10 +6238,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    out = auth.clear_openai_key(int(me["id"]))
-                    return _json(
-                        self, 200, build_auth_openai_status_payload(openai=out)
-                    )
+                    code, payload = handle_auth_openai_key_delete(me=me, auth=auth)
+                    return _json(self, code, payload)
 
                 if u.path == "/session/heartbeat":
                     return _json(
