@@ -7,9 +7,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from surrogate_sim import load_rows, simulate_from_logs
 
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
 
 def test_load_rows_fixture():
-    p = Path('app/bridge/tests/fixtures/trace_replay_nominal.csv')
+    p = FIXTURES_DIR / "trace_replay_nominal.csv"
     rows = load_rows(p)
     assert len(rows) > 8
     assert isinstance(rows[0].ang, float)
@@ -17,8 +19,8 @@ def test_load_rows_fixture():
 
 def test_simulate_from_logs_basic():
     paths = [
-        Path('app/bridge/tests/fixtures/trace_replay_nominal.csv'),
-        Path('app/bridge/tests/fixtures/trace_replay_regressed.csv'),
+        FIXTURES_DIR / "trace_replay_nominal.csv",
+        FIXTURES_DIR / "trace_replay_regressed.csv",
     ]
     out = simulate_from_logs(paths, kp=31.0, ki=0.05, kd=1.05, setpoint=0.0, duration_s=2.0)
     assert out['ok'] is True
@@ -31,8 +33,8 @@ def test_simulate_from_logs_basic():
 
 def test_simulate_flags_out_of_distribution_gain():
     paths = [
-        Path('app/bridge/tests/fixtures/trace_replay_nominal.csv'),
-        Path('app/bridge/tests/fixtures/trace_replay_regressed.csv'),
+        FIXTURES_DIR / "trace_replay_nominal.csv",
+        FIXTURES_DIR / "trace_replay_regressed.csv",
     ]
     out = simulate_from_logs(paths, kp=120.0, ki=1.2, kd=20.0, setpoint=0.0, duration_s=1.5)
     assert out['ok'] is True
