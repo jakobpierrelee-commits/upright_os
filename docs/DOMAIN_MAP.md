@@ -196,9 +196,9 @@ Restart queue is frozen in this order for initial decomposition pass:
 
 | Priority | Slice | Risk Level | Status |
 |----------|-------|------------|--------|
-| 1 | `health/status` routes | Low | 🔴 Not started |
-| 2 | `profiles/compat` routes | Low | 🔴 Not started |
-| 3 | `firmware lifecycle` routes | Medium | 🔴 Not started |
+| 1 | `health/status` routes | Low | ✅ Complete (routes_health.py) |
+| 2 | `profiles/compat` routes | Low | ✅ Complete (routes_profiles.py extended) |
+| 3 | `firmware lifecycle` routes | Medium | � Partial (POST handlers done, GET pending) |
 | 4 | `preflight/prearm` safety wrappers | Medium (no behavior drift) | 🔴 Not started |
 | 5 | `codex/chat` route wrappers | Medium | 🔴 Not started |
 | 6 | `tuning intelligence` routes | High (safety-adjacent) | 🔴 Not started |
