@@ -129,6 +129,28 @@ def build_disambiguation_reply_payload(
     }
 
 
+def build_chat_with_tools_payload(
+    *,
+    reply: str,
+    tool_calls: List[Dict[str, Any]],
+    iterations: int,
+    ai: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    threads: List[Dict[str, Any]],
+    thread_id: str,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "reply": reply,
+        "tool_calls": tool_calls,
+        "iterations": iterations,
+        "ai": ai,
+        "history": history,
+        "threads": threads,
+        "thread_id": thread_id,
+    }
+
+
 def build_ai_threads_status_payload(
     *, threads: List[Dict[str, Any]], ai: Dict[str, Any]
 ) -> Dict[str, Any]:

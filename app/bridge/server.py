@@ -261,6 +261,7 @@ try:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_chat_with_tools_payload,
         build_disambiguation_reply_payload,
         build_openai_config_payload,
         build_session_heartbeat_payload,
@@ -280,6 +281,7 @@ except ImportError:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_chat_with_tools_payload,
         build_disambiguation_reply_payload,
         build_openai_config_payload,
         build_session_heartbeat_payload,
@@ -13696,20 +13698,19 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "reply": normalized_reply,
-                                "tool_calls": result.get("tool_calls", []),
-                                "iterations": result.get("iterations", 1),
-                                "ai": ai.status(
+                            build_chat_with_tools_payload(
+                                reply=normalized_reply,
+                                tool_calls=result.get("tool_calls", []),
+                                iterations=result.get("iterations", 1),
+                                ai=ai.status(
                                     configured=True,
                                     model=str(creds["model"] or "gpt-4"),
                                     session_key=skey,
                                 ),
-                                "history": ai.history(skey, tid)[-80:],
-                                "threads": ai.list_threads(skey),
-                                "thread_id": tid,
-                            },
+                                history=ai.history(skey, tid)[-80:],
+                                threads=ai.list_threads(skey),
+                                thread_id=tid,
+                            ),
                         )
                     except Exception as exc:
                         return _json(self, 500, {"ok": False, "error": str(exc)})
