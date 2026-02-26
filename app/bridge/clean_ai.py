@@ -113,3 +113,23 @@ def build_ai_threads_status_payload(
     *, threads: List[Dict[str, Any]], ai: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "threads": threads, "ai": ai}
+
+
+def build_ai_chat_response_payload(
+    *,
+    reply: str,
+    ai: Dict[str, Any],
+    history: List[Dict[str, Any]],
+    threads: List[Dict[str, Any]],
+    thread_id: Optional[str],
+    apply: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "reply": reply,
+        "ai": ai,
+        "history": history,
+        "threads": threads,
+        "thread_id": thread_id,
+        "apply": apply,
+    }

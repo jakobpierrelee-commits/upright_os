@@ -251,6 +251,7 @@ try:
         build_agent_chat_reply_payload,
         build_agent_status_payload,
         build_agent_thread_state_payload,
+        build_ai_chat_response_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
@@ -267,6 +268,7 @@ except ImportError:
         build_agent_chat_reply_payload,
         build_agent_status_payload,
         build_agent_thread_state_payload,
+        build_ai_chat_response_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
         build_ai_status_payload,
@@ -13447,19 +13449,18 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "reply": reply,
-                                "ai": ai.status(
+                            build_ai_chat_response_payload(
+                                reply=reply,
+                                ai=ai.status(
                                     configured=True,
                                     model=str(creds["model"] or "gpt-5-codex"),
                                     session_key=skey,
                                 ),
-                                "history": ai.history(skey, tid)[-80:],
-                                "threads": ai.list_threads(skey),
-                                "thread_id": tid,
-                                "apply": None,
-                            },
+                                history=ai.history(skey, tid)[-80:],
+                                threads=ai.list_threads(skey),
+                                thread_id=tid,
+                                apply=None,
+                            ),
                         )
                     out = ai.chat(
                         message=msg,
@@ -13501,19 +13502,18 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "reply": reply,
-                            "ai": ai.status(
+                        build_ai_chat_response_payload(
+                            reply=reply,
+                            ai=ai.status(
                                 configured=True,
                                 model=str(creds["model"] or "gpt-5-codex"),
                                 session_key=skey,
                             ),
-                            "history": hist,
-                            "threads": ai.list_threads(skey),
-                            "thread_id": out.get("thread_id"),
-                            "apply": apply_result,
-                        },
+                            history=hist,
+                            threads=ai.list_threads(skey),
+                            thread_id=out.get("thread_id"),
+                            apply=apply_result,
+                        ),
                     )
 
                 if u.path == "/ai/chat/tools":
