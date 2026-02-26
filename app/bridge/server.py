@@ -11997,7 +11997,9 @@ def build_handler(
                         source=source,
                         note=note,
                     )
-                    return _json(self, 200, {"ok": True, "design": row})
+                    return _json(
+                        self, 200, build_design_payload(design=row)
+                    )
 
                 if u.path == "/design-memory/rate":
                     session_key = (
@@ -12019,7 +12021,9 @@ def build_handler(
                         if err == "design_not_found":
                             return _json(self, 404, {"ok": False, "error": err})
                         return _json(self, 400, {"ok": False, "error": err})
-                    return _json(self, 200, {"ok": True, "design": row})
+                    return _json(
+                        self, 200, build_design_payload(design=row)
+                    )
 
                 if u.path == "/commissioning/run":
                     if gateway.health().get("connected", False):
