@@ -288,6 +288,7 @@ try:
         build_overwatch_payload,
         build_reset_payload,
         build_sketch_payload,
+        build_targets_payload,
     )
 except ImportError:
     from clean_misc import (  # type: ignore
@@ -299,6 +300,7 @@ except ImportError:
         build_overwatch_payload,
         build_reset_payload,
         build_sketch_payload,
+        build_targets_payload,
     )
 try:
     from app.bridge.clean_request_parsers import (
@@ -11449,7 +11451,7 @@ def build_handler(
                         self, 200, build_boards_payload(boards=firmware.list_boards())
                     )
                 if u.path == "/firmware/targets":
-                    payload = {"ok": True, "targets": firmware.list_targets()}
+                    payload = build_targets_payload(targets=firmware.list_targets())
                     validate_firmware_targets_response(payload)
                     return _json(self, 200, payload)
                 if u.path == "/firmware/runtime-manifest/validate":

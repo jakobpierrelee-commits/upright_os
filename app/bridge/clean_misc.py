@@ -35,3 +35,7 @@ def build_design_payload(*, design: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_reset_payload(*, reset: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "reset": reset}
+
+
+def build_targets_payload(*, targets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"ok": True, "targets": targets}
