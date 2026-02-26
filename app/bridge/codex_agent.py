@@ -29,11 +29,16 @@ except ImportError:
 try:
     from app.bridge.codex_db import CodexDB, TelemetrySnapshot, Checkpoint, get_codex_db
     from app.bridge.codex_rag import CodexRAG, get_codex_rag
-    from app.bridge.codex_tools import CodexToolExecutor, ToolResult, get_tool_definitions
+    from app.bridge.codex_tools import CodexToolExecutor, get_tool_definitions
+    from app.bridge.codex_tool_orchestrator import (
+        ToolExecutionError,
+        execute_tool_batch,
+    )
 except ImportError:
     from codex_db import CodexDB, TelemetrySnapshot, Checkpoint, get_codex_db
     from codex_rag import CodexRAG, get_codex_rag
-    from codex_tools import CodexToolExecutor, ToolResult, get_tool_definitions
+    from codex_tools import CodexToolExecutor, get_tool_definitions
+    from codex_tool_orchestrator import ToolExecutionError, execute_tool_batch
 
 logger = logging.getLogger(__name__)
 
@@ -48,24 +53,6 @@ SKETCH_TOTAL_TIMEOUT_S = int(os.environ.get("CODEX_SKETCH_TOTAL_TIMEOUT_S", "300
 OPENAI_IN_PROGRESS_TIMEOUT_S = int(os.environ.get("CODEX_OPENAI_IN_PROGRESS_TIMEOUT_S", "240"))
 MAX_HISTORY_MESSAGES = 16
 MAX_HISTORY_CHARS_PER_MESSAGE = 1200
-
-
-class ToolExecutionError(Exception):
-    """Raised when a tool fails to execute."""
-
-    def __init__(self, tool: str, message: str, recoverable: bool = True):
-        self.tool = tool
-        self.message = message
-        self.recoverable = recoverable
-        super().__init__(f"Tool '{tool}' failed: {message}")
-
-    def to_dict(self) -> dict:
-        return {
-            "error_type": "ToolExecutionError",
-            "tool": self.tool,
-            "message": self.message,
-            "recoverable": self.recoverable,
-        }
 
 
 class CodexAgent:
@@ -328,78 +315,20 @@ class CodexAgent:
                     "iterations": iterations,
                 }
 
-            # Execute tool calls
-            # Capture assistant's reasoning (content field alongside tool_calls)
-            assistant_msg = response.get("choices", [{}])[0].get("message", {})
-            tool_reasoning = (assistant_msg.get("content") or "").strip()
-            
-            tool_results = []
-            for tc in tool_calls:
-                tool_name = tc.get("function", {}).get("name", "")
-                tool_args_str = tc.get("function", {}).get("arguments", "{}")
-                tool_call_id = tc.get("id", "")
-
-                try:
-                    tool_args = json.loads(tool_args_str)
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
-
-                tool_start = time.time()
-                if sketch_request and tool_name == "generate_sketch" and sketch_generation_started_at is None:
-                    sketch_generation_started_at = tool_start
-                try:
-                    result = tool_executor.execute(tool_name, tool_args)
-                    if not result.ok:
-                        raise ToolExecutionError(
-                            tool=tool_name,
-                            message=result.error or "tool_execution_failed",
-                            recoverable=True,
-                        )
-                except ToolExecutionError as te:
-                    result = ToolResult(
-                        ok=False,
-                        tool=tool_name,
-                        error=te.message,
-                        data={"recoverable": te.recoverable, "error_type": "ToolExecutionError"},
-                    )
-                    logger.warning(str(te))
-                except Exception as exc:
-                    result = ToolResult(
-                        ok=False,
-                        tool=tool_name,
-                        error=f"tool_execution_error:{exc}",
-                        data={"recoverable": True, "error_type": "ToolExecutionError"},
-                    )
-                    logger.warning(f"Tool '{tool_name}' raised unexpected error: {exc}")
-                tool_latency_ms = (time.time() - tool_start) * 1000
-
-                # Structured JSON log for observability
-                self._log_tool_audit(
-                    tool=tool_name,
-                    args=tool_args,
-                    ok=result.ok,
-                    latency_ms=tool_latency_ms,
-                    error=result.error,
-                )
-
-                # Include reasoning on first tool of the batch
-                tool_entry = {
-                    "tool": tool_name,
-                    "args": tool_args,
-                    "result": result.to_dict(),
-                }
-                # Attach reasoning to first tool call in this iteration
-                if tool_reasoning and len([t for t in executed_tools if "reasoning" in t]) == 0:
-                    tool_entry["reasoning"] = tool_reasoning
-                executed_tools.append(tool_entry)
-
-                tool_results.append({
-                    "tool_call_id": tool_call_id,
-                    "role": "tool",
-                    "content": json.dumps(result.to_dict()),
-                })
+            tool_exec = execute_tool_batch(
+                response=response,
+                tool_calls=tool_calls,
+                tool_executor=tool_executor,
+                executed_tools=executed_tools,
+                sketch_request=sketch_request,
+                sketch_generation_started_at=sketch_generation_started_at,
+                log_tool_audit=self._log_tool_audit,
+            )
+            tool_results = list(tool_exec.get("tool_results") or [])
+            sketch_generation_started_at = tool_exec.get(
+                "sketch_generation_started_at",
+                sketch_generation_started_at,
+            )
 
             # Add assistant message with tool calls
             assistant_msg = response.get("choices", [{}])[0].get("message", {})
