@@ -29,7 +29,10 @@ CHECK_INTERVAL_S="${BRIDGE_SUPERVISOR_CHECK_INTERVAL_S:-2}"
 RESTART_BACKOFF_S="${BRIDGE_SUPERVISOR_RESTART_BACKOFF_S:-1}"
 STARTUP_GRACE_S="${BRIDGE_SUPERVISOR_STARTUP_GRACE_S:-8}"
 HEALTH_MAX_TIME_S="${BRIDGE_SUPERVISOR_HEALTH_MAX_TIME_S:-2}"
-FAIL_THRESHOLD="${BRIDGE_SUPERVISOR_FAIL_THRESHOLD:-3}"
+FAIL_THRESHOLD="${BRIDGE_SUPERVISOR_FAIL_THRESHOLD:-4}"
+# By default, do not recycle a live bridge process on transient health misses.
+# Only restart immediately when process is not alive.
+RESTART_LIVE_ON_HEALTH_FAIL="${BRIDGE_SUPERVISOR_RESTART_LIVE_ON_HEALTH_FAIL:-0}"
 
 health_ok() {
   curl -fsS --max-time "${HEALTH_MAX_TIME_S}" "${HEALTH_URL}" >/dev/null 2>&1
@@ -60,7 +63,7 @@ start_bridge() {
   fi
   (
     cd "${ROOT_DIR}"
-    nohup python3 -u "${ENTRYPOINT}" --supervised --instance "${BRIDGE_INSTANCE}" >"${LOG_FILE}" 2>&1 &
+    nohup python3 -u "${ENTRYPOINT}" --supervised --instance "${BRIDGE_INSTANCE}" >>"${LOG_FILE}" 2>&1 &
     echo $! >"${PID_FILE}"
   )
   local new_pid
@@ -115,6 +118,13 @@ while true; do
 
   # Require multiple consecutive failures before recycling a live process.
   if [ "${consecutive_failures}" -lt "${FAIL_THRESHOLD}" ]; then
+    sleep "${CHECK_INTERVAL_S}"
+    continue
+  fi
+
+  # Keep the live process unless explicitly configured to recycle on health miss.
+  if [ "${RESTART_LIVE_ON_HEALTH_FAIL}" != "1" ]; then
+    echo "[bridge-supervisor] health unhealthy but bridge is alive; skipping live restart (RESTART_LIVE_ON_HEALTH_FAIL=0)"
     sleep "${CHECK_INTERVAL_S}"
     continue
   fi
