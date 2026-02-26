@@ -56,3 +56,19 @@ def build_auth_session_payload(
     *, session_token: str, user: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "session_token": session_token, "user": user}
+
+
+def build_agent_thread_state_payload(
+    *,
+    agent: Dict[str, Any],
+    thread: Dict[str, Any],
+    threads: List[Dict[str, Any]],
+    history: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "agent": agent,
+        "thread": thread,
+        "threads": threads,
+        "history": history,
+    }
