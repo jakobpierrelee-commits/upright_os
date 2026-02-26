@@ -396,6 +396,8 @@ try:
     from app.bridge.routes_profiles import (
         handle_profiles_activate,
         handle_profiles_delete,
+        handle_profiles_hardware,
+        handle_profiles_list,
         handle_profiles_save,
         handle_profiles_validate,
     )
@@ -403,6 +405,8 @@ except ImportError:
     from routes_profiles import (  # type: ignore
         handle_profiles_activate,
         handle_profiles_delete,
+        handle_profiles_hardware,
+        handle_profiles_list,
         handle_profiles_save,
         handle_profiles_validate,
     )
@@ -6141,19 +6145,14 @@ def build_handler(
                         ),
                     )
                 if u.path == "/profiles":
-                    return _json(
-                        self,
-                        200,
-                        build_profiles_payload(profiles_state=profiles.list()),
-                    )
+                    code, payload = handle_profiles_list(profiles=profiles)
+                    return _json(self, code, payload)
                 if u.path == "/profiles/hardware":
-                    targets = firmware.list_targets()
-                    registry = _build_hardware_registry(targets)
-                    return _json(
-                        self,
-                        200,
-                        build_profiles_hardware_payload(registry=registry),
+                    code, payload = handle_profiles_hardware(
+                        firmware=firmware,
+                        build_hardware_registry_fn=_build_hardware_registry,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/tooling/traces":
                     return _json(
                         self,

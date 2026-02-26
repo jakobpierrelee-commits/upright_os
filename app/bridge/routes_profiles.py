@@ -1,9 +1,9 @@
 """
-Profiles route handlers extracted from server.py (Phase C).
+Profiles route handlers extracted from server.py (Phase B/C).
 
-These handlers manage profile save, activate, delete, and validate operations.
+These handlers manage profile list, save, activate, delete, validate, and hardware registry.
 """
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 try:
     from app.bridge.clean_misc import (
@@ -19,6 +19,44 @@ except ImportError:
         build_saved_profiles_payload,
         build_validation_payload,
     )
+
+try:
+    from app.bridge.clean_profiles import (
+        build_profiles_payload,
+        build_profiles_hardware_payload,
+    )
+except ImportError:
+    from clean_profiles import (  # type: ignore
+        build_profiles_payload,
+        build_profiles_hardware_payload,
+    )
+
+
+def handle_profiles_list(
+    *,
+    profiles: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /profiles GET request.
+
+    Returns (status_code, payload).
+    """
+    return 200, build_profiles_payload(profiles_state=profiles.list())
+
+
+def handle_profiles_hardware(
+    *,
+    firmware: Any,
+    build_hardware_registry_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /profiles/hardware GET request.
+
+    Returns (status_code, payload).
+    """
+    targets = firmware.list_targets()
+    registry = build_hardware_registry_fn(targets)
+    return 200, build_profiles_hardware_payload(registry=registry)
 
 
 def handle_profiles_save(
