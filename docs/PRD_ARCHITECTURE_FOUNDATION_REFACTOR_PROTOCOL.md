@@ -232,11 +232,49 @@ Each slice requires:
 - handoff snapshot.
 
 ### Phase D — UI Boundary Convergence
-1. Move UI sections to domain-aligned features.
-2. Enforce `strings.ts`/copy centralization.
-3. Eliminate duplicate gate logic in frontend.
 
-### Phase E — Hardening + Governance Consolidation
+**Audit Findings (2026-02-26):**
+- `App.tsx`: 2,711 lines (monolithic - same issue as old server.py)
+- `api.ts`: 1,962 lines (monolithic API client)
+- `CleanApp.tsx`: 112 lines (clean alternative started)
+- `features/`: 10 dirs exist but underused (everything still in App.tsx)
+
+**D.1 — Migrate App.tsx → CleanApp.tsx**
+1. Incrementally extract UI sections from `App.tsx` into `features/*/`.
+2. Wire extracted features into `CleanApp.tsx`.
+3. Preserve all existing behavior (no UI regressions).
+
+**D.2 — Split api.ts into domain clients**
+1. Create `features/*/api.ts` for domain-specific API calls.
+2. Keep shared utilities in `src/lib/api-client.ts`.
+
+**D.3 — Enforce strings.ts centralization**
+1. Audit hardcoded strings in extracted components.
+2. Migrate to `strings.ts` keys.
+
+**D.4 — Eliminate duplicate gate logic**
+1. Consolidate duplicated prearm/safety gate checks.
+
+### Phase E — Backend Cleanup
+
+**Audit Findings (2026-02-26):**
+- `codex_db.py`: Duplicate file exists in both `/bridge/` AND `/domains/session_traceability/`
+- `codex_tools.py`: 3,485 lines (oversized, needs extraction)
+- `routes_*.py`: 8 files flat in bridge root (not organized into domains)
+- `clean_*.py`: 19 files flat in bridge root
+
+**E.1 — Remove duplicates**
+1. Delete duplicate `codex_db.py` (keep domain version).
+2. Update imports in server.py.
+
+**E.2 — Extract codex_tools.py**
+1. Split 3,485-line file into domain-aligned tool modules.
+
+**E.3 — Consolidate routes into domains (optional)**
+1. Move `routes_*.py` into `domains/*/routes.py`.
+2. Low priority - current flat structure works.
+
+### Phase F — Hardening + Governance Consolidation
 1. Consolidate decision/governance flow to explicit authority chain.
 2. Add CI checks for module size + forbidden imports + contract drift.
 3. Final architecture handoff with risks/open items.

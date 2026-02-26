@@ -31,6 +31,14 @@ app/bridge/ai_threads_backups/
 app/bridge/config_history.json
 app/bridge/design_memory.json
 app/bridge/robot_profiles.json
+app/bridge/ai_hardware_context.json
+app/bridge/ai_mission_memory.json
+app/bridge/ai_profiles.json
+app/bridge/setup_attempt_history.json
+app/bridge/bridge.log
+
+# Generated firmware
+generated_firmware/
 
 # Build/test artifacts
 .runlogs/
