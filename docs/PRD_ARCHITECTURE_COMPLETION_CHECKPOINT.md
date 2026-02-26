@@ -60,19 +60,19 @@ app/bridge/domains/
 
 ## 3) Work Remaining (Sequenced Properly)
 
-### Phase A — Foundation Lock (BLOCKING)
+### Phase A — Foundation Lock (COMPLETE ✅)
 
-**Required for PRD exit — cannot proceed without these:**
+**All deliverables verified 2026-02-26:**
 
-| Deliverable | Status | Action Required |
-|-------------|--------|-----------------|
-| `docs/DOMAIN_MAP.md` (approved) | 🟡 Exists but stale | Update with current domain ownership, boundaries, SoT matrix |
-| `docs/contracts/dependency_matrix_v1.json` | 🔴 Missing | Create machine-checkable dependency rules |
-| `docs/contracts/dependency_matrix_v1.schema.json` | 🔴 Missing | Create validation schema |
-| `tools/lean/check_dependency_matrix.py` | 🔴 Missing | Create CI tool |
-| `tools/lean/check_import_boundaries.py` | 🔴 Missing | Create CI tool |
-| `tools/lean/check_contract_drift.py` | 🔴 Missing | Create CI tool |
-| Frozen restart queue documented | 🔴 Missing | Document in DOMAIN_MAP |
+| Deliverable | Status | Evidence |
+|-------------|--------|----------|
+| `docs/DOMAIN_MAP.md` (approved) | ✅ Complete | Updated with current inventory, frozen restart queue |
+| `docs/contracts/dependency_matrix_v1.json` | ✅ Complete | 9 zones, 8 allowed edges, notes documented |
+| `docs/contracts/dependency_matrix_v1.schema.json` | ✅ Complete | JSON Schema 2020-12 |
+| `tools/lean/check_dependency_matrix.py` | ✅ Complete | `--help` exits 0, pinned command passes |
+| `tools/lean/check_import_boundaries.py` | ✅ Complete | `--help` exits 0, pinned command passes |
+| `tools/lean/check_contract_drift.py` | ✅ Complete | `--help` exits 0, pinned command passes |
+| Frozen restart queue documented | ✅ Complete | Added to DOMAIN_MAP §Frozen Restart Queue |
 
 ### Phase B — Composition Root Slim-down
 
@@ -145,11 +145,25 @@ app/bridge/domains/
 
 ## 5) Acceptance Criteria (This Sub-PRD)
 
-- [ ] Phase A deliverables complete and CI tools executable
-- [ ] `DOMAIN_MAP.md` updated and approved
-- [ ] Dependency matrix created and schema-validated
-- [ ] All 3 CI governance tools pass `--help` check
-- [ ] Clear path documented for remaining phases
+- [x] Phase A deliverables complete and CI tools executable
+- [x] `DOMAIN_MAP.md` updated and approved
+- [x] Dependency matrix created and schema-validated
+- [x] All 3 CI governance tools pass `--help` check
+- [x] Clear path documented for remaining phases
+
+**Phase A Exit Verified:** 2026-02-26
+
+```bash
+# Verification commands run:
+python3 tools/lean/check_dependency_matrix.py --matrix docs/contracts/dependency_matrix_v1.json --schema docs/contracts/dependency_matrix_v1.schema.json
+# [check_dependency_matrix] PASS (zones=9, allowed_edges=8)
+
+python3 tools/lean/check_import_boundaries.py --matrix docs/contracts/dependency_matrix_v1.json --repo-root .
+# [check_import_boundaries] PASS (scanned=11312, boundary_scoped=56, zones=8)
+
+python3 tools/lean/check_contract_drift.py --contracts-root docs/contracts --fail-on-drift
+# [check_contract_drift] PASS (contracts=10, versioned=8)
+```
 
 ---
 
@@ -163,11 +177,24 @@ app/bridge/domains/
 
 ## 7) Decision Required
 
-**Mission Command:** Approve this checkpoint PRD and confirm execution order.
+**Status:** Phase A complete. Ready for Phase B.
 
-Options:
-1. **Complete Phase A first** — Create governance artifacts before more code changes
-2. **Continue mechanical refactor** — Finish delegation work, update governance later
-3. **Hybrid** — Minimal Phase A (DOMAIN_MAP only), then continue
+**Mission Command:** Confirm Phase A exit and approve Phase B start.
 
-**Recommendation:** Option 1 — The governance artifacts will prevent architectural drift and make future work more deliberate.
+**Recommended Next Step:** Begin Phase B (Composition Root Slim-down) — extract business logic from `server.py` to domain modules, following frozen restart queue order.
+
+---
+
+## 8) Phase A Exit Gate (Verified)
+
+All criteria from PRD §7.2 satisfied:
+
+| Criterion | Result |
+|-----------|--------|
+| `check_dependency_matrix.py` exists | ✅ |
+| `check_dependency_matrix.py --help` exits 0 | ✅ |
+| `check_import_boundaries.py` exists | ✅ |
+| `check_import_boundaries.py --help` exits 0 | ✅ |
+| `check_contract_drift.py` exists | ✅ |
+| `check_contract_drift.py --help` exits 0 | ✅ |
+| Pinned command contract executes | ✅ |

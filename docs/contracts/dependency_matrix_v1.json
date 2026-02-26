@@ -7,6 +7,9 @@
     "domains": [
       "app/bridge/domains"
     ],
+    "domain_shared": [
+      "app/bridge/domains/ai_agent"
+    ],
     "adapters": [
       "app/bridge/adapters"
     ],
@@ -32,8 +35,12 @@
     ["domains", "adapters"],
     ["domains", "contracts"],
     ["domains", "policies"],
+    ["domains", "domain_shared"],
     ["ui_features", "ui_components"],
     ["ui_features", "ui_lib"],
     ["ui_components", "ui_lib"]
-  ]
+  ],
+  "notes": {
+    "domain_shared": "ai_agent/tool_constants.py provides shared constants (ToolResult, error codes, limits) for all domain tools. Evaluate migration to contracts/ in Phase F."
+  }
 }

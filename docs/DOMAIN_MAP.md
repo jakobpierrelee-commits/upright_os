@@ -146,24 +146,27 @@ Per PRD §7.2, these tools enforce boundaries:
 | codex_tools.py | 3,485 lines | Extracted to domains | 🔴 Phase E.2 pending |
 | api.ts | 1,962 lines (legacy) | Migrate to lib/api/ | � Gradual migration |
 
-### Domain Module Inventory (as of 2026-02-26)
+### Domain Module Inventory (as of 2026-02-26, updated)
 
 ```
 app/bridge/domains/
+├── ai_agent/                          # Shared constants/contracts for tools
+│   ├── ai_manager.py                  # AI provider orchestration
+│   └── tool_constants.py              # ToolResult, error codes, limits (shared)
 ├── control_runtime/
 │   ├── bridge_control_state.py
 │   ├── telemetry_hub.py
+│   ├── tools.py                       # ControlTools (delegated from codex_tools)
 │   └── watchdog.py
 ├── firmware_lifecycle/
-│   └── firmware_manager.py
+│   ├── firmware_manager.py
+│   └── tools.py                       # FirmwareTools (delegated from codex_tools)
 ├── hardware_profile/
 │   ├── hardware_context.py
 │   └── robot_profiles_manager.py
 ├── safety_prearm/
+│   ├── tools.py                       # SafetyTools (delegated from codex_tools)
 │   └── tuning_preflight.py
-├── tuning_intelligence/
-│   ├── commissioning_manager.py
-│   └── host_capture_manager.py
 ├── session_traceability/
 │   ├── agent_mission_manager.py
 │   ├── ai_profile_manager.py
@@ -174,10 +177,33 @@ app/bridge/domains/
 │   ├── config_history_manager.py
 │   ├── design_memory.py
 │   ├── mission_memory.py
-│   └── setup_attempt_history.py
-└── ai_agent/
-    └── ai_manager.py
+│   ├── setup_attempt_history.py
+│   └── tools.py                       # SessionTools (delegated from codex_tools)
+└── tuning_intelligence/
+    ├── commissioning_manager.py
+    ├── host_capture_manager.py
+    ├── simulation_tools.py            # SimulationTools (delegated from codex_tools)
+    └── tools.py                        # TelemetryTools (delegated from codex_tools)
 ```
+
+**Note:** `ai_agent/` is designated as `domain_shared` zone in `dependency_matrix_v1.json`. All domain tools may import from it. Evaluate migration to `contracts/` in Phase F.
+
+---
+
+## Frozen Restart Queue (per PRD §8.2)
+
+Restart queue is frozen in this order for initial decomposition pass:
+
+| Priority | Slice | Risk Level | Status |
+|----------|-------|------------|--------|
+| 1 | `health/status` routes | Low | 🔴 Not started |
+| 2 | `profiles/compat` routes | Low | 🔴 Not started |
+| 3 | `firmware lifecycle` routes | Medium | 🔴 Not started |
+| 4 | `preflight/prearm` safety wrappers | Medium (no behavior drift) | 🔴 Not started |
+| 5 | `codex/chat` route wrappers | Medium | 🔴 Not started |
+| 6 | `tuning intelligence` routes | High (safety-adjacent) | 🔴 Not started |
+
+**Change control:** Any queue reorder requires explicit decision log entry in `docs/MULTI_AGENT_SIGNOFF_LEDGER.md`.
 
 ---
 
