@@ -10,13 +10,13 @@ Components:
 - config_history: Configuration change tracking
 """
 
-# Import from local copies in domain
+# Re-export from existing modules (facade pattern)
 try:
-    from .codex_db import CodexDB, get_codex_db
+    from app.bridge.codex_db import CodexDB, get_codex_db
 except ImportError:
-    # Fallback to original location during transition
     from codex_db import CodexDB, get_codex_db  # type: ignore
 
+# Local domain components
 from .checkpoint_manager import CheckpointManager, Checkpoint
 from .config_history import ConfigHistory, ConfigChange
 
