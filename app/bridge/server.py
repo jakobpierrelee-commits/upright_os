@@ -310,6 +310,7 @@ try:
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
+        build_port_released_payload,
         build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
@@ -344,6 +345,7 @@ except ImportError:
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
+        build_port_released_payload,
         build_profiles_list_payload,
         build_replay_payload,
         build_reset_payload,
@@ -12539,11 +12541,10 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "released": True,
-                                "note": "bridge stopping in background; use IDE upload now",
-                            },
+                            build_port_released_payload(
+                                released=True,
+                                note="bridge stopping in background; use IDE upload now",
+                            ),
                         )
                     except Exception as exc:
                         return _json(

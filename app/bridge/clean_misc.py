@@ -157,3 +157,7 @@ def build_saved_profiles_payload(
     *, saved: Dict[str, Any], profiles: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     return {"ok": True, "saved": saved, "profiles": profiles}
+
+
+def build_port_released_payload(*, released: bool, note: str) -> Dict[str, Any]:
+    return {"ok": True, "released": released, "note": note}
