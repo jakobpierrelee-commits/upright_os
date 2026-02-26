@@ -15117,14 +15117,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "snapshot": snap,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                            "preflight_id": preflight_used,
-                        },
+                        build_tuning_result_payload(
+                            result=res,
+                            snapshot=snap,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                            preflight_id=preflight_used,
+                        ),
                     )
 
                 if u.path == "/motion":
@@ -15157,14 +15156,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "snapshot": snap,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                            "preflight_id": preflight_used,
-                        },
+                        build_tuning_result_payload(
+                            result=res,
+                            snapshot=snap,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                            preflight_id=preflight_used,
+                        ),
                     )
 
                 if u.path == "/setpoint":
@@ -15193,14 +15191,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "snapshot": snap,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                            "preflight_id": preflight_used,
-                        },
+                        build_tuning_result_payload(
+                            result=res,
+                            snapshot=snap,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                            preflight_id=preflight_used,
+                        ),
                     )
 
                 if u.path == "/limits":
