@@ -200,7 +200,7 @@ Restart queue is frozen in this order for initial decomposition pass:
 | 2 | `profiles/compat` routes | Low | ✅ Complete (routes_profiles.py extended) |
 | 3 | `firmware lifecycle` routes | Medium | ✅ Complete (routes_firmware.py: 10 GET + 9 POST) |
 | 4 | `preflight/prearm` safety wrappers | Medium (no behavior drift) | ✅ Complete (handle_arm_precheck in routes_arm.py) |
-| 5 | `codex/chat` route wrappers | Medium | 🔴 Not started |
+| 5 | `codex/chat` route wrappers | Medium | ✅ Complete (routes_ai.py: 8 handlers, routes_auth.py: 8 handlers) |
 | 6 | `tuning intelligence` routes | High (safety-adjacent) | ✅ Complete (handle_tuning_capabilities_get in routes_tuning.py) |
 
 **Change control:** Any queue reorder requires explicit decision log entry in `docs/MULTI_AGENT_SIGNOFF_LEDGER.md`.
