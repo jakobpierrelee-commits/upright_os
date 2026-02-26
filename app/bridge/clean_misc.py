@@ -186,3 +186,9 @@ def build_burst_label_payload(
     *, burst: Dict[str, Any], host_capture: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "burst": burst, "host_capture": host_capture}
+
+
+def build_command_result_payload(
+    *, result: str, status: Dict[str, Any], control: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "result": result, "status": status, "control": control}

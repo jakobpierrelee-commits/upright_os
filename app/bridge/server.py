@@ -304,6 +304,7 @@ try:
         build_boards_payload,
         build_burst_label_payload,
         build_capabilities_payload,
+        build_command_result_payload,
         build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
@@ -341,6 +342,7 @@ except ImportError:
         build_boards_payload,
         build_burst_label_payload,
         build_capabilities_payload,
+        build_command_result_payload,
         build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
@@ -14941,12 +14943,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_command_result_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/imu/calibrate":
@@ -14967,12 +14968,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_command_result_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/imu/load":
@@ -14994,12 +14994,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_command_result_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/imu/save":
@@ -15021,12 +15020,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_command_result_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/imu/info":
@@ -15048,12 +15046,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "result": res,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_command_result_payload(
+                            result=res,
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/savecfg":
