@@ -261,6 +261,7 @@ try:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_openai_config_payload,
         build_session_heartbeat_payload,
     )
 except ImportError:
@@ -278,6 +279,7 @@ except ImportError:
         build_auth_openai_status_payload,
         build_auth_session_payload,
         build_auth_user_payload,
+        build_openai_config_payload,
         build_session_heartbeat_payload,
     )
 try:
@@ -11484,15 +11486,12 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "openai": {
-                                "configured": bool(me.get("openai_configured")),
-                                "model": me.get("openai_model"),
-                                "runtime_has_key": bool(runtime_key),
-                                "runtime_key_source": runtime_source,
-                            },
-                        },
+                        build_openai_config_payload(
+                            configured=bool(me.get("openai_configured")),
+                            model=me.get("openai_model"),
+                            runtime_has_key=bool(runtime_key),
+                            runtime_key_source=runtime_source,
+                        ),
                     )
                 if u.path == "/firmware/sketch":
                     q = parse_qs(u.query)

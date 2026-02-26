@@ -133,3 +133,21 @@ def build_ai_chat_response_payload(
         "thread_id": thread_id,
         "apply": apply,
     }
+
+
+def build_openai_config_payload(
+    *,
+    configured: bool,
+    model: Optional[str],
+    runtime_has_key: bool,
+    runtime_key_source: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "openai": {
+            "configured": configured,
+            "model": model,
+            "runtime_has_key": runtime_has_key,
+            "runtime_key_source": runtime_key_source,
+        },
+    }
