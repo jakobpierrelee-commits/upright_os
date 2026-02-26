@@ -372,23 +372,43 @@ except ImportError:
     )
 try:
     from app.bridge.routes_firmware import (
+        handle_firmware_artifacts_get,
+        handle_firmware_boards_get,
+        handle_firmware_check_post,
         handle_firmware_compile,
         handle_firmware_generate_docs_pack,
         handle_firmware_generate_unified,
         handle_firmware_install_cli,
+        handle_firmware_runtime_manifest_compat_get,
+        handle_firmware_runtime_manifest_validate_get,
+        handle_firmware_sketch_folders_get,
         handle_firmware_sketch_folder_pick,
+        handle_firmware_sketch_get,
         handle_firmware_sketch_write,
+        handle_firmware_status_get,
+        handle_firmware_targets_get,
+        handle_firmware_unified_schema_get,
         handle_firmware_upload,
         handle_firmware_upload_guarded,
     )
 except ImportError:
     from routes_firmware import (  # type: ignore
+        handle_firmware_artifacts_get,
+        handle_firmware_boards_get,
+        handle_firmware_check_post,
         handle_firmware_compile,
         handle_firmware_generate_docs_pack,
         handle_firmware_generate_unified,
         handle_firmware_install_cli,
+        handle_firmware_runtime_manifest_compat_get,
+        handle_firmware_runtime_manifest_validate_get,
+        handle_firmware_sketch_folders_get,
         handle_firmware_sketch_folder_pick,
+        handle_firmware_sketch_get,
         handle_firmware_sketch_write,
+        handle_firmware_status_get,
+        handle_firmware_targets_get,
+        handle_firmware_unified_schema_get,
         handle_firmware_upload,
         handle_firmware_upload_guarded,
     )
@@ -5585,27 +5605,14 @@ def build_handler(
                         ),
                     )
                 if u.path == "/firmware/status":
-                    return _json(
-                        self,
-                        200,
-                        build_firmware_status_payload(
-                            firmware_status=firmware.status()
-                        ),
-                    )
+                    code, payload = handle_firmware_status_get(firmware=firmware)
+                    return _json(self, code, payload)
                 if u.path == "/firmware/artifacts":
                     q = parse_qs(u.query)
-                    n_raw = str((q.get("limit") or ["20"])[0]).strip()
-                    try:
-                        n = int(n_raw)
-                    except Exception:
-                        n = 20
-                    return _json(
-                        self,
-                        200,
-                        build_firmware_artifacts_payload(
-                            firmware_artifacts=firmware.list_run_artifacts(limit=n)
-                        ),
+                    code, payload = handle_firmware_artifacts_get(
+                        firmware=firmware, query=q
                     )
+                    return _json(self, code, payload)
                 if u.path == "/design-memory":
                     q = parse_qs(u.query)
                     n_raw = str((q.get("limit") or ["30"])[0]).strip()
@@ -5648,11 +5655,8 @@ def build_handler(
                         ),
                     )
                 if u.path == "/firmware/unified-schema":
-                    return _json(
-                        self,
-                        200,
-                        build_unified_schema_payload(schema=firmware.unified_schema()),
-                    )
+                    code, payload = handle_firmware_unified_schema_get(firmware=firmware)
+                    return _json(self, code, payload)
                 if u.path == "/ai/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -5912,59 +5916,34 @@ def build_handler(
                     )
                 if u.path == "/firmware/sketch":
                     q = parse_qs(u.query)
-                    path = q.get("path", [None])[0]
-                    return _json(
-                        self,
-                        200,
-                        build_sketch_payload(sketch=firmware.read_sketch(path=path)),
+                    code, payload = handle_firmware_sketch_get(
+                        firmware=firmware, query=q
                     )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/boards":
-                    return _json(
-                        self, 200, build_boards_payload(boards=firmware.list_boards())
-                    )
+                    code, payload = handle_firmware_boards_get(firmware=firmware)
+                    return _json(self, code, payload)
                 if u.path == "/firmware/targets":
-                    payload = build_targets_payload(targets=firmware.list_targets())
-                    validate_firmware_targets_response(payload)
-                    return _json(self, 200, payload)
+                    code, payload = handle_firmware_targets_get(firmware=firmware)
+                    return _json(self, code, payload)
                 if u.path == "/firmware/runtime-manifest/validate":
                     q = parse_qs(u.query)
-                    sketch = (
-                        str((q.get("sketch", [""]) or [""])[0] or "").strip() or None
+                    code, payload = handle_firmware_runtime_manifest_validate_get(
+                        firmware=firmware, query=q
                     )
-                    check = firmware.validate_runtime_manifest(
-                        sketch=sketch, require_exists=True
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_runtime_manifest_validate_payload(check=check),
-                    )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/runtime-manifest/compat":
                     q = parse_qs(u.query)
-                    sketch = (
-                        str((q.get("sketch", [""]) or [""])[0] or "").strip() or None
+                    code, payload = handle_firmware_runtime_manifest_compat_get(
+                        firmware=firmware,
+                        profiles=profiles,
+                        query=q,
+                        compatibility_fn=_runtime_manifest_profile_compatibility,
                     )
-                    manifest_check = firmware.validate_runtime_manifest(
-                        sketch=sketch, require_exists=True
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_runtime_manifest_compat_payload(
-                            manifest_check=manifest_check,
-                            profiles_state=profiles.list(),
-                            targets=firmware.list_targets(),
-                            compatibility_fn=_runtime_manifest_profile_compatibility,
-                        ),
-                    )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/sketch-folders":
-                    return _json(
-                        self,
-                        200,
-                        build_firmware_sketch_folders_payload(
-                            sketch_folders=firmware.list_sketch_folders()
-                        ),
-                    )
+                    code, payload = handle_firmware_sketch_folders_get(firmware=firmware)
+                    return _json(self, code, payload)
                 if u.path == "/probe/compat":
                     q = parse_qs(u.query)
                     requested_profile = str(
@@ -6496,11 +6475,8 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/check":
-                    return _json(
-                        self,
-                        200,
-                        build_firmware_check_payload(firmware_check=firmware.check()),
-                    )
+                    code, payload = handle_firmware_check_post(firmware=firmware)
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/compile":
                     code, payload = handle_firmware_compile(

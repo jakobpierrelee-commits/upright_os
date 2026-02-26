@@ -1,26 +1,180 @@
 """
-Firmware route handlers extracted from server.py (Phase C).
+Firmware route handlers extracted from server.py (Phase B/C).
 
-These handlers manage firmware compilation, upload, and generation operations.
+These handlers manage firmware status, compilation, upload, and generation operations.
 """
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, List, Tuple
+from urllib.parse import parse_qs
 
 try:
     from app.bridge.clean_misc import (
+        build_boards_payload,
         build_docs_pack_payload,
         build_firmware_result_payload,
         build_picked_payload,
+        build_sketch_payload,
         build_sketch_write_payload,
+        build_targets_payload,
         build_unified_payload,
     )
 except ImportError:
     from clean_misc import (  # type: ignore
+        build_boards_payload,
         build_docs_pack_payload,
         build_firmware_result_payload,
         build_picked_payload,
+        build_sketch_payload,
         build_sketch_write_payload,
+        build_targets_payload,
         build_unified_payload,
     )
+
+try:
+    from app.bridge.clean_firmware import (
+        build_firmware_artifacts_payload,
+        build_firmware_sketch_folders_payload,
+        build_firmware_status_payload,
+        build_runtime_manifest_validate_payload,
+    )
+except ImportError:
+    from clean_firmware import (  # type: ignore
+        build_firmware_artifacts_payload,
+        build_firmware_sketch_folders_payload,
+        build_firmware_status_payload,
+        build_runtime_manifest_validate_payload,
+    )
+
+try:
+    from app.bridge.clean_serial import build_unified_schema_payload
+except ImportError:
+    from clean_serial import build_unified_schema_payload  # type: ignore
+
+try:
+    from app.bridge.clean_profiles import build_runtime_manifest_compat_payload
+except ImportError:
+    from clean_profiles import build_runtime_manifest_compat_payload  # type: ignore
+
+try:
+    from app.bridge.clean_contracts import validate_firmware_targets_response
+except ImportError:
+    from clean_contracts import validate_firmware_targets_response  # type: ignore
+
+
+# --- GET Handlers ---
+
+
+def handle_firmware_status_get(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/status GET request."""
+    return 200, build_firmware_status_payload(firmware_status=firmware.status())
+
+
+def handle_firmware_artifacts_get(
+    *,
+    firmware: Any,
+    query: Dict[str, List[str]],
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/artifacts GET request."""
+    n_raw = str((query.get("limit") or ["20"])[0]).strip()
+    try:
+        n = int(n_raw)
+    except Exception:
+        n = 20
+    return 200, build_firmware_artifacts_payload(
+        firmware_artifacts=firmware.list_run_artifacts(limit=n)
+    )
+
+
+def handle_firmware_unified_schema_get(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/unified-schema GET request."""
+    return 200, build_unified_schema_payload(schema=firmware.unified_schema())
+
+
+def handle_firmware_sketch_get(
+    *,
+    firmware: Any,
+    query: Dict[str, List[str]],
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/sketch GET request (read sketch)."""
+    path = query.get("path", [None])[0]
+    return 200, build_sketch_payload(sketch=firmware.read_sketch(path=path))
+
+
+def handle_firmware_boards_get(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/boards GET request."""
+    return 200, build_boards_payload(boards=firmware.list_boards())
+
+
+def handle_firmware_targets_get(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/targets GET request."""
+    payload = build_targets_payload(targets=firmware.list_targets())
+    validate_firmware_targets_response(payload)
+    return 200, payload
+
+
+def handle_firmware_runtime_manifest_validate_get(
+    *,
+    firmware: Any,
+    query: Dict[str, List[str]],
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/runtime-manifest/validate GET request."""
+    sketch = str((query.get("sketch", [""]) or [""])[0] or "").strip() or None
+    check = firmware.validate_runtime_manifest(sketch=sketch, require_exists=True)
+    return 200, build_runtime_manifest_validate_payload(check=check)
+
+
+def handle_firmware_runtime_manifest_compat_get(
+    *,
+    firmware: Any,
+    profiles: Any,
+    query: Dict[str, List[str]],
+    compatibility_fn: Callable[..., Any],
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/runtime-manifest/compat GET request."""
+    sketch = str((query.get("sketch", [""]) or [""])[0] or "").strip() or None
+    manifest_check = firmware.validate_runtime_manifest(sketch=sketch, require_exists=True)
+    return 200, build_runtime_manifest_compat_payload(
+        manifest_check=manifest_check,
+        profiles_state=profiles.list(),
+        targets=firmware.list_targets(),
+        compatibility_fn=compatibility_fn,
+    )
+
+
+def handle_firmware_sketch_folders_get(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/sketch-folders GET request."""
+    return 200, build_firmware_sketch_folders_payload(
+        sketch_folders=firmware.list_sketch_folders()
+    )
+
+
+def handle_firmware_check_post(
+    *,
+    firmware: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /firmware/check POST request."""
+    try:
+        from app.bridge.clean_misc import build_firmware_check_payload
+    except ImportError:
+        from clean_misc import build_firmware_check_payload  # type: ignore
+    return 200, build_firmware_check_payload(firmware_check=firmware.check())
+
+
+# --- POST Handlers (existing) ---
 
 
 def handle_firmware_compile(
