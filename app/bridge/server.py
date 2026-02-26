@@ -251,6 +251,16 @@ except ImportError:
         build_tooling_traces_payload,
     )
 try:
+    from app.bridge.routes_tuning import (
+        handle_tuning_preflight,
+        handle_tuning_recommend,
+    )
+except ImportError:
+    from routes_tuning import (  # type: ignore
+        handle_tuning_preflight,
+        handle_tuning_recommend,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -14244,427 +14254,32 @@ def build_handler(
                         )
 
                 if u.path == "/tooling/tuning/recommend":
-                    if evaluate_tuning_plan is None:
-                        return _json(
-                            self,
-                            501,
-                            {"ok": False, "error": "tuning_policy_unavailable"},
-                        )
-
-                    current_raw = body.get("current", {})
-                    telemetry_raw = body.get("telemetry", {})
-                    if not isinstance(current_raw, dict):
-                        return _json(
-                            self, 400, {"ok": False, "error": "current_object_required"}
-                        )
-                    if not isinstance(telemetry_raw, dict):
-                        telemetry_raw = {}
-
-                    current: Dict[str, Any] = {
-                        "kp": float(current_raw.get("kp", 31.0)),
-                        "ki": float(current_raw.get("ki", 0.05)),
-                        "kd": float(current_raw.get("kd", 1.05)),
-                        "kv": float(current_raw.get("kv", 0.0)),
-                        "kx": float(current_raw.get("kx", 0.0)),
-                        "setpoint": float(current_raw.get("setpoint", 0.0)),
-                        "out_max": float(current_raw.get("out_max", 180.0)),
-                        "tip_deg": float(current_raw.get("tip_deg", 35.0)),
-                        "i_max": float(current_raw.get("i_max", 70.0)),
-                        "lowpass_cutoff_hz": float(
-                            current_raw.get("lowpass_cutoff_hz", 8.0)
-                        ),
-                        "conditional_integration": bool(
-                            current_raw.get("conditional_integration", False)
-                        ),
-                    }
-
-                    telemetry = {
-                        "angle_variance": float(
-                            telemetry_raw.get("angle_variance", 0.0)
-                        ),
-                        "output_saturation_pct": float(
-                            telemetry_raw.get("output_saturation_pct", 0.0)
-                        ),
-                        "oscillation_detected": bool(
-                            telemetry_raw.get("oscillation_detected", False)
-                        ),
-                        "oscillation_freq_hz": float(
-                            telemetry_raw.get("oscillation_freq_hz", 0.0)
-                        ),
-                        "mode": str(telemetry_raw.get("mode", "")),
-                    }
-
-                    replay_reports: list[Dict[str, Any]] = []
-                    surrogate_report: Optional[Dict[str, Any]] = None
-
-                    raw_paths = body.get("trace_paths", [])
-                    cleaned: list[pathlib.Path] = []
-                    if isinstance(raw_paths, list):
-                        for raw in raw_paths[:8]:
-                            p = pathlib.Path(str(raw))
-                            if not p.is_absolute():
-                                p = (repo_root / p).resolve()
-                            try:
-                                p.relative_to(repo_root.resolve())
-                            except Exception:
-                                return _json(
-                                    self,
-                                    400,
-                                    {"ok": False, "error": "trace_path_outside_repo"},
-                                )
-                            if p.exists():
-                                cleaned.append(p)
-
-                    if cleaned and replay_file is not None:
-                        for p in cleaned:
-                            try:
-                                replay_reports.append(
-                                    replay_file(
-                                        p,
-                                        i_limit=float(current["i_max"]),
-                                        out_limit=float(current["out_max"]),
-                                        cmd_vel=0.0,
-                                    )
-                                )
-                            except Exception as exc:
-                                replay_reports.append(
-                                    {
-                                        "trace": str(p),
-                                        "result": {
-                                            "ok": False,
-                                            "pass": False,
-                                            "error": str(exc),
-                                        },
-                                    }
-                                )
-
-                    if cleaned and simulate_from_logs is not None:
-                        try:
-                            surrogate_report = simulate_from_logs(
-                                cleaned,
-                                kp=float(current["kp"]),
-                                ki=float(current["ki"]),
-                                kd=float(current["kd"]),
-                                setpoint=float(current["setpoint"]),
-                                duration_s=float(body.get("duration_s", 3.0)),
-                                i_limit=float(current["i_max"]),
-                                out_limit=float(current["out_max"]),
-                            )
-                        except Exception as exc:
-                            surrogate_report = {
-                                "ok": False,
-                                "error": f"surrogate_error:{exc}",
-                            }
-
-                    recommendation = evaluate_tuning_plan(
-                        current=current,
-                        telemetry=telemetry,
-                        surrogate=surrogate_report,
-                        replay_results=replay_reports,
+                    code, payload = handle_tuning_recommend(
+                        body=body,
+                        repo_root=repo_root,
+                        evaluate_tuning_plan=evaluate_tuning_plan,
+                        replay_file=replay_file,
+                        simulate_from_logs=simulate_from_logs,
+                        validate_contract_fn=_validate_tuning_recommendation_contract,
+                        evaluate_quality_fn=_evaluate_tuning_recommendation_quality,
                     )
-                    contract_errors = _validate_tuning_recommendation_contract(
-                        recommendation
-                    )
-                    if contract_errors:
-                        return _json(
-                            self,
-                            500,
-                            {
-                                "ok": False,
-                                "error": "tuning_recommendation_contract_invalid",
-                                "contract_errors": contract_errors,
-                            },
-                        )
-                    quality_gate = _evaluate_tuning_recommendation_quality(
-                        recommendation=recommendation,
-                        telemetry=telemetry,
-                        trace_paths=cleaned,
-                        replay_reports=replay_reports,
-                        surrogate_report=surrogate_report,
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_recommend_payload(
-                            recommendation=recommendation,
-                            surrogate=surrogate_report,
-                            replay=replay_reports,
-                            quality_gate=quality_gate,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/tooling/tuning/preflight":
-                    if evaluate_tuning_plan is None:
-                        return _json(
-                            self,
-                            501,
-                            {"ok": False, "error": "tuning_policy_unavailable"},
-                        )
-                    family = str(body.get("family", "")).strip().lower()
-                    if family not in {"pid", "motion", "setpoint", "limits"}:
-                        return _json(
-                            self, 400, {"ok": False, "error": "invalid_family"}
-                        )
-
-                    status_now = gateway.get_status()
-                    current_raw = body.get("current", {})
-                    telemetry_raw = body.get("telemetry", {})
-                    if not isinstance(current_raw, dict):
-                        current_raw = {}
-                    if not isinstance(telemetry_raw, dict):
-                        telemetry_raw = {}
-
-                    current = {
-                        "kp": float(
-                            current_raw.get(
-                                "kp", _status_float(status_now, "kp", default=31.0)
-                            )
-                        ),
-                        "ki": float(
-                            current_raw.get(
-                                "ki", _status_float(status_now, "ki", default=0.05)
-                            )
-                        ),
-                        "kd": float(
-                            current_raw.get(
-                                "kd", _status_float(status_now, "kd", default=1.05)
-                            )
-                        ),
-                        "kv": float(
-                            current_raw.get(
-                                "kv", _status_float(status_now, "kv", default=0.0)
-                            )
-                        ),
-                        "kx": float(
-                            current_raw.get(
-                                "kx", _status_float(status_now, "kx", default=0.0)
-                            )
-                        ),
-                        "setpoint": float(
-                            current_raw.get(
-                                "setpoint",
-                                _status_float(status_now, "set", default=0.0),
-                            )
-                        ),
-                        "out_max": float(
-                            current_raw.get(
-                                "out_max",
-                                _status_float(
-                                    status_now, "outMax", "out_max", default=180.0
-                                ),
-                            )
-                        ),
-                        "tip_deg": float(
-                            current_raw.get(
-                                "tip_deg",
-                                _status_float(
-                                    status_now, "tipDeg", "tip_deg", default=35.0
-                                ),
-                            )
-                        ),
-                        "i_max": float(
-                            current_raw.get(
-                                "i_max",
-                                _status_float(
-                                    status_now, "iMax", "i_max", default=70.0
-                                ),
-                            )
-                        ),
-                        "lowpass_cutoff_hz": float(
-                            current_raw.get("lowpass_cutoff_hz", 8.0)
-                        ),
-                        "conditional_integration": bool(
-                            current_raw.get("conditional_integration", False)
-                        ),
-                    }
-
-                    target_raw = body.get("target", {})
-                    if not isinstance(target_raw, dict):
-                        return _json(
-                            self, 400, {"ok": False, "error": "target_object_required"}
-                        )
-                    target: Dict[str, float] = {}
-                    if family == "pid":
-                        target = {
-                            "kp": float(target_raw["kp"]),
-                            "ki": float(target_raw["ki"]),
-                            "kd": float(target_raw["kd"]),
-                        }
-                        current_for_family = {
-                            "kp": float(current["kp"]),
-                            "ki": float(current["ki"]),
-                            "kd": float(current["kd"]),
-                        }
-                    elif family == "motion":
-                        target = {
-                            "kv": float(target_raw["kv"]),
-                            "kx": float(target_raw["kx"]),
-                        }
-                        current_for_family = {
-                            "kv": float(current["kv"]),
-                            "kx": float(current["kx"]),
-                        }
-                    elif family == "setpoint":
-                        target = {"deg": float(target_raw["deg"])}
-                        current_for_family = {"deg": float(current["setpoint"])}
-                    else:
-                        target = {
-                            "out_max": float(target_raw["out_max"]),
-                            "tip_deg": float(target_raw["tip_deg"]),
-                            "i_max": float(target_raw["i_max"]),
-                        }
-                        current_for_family = {
-                            "out_max": float(current["out_max"]),
-                            "tip_deg": float(current["tip_deg"]),
-                            "i_max": float(current["i_max"]),
-                        }
-
-                    telemetry = {
-                        "angle_variance": float(
-                            telemetry_raw.get("angle_variance", 0.0)
-                        ),
-                        "output_saturation_pct": float(
-                            telemetry_raw.get("output_saturation_pct", 0.0)
-                        ),
-                        "oscillation_detected": bool(
-                            telemetry_raw.get("oscillation_detected", False)
-                        ),
-                        "oscillation_freq_hz": float(
-                            telemetry_raw.get("oscillation_freq_hz", 0.0)
-                        ),
-                        "mode": str(
-                            telemetry_raw.get("mode", status_now.get("mode", ""))
-                        ),
-                    }
-
-                    replay_reports: list[Dict[str, Any]] = []
-                    surrogate_report: Optional[Dict[str, Any]] = None
-                    raw_paths = body.get("trace_paths", [])
-                    cleaned: list[pathlib.Path] = []
-                    if isinstance(raw_paths, list):
-                        for raw in raw_paths[:8]:
-                            p = pathlib.Path(str(raw))
-                            if not p.is_absolute():
-                                p = (repo_root / p).resolve()
-                            try:
-                                p.relative_to(repo_root.resolve())
-                            except Exception:
-                                return _json(
-                                    self,
-                                    400,
-                                    {"ok": False, "error": "trace_path_outside_repo"},
-                                )
-                            if p.exists():
-                                cleaned.append(p)
-
-                    if cleaned and replay_file is not None:
-                        for p in cleaned:
-                            try:
-                                replay_reports.append(
-                                    replay_file(
-                                        p,
-                                        i_limit=float(current["i_max"]),
-                                        out_limit=float(current["out_max"]),
-                                        cmd_vel=0.0,
-                                    )
-                                )
-                            except Exception as exc:
-                                replay_reports.append(
-                                    {
-                                        "trace": str(p),
-                                        "result": {
-                                            "ok": False,
-                                            "pass": False,
-                                            "error": str(exc),
-                                        },
-                                    }
-                                )
-
-                    sim_current = dict(current)
-                    if family == "pid":
-                        sim_current["kp"] = target["kp"]
-                        sim_current["ki"] = target["ki"]
-                        sim_current["kd"] = target["kd"]
-                    elif family == "setpoint":
-                        sim_current["setpoint"] = target["deg"]
-                    elif family == "limits":
-                        sim_current["out_max"] = target["out_max"]
-                        sim_current["i_max"] = target["i_max"]
-
-                    if cleaned and simulate_from_logs is not None:
-                        try:
-                            surrogate_report = simulate_from_logs(
-                                cleaned,
-                                kp=float(sim_current["kp"]),
-                                ki=float(sim_current["ki"]),
-                                kd=float(sim_current["kd"]),
-                                setpoint=float(sim_current["setpoint"]),
-                                duration_s=float(body.get("duration_s", 3.0)),
-                                i_limit=float(sim_current["i_max"]),
-                                out_limit=float(sim_current["out_max"]),
-                            )
-                        except Exception as exc:
-                            surrogate_report = {
-                                "ok": False,
-                                "error": f"surrogate_error:{exc}",
-                            }
-
-                    recommendation = evaluate_tuning_plan(
-                        current=sim_current,
-                        telemetry=telemetry,
-                        surrogate=surrogate_report,
-                        replay_results=replay_reports,
+                    code, payload = handle_tuning_preflight(
+                        body=body,
+                        repo_root=repo_root,
+                        status_now=gateway.get_status(),
+                        evaluate_tuning_plan=evaluate_tuning_plan,
+                        replay_file=replay_file,
+                        simulate_from_logs=simulate_from_logs,
+                        validate_contract_fn=_validate_tuning_recommendation_contract,
+                        evaluate_quality_fn=_evaluate_tuning_recommendation_quality,
+                        build_signature_fn=_build_tuning_apply_signature,
+                        preflight_issue_fn=tuning_preflight.issue,
+                        status_float_fn=_status_float,
                     )
-                    contract_errors = _validate_tuning_recommendation_contract(
-                        recommendation
-                    )
-                    if contract_errors:
-                        return _json(
-                            self,
-                            500,
-                            {
-                                "ok": False,
-                                "error": "tuning_recommendation_contract_invalid",
-                                "contract_errors": contract_errors,
-                            },
-                        )
-                    quality_gate = _evaluate_tuning_recommendation_quality(
-                        recommendation=recommendation,
-                        telemetry=telemetry,
-                        trace_paths=cleaned,
-                        replay_reports=replay_reports,
-                        surrogate_report=surrogate_report,
-                    )
-                    reasons = list(quality_gate.get("reasons") or [])
-                    gate_ok = bool(quality_gate.get("gate_ok", False))
-                    preflight_node: Optional[Dict[str, Any]] = None
-                    signature = _build_tuning_apply_signature(family, target)
-                    if gate_ok:
-                        preflight_node = tuning_preflight.issue(
-                            family=family,
-                            signature=signature,
-                            score_pct=int(recommendation.get("score_pct", 0)),
-                            notes=["preflight_gate_ok"],
-                        )
-
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_preflight_payload(
-                            gate_ok=gate_ok,
-                            family=family,
-                            reasons=reasons,
-                            recommendation_score_pct=int(
-                                recommendation.get("score_pct", 0)
-                            ),
-                            signature=signature,
-                            quality_gate=quality_gate,
-                            preflight_node=preflight_node,
-                            recommendation=recommendation,
-                            surrogate=surrogate_report,
-                            replay=replay_reports,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/command":
                     cmd = str(body.get("cmd", "")).strip()
