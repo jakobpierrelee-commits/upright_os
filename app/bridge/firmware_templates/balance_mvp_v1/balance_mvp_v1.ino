@@ -11,8 +11,16 @@
 #include "module_contracts.h"
 #include "release_version.h"
 
+#ifndef FEAT_IMU_SERVICE_CMDS
+#define FEAT_IMU_SERVICE_CMDS 0
+#endif
+
+#ifndef FEAT_BOOT_AUTORUN
+#define FEAT_BOOT_AUTORUN 0
+#endif
+
 #ifndef UPRIGHT_BUILD_ID
-#define UPRIGHT_BUILD_ID "prv1a"
+#define UPRIGHT_BUILD_ID "bmv1a"
 #endif
 
 #ifndef UPRIGHT_BUILD_HASH
@@ -21,7 +29,7 @@
 
 // Fallbacks in case generated release_version.h is absent.
 #ifndef UPRIGHT_RUNTIME_VERSION
-#define UPRIGHT_RUNTIME_VERSION "profiled_runtime_v1.3.0"
+#define UPRIGHT_RUNTIME_VERSION "balance_mvp_v1.0.0"
 #endif
 
 #ifndef UPRIGHT_TUNE_VERSION
@@ -85,12 +93,77 @@ struct ImuCalV1 {
   uint16_t crc16;
 };
 
+struct MotionConfigV2 {
+  uint32_t magic;
+  uint8_t version;
+  uint8_t reserved0;
+  float kv;
+  float kx;
+  float out_slew_per_s;
+  uint16_t arm_engage_ramp_ms;
+  float motion_angle_gate_deg;
+  float motion_term_max_deg;
+  float autozero_trim_max_deg;
+  float autozero_step_max_deg_per_s;
+  float autozero_angle_gate_deg;
+  float autozero_gyro_gate_dps;
+  float autozero_out_frac_gate;
+  float autozero_err_deadband_deg;
+  uint16_t autozero_arm_holdoff_ms;
+  uint16_t autozero_reversal_holdoff_ms;
+  float autozero_out_sign_deadband;
+  float autozero_wspd_gate_counts;
+  uint32_t autozero_fast_window_ms;
+  float autozero_fast_step_max_deg_per_s;
+  float autozero_fast_angle_gate_deg;
+  float autozero_fast_gyro_gate_dps;
+  float autozero_fast_out_frac_gate;
+  uint8_t autozero_enabled;
+  uint8_t reserved1;
+  uint16_t crc16;
+};
+
+struct MotionConfigV3 {
+  uint32_t magic;
+  uint8_t version;
+  uint8_t reserved0;
+  float kv;
+  float kx;
+  float out_slew_per_s;
+  uint16_t arm_engage_ramp_ms;
+  float motion_angle_gate_deg;
+  float motion_term_max_deg;
+  float autozero_trim_max_deg;
+  float autozero_step_max_deg_per_s;
+  float autozero_angle_gate_deg;
+  float autozero_gyro_gate_dps;
+  float autozero_out_frac_gate;
+  float autozero_err_deadband_deg;
+  uint16_t autozero_arm_holdoff_ms;
+  uint16_t autozero_reversal_holdoff_ms;
+  float autozero_out_sign_deadband;
+  float autozero_wspd_gate_counts;
+  uint32_t autozero_fast_window_ms;
+  float autozero_fast_step_max_deg_per_s;
+  float autozero_fast_angle_gate_deg;
+  float autozero_fast_gyro_gate_dps;
+  float autozero_fast_out_frac_gate;
+  uint8_t autozero_enabled;
+  uint8_t reserved1;
+  float sched_err_deg;
+  float sched_boost;
+  uint16_t crc16;
+};
+
 static const uint32_t CFG_MAGIC = 0x31565055UL;  // "UPV1"
 static const uint8_t CFG_VERSION = 11;
 static const int EEPROM_ADDR = 0;
 static const uint32_t IMU_CAL_MAGIC = 0x31434955UL;  // "UIC1"
 static const uint8_t IMU_CAL_VERSION = 1;
 static const int EEPROM_IMU_CAL_ADDR = EEPROM_ADDR + static_cast<int>(sizeof(RuntimeConfigV11));
+static const uint32_t MOTION_CFG_MAGIC = 0x314D5655UL;  // "UVM1"
+static const uint8_t MOTION_CFG_VERSION = 3;
+static const int EEPROM_MOTION_CFG_ADDR = EEPROM_IMU_CAL_ADDR + static_cast<int>(sizeof(ImuCalV1));
 static const uint16_t FAULT_ESTOP_LATCH_CODE = 32;
 
 enum FaultNoteCode : uint8_t {
@@ -110,14 +183,10 @@ static RuntimeState g_state = {true, false, 0.0f, 0.0f, 0.0f, 0, FAULT_NONE};
 static float g_raw = 0.0f;
 static float g_out = 0.0f;
 static float g_vol_raw = 0.0f;
-static float g_motion_kv = 0.0f;
-static float g_motion_kx = 0.0f;
-static float g_motion_term = 0.0f;
-static float g_motion_vel_counts = 0.0f;
-static float g_motion_pos_counts = 0.0f;
-static float g_motion_pos_raw_counts = 0.0f;
-static float g_motion_delta_counts = 0.0f;
-static bool g_motion_vel_init = false;
+static float g_wpos_raw_counts = 0.0f;
+static float g_wdelta_counts = 0.0f;
+static float g_wpos_unclamped_counts = 0.0f;
+static float g_wdelta_tick_counts = 0.0f;
 
 static float g_pid_err = 0.0f;
 static float g_pid_p = 0.0f;
@@ -166,28 +235,72 @@ static uint32_t g_fault_count = 0;
 static uint8_t g_last_fault_note = NOTE_NONE;
 
 static float g_runaway_score = 0.0f;
-static bool g_autozero_enabled = false;
+static float g_motion_kv = 0.008f;
+static float g_motion_kx = 0.0015f;
+static float g_sched_err_deg = 3.0f;
+static float g_sched_boost = 0.40f;
+static float g_sched_scale = 1.0f;
+static float g_wspd_counts = 0.0f;
+static float g_wpos_target_counts = 0.0f;
+static int16_t g_out_left_cmd = 0;
+static int16_t g_out_right_cmd = 0;
+static float g_fault_ang_snapshot = 0.0f;
+static float g_fault_out_snapshot = 0.0f;
+static float g_fault_runaway_snapshot = 0.0f;
+static float g_fault_wpos_snapshot = 0.0f;
+static bool g_autozero_enabled = true;
 static float g_autozero_trim_deg = 0.0f;
 static float g_set_eff_deg = 0.0f;
+static bool g_autozero_fast_active = false;
+static uint32_t g_autozero_holdoff_until_ms = 0;
+static int8_t g_autozero_prev_out_sign = 0;
 
 static bool g_imu_ok = false;
+static bool g_imu_cal_loaded = false;
 MPU6050 g_mpu(Wire);
+
+#if FEAT_AUTORUN_CMD
+static bool g_autorun_pending = false;
+static uint32_t g_autorun_due_ms = 0;
+#endif
+#if FEAT_BOOT_AUTORUN
+static bool g_boot_autorun_pending = false;
+static uint32_t g_boot_autorun_due_ms = 0;
+#endif
 
 static char g_cmd_buf[128];
 static uint8_t g_cmd_len = 0;
 
 static const float DT_S = static_cast<float>(LOOP_PERIOD_US) * 1.0e-6f;
-static const float MOTION_VEL_CUTOFF_HZ = 6.0f;
-static const float MOTION_POS_MAX_COUNTS = 500.0f;
-static const float MOTION_TERM_FRAC = 0.55f;
-static const float OUT_SLEW_PER_S = 900.0f;
-static const float AUTOZERO_TRIM_MAX_DEG = 3.0f;
-static const float AUTOZERO_STEP_MAX_DEG_PER_S = 0.25f;
-static const float AUTOZERO_ANGLE_GATE_DEG = 9.0f;
-static const float AUTOZERO_GYRO_GATE_DPS = 80.0f;
-static const float AUTOZERO_OUT_FRAC_GATE = 0.82f;
-static const float AUTOZERO_RUNAWAY_GATE = 0.75f;
-static const float AUTOZERO_ERR_DEADBAND_DEG = 0.06f;
+#if FEAT_AUTORUN_CMD
+static const uint16_t AUTORUN_DELAY_MAX_MS = 15000U;
+#endif
+#if FEAT_AUTORUN_CMD || FEAT_BOOT_AUTORUN
+static const uint16_t AUTORUN_BOOT_DELAY_MS = 2000U;
+#endif
+
+// Runtime-adjustable high-impact shaping variables (nano compat guardrail).
+static float g_out_slew_per_s = 3000.0f;
+static uint16_t g_arm_engage_ramp_ms = 450U;
+static float g_motion_angle_gate_deg = 12.0f;
+static float g_motion_term_max_deg = 5.0f;
+
+// Autozero runtime-adjustable variables.
+static float g_autozero_trim_max_deg = 3.0f;
+static float g_autozero_step_max_deg_per_s = 0.25f;
+static float g_autozero_angle_gate_deg = 9.0f;
+static float g_autozero_gyro_gate_dps = 80.0f;
+static float g_autozero_out_frac_gate = 0.82f;
+static float g_autozero_err_deadband_deg = 0.06f;
+static uint16_t g_autozero_arm_holdoff_ms = 1200U;
+static uint16_t g_autozero_reversal_holdoff_ms = 220U;
+static float g_autozero_out_sign_deadband = 10.0f;
+static float g_autozero_wspd_gate_counts = 120.0f;
+static uint32_t g_autozero_fast_window_ms = 2500U;
+static float g_autozero_fast_step_max_deg_per_s = 0.80f;
+static float g_autozero_fast_angle_gate_deg = 6.0f;
+static float g_autozero_fast_gyro_gate_dps = 45.0f;
+static float g_autozero_fast_out_frac_gate = 0.70f;
 
 static float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
@@ -207,6 +320,34 @@ static const char* modeName() {
 static uint16_t cfgCrc16(const RuntimeConfigV11& cfg) {
   const uint8_t* p = reinterpret_cast<const uint8_t*>(&cfg);
   const size_t n = sizeof(RuntimeConfigV11) - sizeof(cfg.crc16);
+  uint16_t crc = 0xFFFFU;
+  for (size_t i = 0; i < n; ++i) {
+    crc ^= static_cast<uint16_t>(p[i]);
+    for (uint8_t b = 0; b < 8; ++b) {
+      if (crc & 1U) crc = static_cast<uint16_t>((crc >> 1) ^ 0xA001U);
+      else crc >>= 1;
+    }
+  }
+  return crc;
+}
+
+static uint16_t motionCfgCrc16V2(const MotionConfigV2& cfg) {
+  const uint8_t* p = reinterpret_cast<const uint8_t*>(&cfg);
+  const size_t n = sizeof(MotionConfigV2) - sizeof(cfg.crc16);
+  uint16_t crc = 0xFFFFU;
+  for (size_t i = 0; i < n; ++i) {
+    crc ^= static_cast<uint16_t>(p[i]);
+    for (uint8_t b = 0; b < 8; ++b) {
+      if (crc & 1U) crc = static_cast<uint16_t>((crc >> 1) ^ 0xA001U);
+      else crc >>= 1;
+    }
+  }
+  return crc;
+}
+
+static uint16_t motionCfgCrc16V3(const MotionConfigV3& cfg) {
+  const uint8_t* p = reinterpret_cast<const uint8_t*>(&cfg);
+  const size_t n = sizeof(MotionConfigV3) - sizeof(cfg.crc16);
   uint16_t crc = 0xFFFFU;
   for (size_t i = 0; i < n; ++i) {
     crc ^= static_cast<uint16_t>(p[i]);
@@ -307,6 +448,8 @@ static void cfgDefaults() {
 
   g_cfg.log_t = 1;
   g_cfg.log_csv = 0;
+  g_motion_kv = 0.008f;
+  g_motion_kx = 0.0015f;
 
   g_cfg.crc16 = cfgCrc16(g_cfg);
 }
@@ -337,6 +480,56 @@ static void cfgSanitize() {
   g_cfg.log_csv = g_cfg.log_csv ? 1 : 0;
 }
 
+static void runtimeTuneDefaults() {
+  g_out_slew_per_s = 3000.0f;
+  g_arm_engage_ramp_ms = 450U;
+  g_motion_angle_gate_deg = 12.0f;
+  g_motion_term_max_deg = 5.0f;
+  g_autozero_trim_max_deg = 3.0f;
+  g_autozero_step_max_deg_per_s = 0.25f;
+  g_autozero_angle_gate_deg = 9.0f;
+  g_autozero_gyro_gate_dps = 80.0f;
+  g_autozero_out_frac_gate = 0.82f;
+  g_autozero_err_deadband_deg = 0.06f;
+  g_autozero_arm_holdoff_ms = 1200U;
+  g_autozero_reversal_holdoff_ms = 220U;
+  g_autozero_out_sign_deadband = 10.0f;
+  g_autozero_wspd_gate_counts = 120.0f;
+  g_autozero_fast_window_ms = 2500U;
+  g_autozero_fast_step_max_deg_per_s = 0.80f;
+  g_autozero_fast_angle_gate_deg = 6.0f;
+  g_autozero_fast_gyro_gate_dps = 45.0f;
+  g_autozero_fast_out_frac_gate = 0.70f;
+  g_autozero_enabled = true;
+  g_sched_err_deg = 3.0f;
+  g_sched_boost = 0.40f;
+}
+
+static void runtimeTuneSanitize() {
+  g_out_slew_per_s = clampf(g_out_slew_per_s, 50.0f, 20000.0f);
+  g_arm_engage_ramp_ms = static_cast<uint16_t>(constrain(g_arm_engage_ramp_ms, 0, 5000));
+  g_motion_angle_gate_deg = clampf(g_motion_angle_gate_deg, 1.0f, 45.0f);
+  g_motion_term_max_deg = clampf(g_motion_term_max_deg, 0.1f, 20.0f);
+
+  g_autozero_trim_max_deg = clampf(g_autozero_trim_max_deg, 0.1f, 10.0f);
+  g_autozero_step_max_deg_per_s = clampf(g_autozero_step_max_deg_per_s, 0.01f, 5.0f);
+  g_autozero_angle_gate_deg = clampf(g_autozero_angle_gate_deg, 0.1f, 30.0f);
+  g_autozero_gyro_gate_dps = clampf(g_autozero_gyro_gate_dps, 1.0f, 300.0f);
+  g_autozero_out_frac_gate = clampf(g_autozero_out_frac_gate, 0.05f, 1.00f);
+  g_autozero_err_deadband_deg = clampf(g_autozero_err_deadband_deg, 0.0f, 2.0f);
+  g_autozero_arm_holdoff_ms = static_cast<uint16_t>(constrain(g_autozero_arm_holdoff_ms, 0, 10000));
+  g_autozero_reversal_holdoff_ms = static_cast<uint16_t>(constrain(g_autozero_reversal_holdoff_ms, 0, 5000));
+  g_autozero_out_sign_deadband = clampf(g_autozero_out_sign_deadband, 0.0f, 100.0f);
+  g_autozero_wspd_gate_counts = clampf(g_autozero_wspd_gate_counts, 0.0f, 2000.0f);
+  g_autozero_fast_window_ms = static_cast<uint32_t>(constrain(static_cast<long>(g_autozero_fast_window_ms), 0L, 30000L));
+  g_autozero_fast_step_max_deg_per_s = clampf(g_autozero_fast_step_max_deg_per_s, 0.01f, 10.0f);
+  g_autozero_fast_angle_gate_deg = clampf(g_autozero_fast_angle_gate_deg, 0.1f, 30.0f);
+  g_autozero_fast_gyro_gate_dps = clampf(g_autozero_fast_gyro_gate_dps, 1.0f, 300.0f);
+  g_autozero_fast_out_frac_gate = clampf(g_autozero_fast_out_frac_gate, 0.05f, 1.00f);
+  g_sched_err_deg = clampf(g_sched_err_deg, 0.5f, 20.0f);
+  g_sched_boost = clampf(g_sched_boost, 0.0f, 2.0f);
+}
+
 static bool cfgLoad() {
 #if FEAT_EEPROM_CONFIG
   RuntimeConfigV11 tmp;
@@ -352,11 +545,118 @@ static bool cfgLoad() {
 #endif
 }
 
+static bool motionCfgLoad() {
+#if FEAT_EEPROM_CONFIG
+  MotionConfigV3 tmp3;
+  EEPROM.get(EEPROM_MOTION_CFG_ADDR, tmp3);
+  if (tmp3.magic == MOTION_CFG_MAGIC && tmp3.version == 3) {
+    if (tmp3.crc16 != motionCfgCrc16V3(tmp3)) return false;
+    g_motion_kv = clampf(tmp3.kv, 0.0f, 0.20f);
+    g_motion_kx = clampf(tmp3.kx, 0.0f, 0.02f);
+    g_out_slew_per_s = tmp3.out_slew_per_s;
+    g_arm_engage_ramp_ms = tmp3.arm_engage_ramp_ms;
+    g_motion_angle_gate_deg = tmp3.motion_angle_gate_deg;
+    g_motion_term_max_deg = tmp3.motion_term_max_deg;
+    g_autozero_trim_max_deg = tmp3.autozero_trim_max_deg;
+    g_autozero_step_max_deg_per_s = tmp3.autozero_step_max_deg_per_s;
+    g_autozero_angle_gate_deg = tmp3.autozero_angle_gate_deg;
+    g_autozero_gyro_gate_dps = tmp3.autozero_gyro_gate_dps;
+    g_autozero_out_frac_gate = tmp3.autozero_out_frac_gate;
+    g_autozero_err_deadband_deg = tmp3.autozero_err_deadband_deg;
+    g_autozero_arm_holdoff_ms = tmp3.autozero_arm_holdoff_ms;
+    g_autozero_reversal_holdoff_ms = tmp3.autozero_reversal_holdoff_ms;
+    g_autozero_out_sign_deadband = tmp3.autozero_out_sign_deadband;
+    g_autozero_wspd_gate_counts = tmp3.autozero_wspd_gate_counts;
+    g_autozero_fast_window_ms = tmp3.autozero_fast_window_ms;
+    g_autozero_fast_step_max_deg_per_s = tmp3.autozero_fast_step_max_deg_per_s;
+    g_autozero_fast_angle_gate_deg = tmp3.autozero_fast_angle_gate_deg;
+    g_autozero_fast_gyro_gate_dps = tmp3.autozero_fast_gyro_gate_dps;
+    g_autozero_fast_out_frac_gate = tmp3.autozero_fast_out_frac_gate;
+    g_autozero_enabled = (tmp3.autozero_enabled != 0);
+    g_sched_err_deg = tmp3.sched_err_deg;
+    g_sched_boost = tmp3.sched_boost;
+    runtimeTuneSanitize();
+    return true;
+  }
+
+  MotionConfigV2 tmp2;
+  EEPROM.get(EEPROM_MOTION_CFG_ADDR, tmp2);
+  if (tmp2.magic != MOTION_CFG_MAGIC || tmp2.version != 2) return false;
+  if (tmp2.crc16 != motionCfgCrc16V2(tmp2)) return false;
+  g_motion_kv = clampf(tmp2.kv, 0.0f, 0.20f);
+  g_motion_kx = clampf(tmp2.kx, 0.0f, 0.02f);
+  g_out_slew_per_s = tmp2.out_slew_per_s;
+  g_arm_engage_ramp_ms = tmp2.arm_engage_ramp_ms;
+  g_motion_angle_gate_deg = tmp2.motion_angle_gate_deg;
+  g_motion_term_max_deg = tmp2.motion_term_max_deg;
+  g_autozero_trim_max_deg = tmp2.autozero_trim_max_deg;
+  g_autozero_step_max_deg_per_s = tmp2.autozero_step_max_deg_per_s;
+  g_autozero_angle_gate_deg = tmp2.autozero_angle_gate_deg;
+  g_autozero_gyro_gate_dps = tmp2.autozero_gyro_gate_dps;
+  g_autozero_out_frac_gate = tmp2.autozero_out_frac_gate;
+  g_autozero_err_deadband_deg = tmp2.autozero_err_deadband_deg;
+  g_autozero_arm_holdoff_ms = tmp2.autozero_arm_holdoff_ms;
+  g_autozero_reversal_holdoff_ms = tmp2.autozero_reversal_holdoff_ms;
+  g_autozero_out_sign_deadband = tmp2.autozero_out_sign_deadband;
+  g_autozero_wspd_gate_counts = tmp2.autozero_wspd_gate_counts;
+  g_autozero_fast_window_ms = tmp2.autozero_fast_window_ms;
+  g_autozero_fast_step_max_deg_per_s = tmp2.autozero_fast_step_max_deg_per_s;
+  g_autozero_fast_angle_gate_deg = tmp2.autozero_fast_angle_gate_deg;
+  g_autozero_fast_gyro_gate_dps = tmp2.autozero_fast_gyro_gate_dps;
+  g_autozero_fast_out_frac_gate = tmp2.autozero_fast_out_frac_gate;
+  g_autozero_enabled = (tmp2.autozero_enabled != 0);
+  g_sched_err_deg = 3.0f;
+  g_sched_boost = 0.40f;
+  runtimeTuneSanitize();
+  return true;
+#else
+  return false;
+#endif
+}
+
+static void motionCfgSave() {
+#if FEAT_EEPROM_CONFIG
+  MotionConfigV3 cfg;
+  cfg.magic = MOTION_CFG_MAGIC;
+  cfg.version = MOTION_CFG_VERSION;
+  cfg.reserved0 = 0;
+  cfg.kv = clampf(g_motion_kv, 0.0f, 0.20f);
+  cfg.kx = clampf(g_motion_kx, 0.0f, 0.02f);
+  cfg.out_slew_per_s = g_out_slew_per_s;
+  cfg.arm_engage_ramp_ms = g_arm_engage_ramp_ms;
+  cfg.motion_angle_gate_deg = g_motion_angle_gate_deg;
+  cfg.motion_term_max_deg = g_motion_term_max_deg;
+  cfg.autozero_trim_max_deg = g_autozero_trim_max_deg;
+  cfg.autozero_step_max_deg_per_s = g_autozero_step_max_deg_per_s;
+  cfg.autozero_angle_gate_deg = g_autozero_angle_gate_deg;
+  cfg.autozero_gyro_gate_dps = g_autozero_gyro_gate_dps;
+  cfg.autozero_out_frac_gate = g_autozero_out_frac_gate;
+  cfg.autozero_err_deadband_deg = g_autozero_err_deadband_deg;
+  cfg.autozero_arm_holdoff_ms = g_autozero_arm_holdoff_ms;
+  cfg.autozero_reversal_holdoff_ms = g_autozero_reversal_holdoff_ms;
+  cfg.autozero_out_sign_deadband = g_autozero_out_sign_deadband;
+  cfg.autozero_wspd_gate_counts = g_autozero_wspd_gate_counts;
+  cfg.autozero_fast_window_ms = g_autozero_fast_window_ms;
+  cfg.autozero_fast_step_max_deg_per_s = g_autozero_fast_step_max_deg_per_s;
+  cfg.autozero_fast_angle_gate_deg = g_autozero_fast_angle_gate_deg;
+  cfg.autozero_fast_gyro_gate_dps = g_autozero_fast_gyro_gate_dps;
+  cfg.autozero_fast_out_frac_gate = g_autozero_fast_out_frac_gate;
+  cfg.autozero_enabled = g_autozero_enabled ? 1 : 0;
+  cfg.reserved1 = 0;
+  cfg.sched_err_deg = g_sched_err_deg;
+  cfg.sched_boost = g_sched_boost;
+  cfg.crc16 = motionCfgCrc16V3(cfg);
+  EEPROM.put(EEPROM_MOTION_CFG_ADDR, cfg);
+#endif
+}
+
 static void cfgSave() {
 #if FEAT_EEPROM_CONFIG
   cfgSanitize();
+  runtimeTuneSanitize();
   g_cfg.crc16 = cfgCrc16(g_cfg);
   EEPROM.put(EEPROM_ADDR, g_cfg);
+  motionCfgSave();
 #endif
 }
 
@@ -375,11 +675,15 @@ static void motorStop() {
   analogWrite(Pins::PWMA, 0);
   analogWrite(Pins::PWMB, 0);
   digitalWrite(Pins::STBY, LOW);
+  g_out_left_cmd = 0;
+  g_out_right_cmd = 0;
 }
 
 static void applyMotorLr(int left_cmd, int right_cmd) {
   left_cmd = constrain(left_cmd * g_cfg.motor_polarity, -255, 255);
   right_cmd = constrain(right_cmd * g_cfg.motor_polarity, -255, 255);
+  g_out_left_cmd = static_cast<int16_t>(left_cmd);
+  g_out_right_cmd = static_cast<int16_t>(right_cmd);
 
   const bool left_backward = (left_cmd > 0);
   const bool right_backward = (right_cmd > 0);
@@ -458,19 +762,26 @@ static float lowPass(float x, float y_prev, float alpha) {
 }
 
 static void resetMotionState() {
-  g_motion_term = 0.0f;
-  g_motion_vel_counts = 0.0f;
-  g_motion_pos_counts = 0.0f;
-  g_motion_pos_raw_counts = 0.0f;
-  g_motion_delta_counts = 0.0f;
-  g_motion_vel_init = false;
+  g_wpos_raw_counts = 0.0f;
+  g_wdelta_counts = 0.0f;
+  g_wpos_unclamped_counts = 0.0f;
+  g_wdelta_tick_counts = 0.0f;
+  g_wspd_counts = 0.0f;
+  g_wpos_target_counts = 0.0f;
 }
 
 static void clearAutozeroTrim() {
   g_autozero_trim_deg = 0.0f;
+  g_autozero_fast_active = false;
+  g_autozero_holdoff_until_ms = 0;
+  g_autozero_prev_out_sign = 0;
 }
 
 static void latchFault(uint16_t code, uint8_t note_code, const __FlashStringHelper* note) {
+  g_fault_ang_snapshot = g_state.angle_deg;
+  g_fault_out_snapshot = g_out;
+  g_fault_runaway_snapshot = g_runaway_score;
+  g_fault_wpos_snapshot = g_wpos_unclamped_counts;
   g_fault_count++;
   g_last_fault_note = note_code;
   if (g_state.active_fault == FAULT_NONE) {
@@ -488,6 +799,14 @@ static void latchFault(uint16_t code, uint8_t note_code, const __FlashStringHelp
   Serial.print(g_fault_count);
   Serial.print(F(" last_note_code="));
   Serial.print(g_last_fault_note);
+  Serial.print(F(" fault_ang="));
+  Serial.print(g_fault_ang_snapshot, 3);
+  Serial.print(F(" fault_out="));
+  Serial.print(g_fault_out_snapshot, 3);
+  Serial.print(F(" fault_runaway="));
+  Serial.print(g_fault_runaway_snapshot, 3);
+  Serial.print(F(" fault_wpos="));
+  Serial.print(g_fault_wpos_snapshot, 3);
   Serial.print(F(" note="));
   Serial.println(note);
 }
@@ -517,105 +836,56 @@ static void resetEstimatorToCurrentAccel() {
 }
 
 static void emitStatus() {
-  long l, r;
-  noInterrupts();
-  l = g_enc_l;
-  r = g_enc_r;
-  interrupts();
-
-  Serial.print(F("STATUS mode="));
+  Serial.print(F("S m="));
   Serial.print(modeName());
-  Serial.print(F(" ident="));
-  Serial.print(F(UPRIGHT_BUILD_ID));
-  Serial.print(F(" hash="));
-  Serial.print(F(UPRIGHT_BUILD_HASH));
-  Serial.print(F(" runtime="));
-  Serial.print(F(UPRIGHT_RUNTIME_VERSION));
-  Serial.print(F(" tune="));
-  Serial.print(F(UPRIGHT_TUNE_VERSION));
-  Serial.print(F(" estop="));
-  Serial.print(g_state.estop_latched ? F("1") : F("0"));
-  Serial.print(F(" fault="));
+  Serial.print(F(" f="));
   Serial.print(g_state.active_fault);
-  Serial.print(F(" fault_count="));
-  Serial.print(g_fault_count);
-  Serial.print(F(" fault_last_note_code="));
-  Serial.print(g_last_fault_note);
-  Serial.print(F(" ang="));
+  Serial.print(F(" a="));
   Serial.print(g_state.angle_deg, 3);
-  Serial.print(F(" raw="));
-  Serial.print(g_raw, 3);
-  Serial.print(F(" gyro="));
-  Serial.print(g_state.gyro_dps, 3);
-  Serial.print(F(" set="));
+  Serial.print(F(" s="));
   Serial.print(g_cfg.set_deg, 3);
-  Serial.print(F(" set_eff="));
-  Serial.print(g_set_eff_deg, 3);
-  Serial.print(F(" az="));
-  Serial.print(g_autozero_enabled ? F("1") : F("0"));
-  Serial.print(F(" ztrim="));
-  Serial.print(g_autozero_trim_deg, 4);
-  Serial.print(F(" out="));
-  Serial.print(g_out, 3);
+  Serial.print(F(" o="));
+  Serial.print(g_out, 2);
   Serial.print(F(" kp="));
-  Serial.print(g_cfg.kp, 4);
+  Serial.print(g_cfg.kp, 2);
   Serial.print(F(" ki="));
-  Serial.print(g_cfg.ki, 4);
+  Serial.print(g_cfg.ki, 2);
   Serial.print(F(" kd="));
-  Serial.print(g_cfg.kd, 4);
+  Serial.print(g_cfg.kd, 2);
   Serial.print(F(" kv="));
   Serial.print(g_motion_kv, 4);
   Serial.print(F(" kx="));
   Serial.print(g_motion_kx, 4);
-  Serial.print(F(" mot="));
-  Serial.print(g_motion_term, 4);
-  Serial.print(F(" wspd="));
-  Serial.print(g_motion_vel_counts, 3);
-  Serial.print(F(" wpos="));
-  Serial.print(g_motion_pos_counts, 3);
-  Serial.print(F(" wposRaw="));
-  Serial.print(g_motion_pos_raw_counts, 3);
-  Serial.print(F(" wdelta="));
-  Serial.print(g_motion_delta_counts, 3);
-  Serial.print(F(" runaway="));
-  Serial.print(g_runaway_score, 3);
-  Serial.print(F(" encL="));
-  Serial.print(l);
-  Serial.print(F(" encR="));
-  Serial.print(r);
-  Serial.print(F(" overrun="));
-  Serial.print(g_state.loop_overrun_count);
-  Serial.print(F(" missed="));
-  Serial.print(g_loop_missed);
-  Serial.print(F(" loop_us="));
-  Serial.print(g_last_step_us);
-  Serial.print(F(" loop_max_us="));
-  Serial.print(g_max_period_us);
-  Serial.print(F(" volRaw="));
-  Serial.print(g_vol_raw, 0);
-#if FEAT_ADV_TELEMETRY
-  Serial.print(F(" pid_err="));
-  Serial.print(g_pid_err, 4);
-  Serial.print(F(" pid_p="));
-  Serial.print(g_pid_p, 4);
-  Serial.print(F(" pid_i="));
-  Serial.print(g_pid_i, 4);
-  Serial.print(F(" pid_d="));
-  Serial.print(g_pid_d, 4);
-  Serial.print(F(" pid_u_unsat="));
-  Serial.print(g_pid_u_unsat, 4);
-  Serial.print(F(" pid_u_sat="));
-  Serial.print(g_pid_u_sat, 4);
-  Serial.print(F(" output_saturated="));
-  Serial.print(g_output_saturated ? F("1") : F("0"));
-  Serial.print(F(" d_cutoff_hz="));
-  Serial.print(g_cfg.d_cutoff_hz, 2);
-  Serial.print(F(" filter_alpha="));
-  Serial.print(g_d_alpha, 5);
-#endif
+  Serial.print(F(" gse="));
+  Serial.print(g_sched_err_deg, 2);
+  Serial.print(F(" gsb="));
+  Serial.print(g_sched_boost, 2);
+  Serial.print(F(" gss="));
+  Serial.print(g_sched_scale, 2);
+  Serial.print(F(" sl="));
+  Serial.print(g_out_slew_per_s, 0);
+  Serial.print(F(" rp="));
+  Serial.print(g_arm_engage_ramp_ms);
+  Serial.print(F(" mg="));
+  Serial.print(g_motion_angle_gate_deg, 1);
+  Serial.print(F(" mm="));
+  Serial.print(g_motion_term_max_deg, 1);
+  Serial.print(F(" dcf="));
+  Serial.print(g_cfg.d_cutoff_hz, 1);
+  Serial.print(F(" kaw="));
+  Serial.print(g_cfg.kaw, 2);
+  Serial.print(F(" ws="));
+  Serial.print(g_wspd_counts, 2);
+  Serial.print(F(" wp="));
+  Serial.print(g_wpos_unclamped_counts, 2);
+  Serial.print(F(" az="));
+  Serial.print(g_autozero_enabled ? 1 : 0);
+  Serial.print(F(" tr="));
+  Serial.print(g_autozero_trim_deg, 3);
   Serial.println();
 }
 
+ #if FEAT_BURST_LOGGING
 static void emitCsv() {
   long l, r;
   noInterrupts();
@@ -623,54 +893,44 @@ static void emitCsv() {
   r = g_enc_r;
   interrupts();
 
-  Serial.print(F("CSV,"));
+  Serial.print(F("C,"));
   Serial.print(millis());
-  Serial.print(',');
-  Serial.print(modeName());
-  Serial.print(',');
-  Serial.print(g_state.estop_latched ? 1 : 0);
   Serial.print(',');
   Serial.print(g_cfg.set_deg, 3);
   Serial.print(',');
   Serial.print(g_state.angle_deg, 3);
   Serial.print(',');
-  Serial.print(g_raw, 3);
-  Serial.print(',');
   Serial.print(g_state.gyro_dps, 3);
   Serial.print(',');
   Serial.print(g_out, 3);
+  Serial.print(',');
+  Serial.print(g_out_left_cmd);
+  Serial.print(',');
+  Serial.print(g_out_right_cmd);
   Serial.print(',');
   Serial.print(l);
   Serial.print(',');
   Serial.print(r);
   Serial.print(',');
-  Serial.print(g_state.active_fault);
+  Serial.print(g_wpos_unclamped_counts, 3);
   Serial.print(',');
-  Serial.print(g_state.loop_overrun_count);
+  Serial.print(g_wspd_counts, 3);
   Serial.print(',');
-  Serial.println(g_jitter_us);
+  Serial.print(g_runaway_score, 3);
+  Serial.print(',');
+  Serial.println(g_state.active_fault);
 }
+#endif
 
 static void printHelp() {
-  Serial.println(F("OK HELP GET ARM DISARM ESTOP PID MOTION SETPOINT LIMITS FILTER KAL CAL ZERO IMU CAL IMU LOAD IMU SAVE IMU INFO AUTOZERO SAVECFG LOADCFG DEFAULTCFG FAULTCLR LOGT LOGCSV BURSTCSV CSVHDR IDENT"));
-#if FEAT_COHEN_COON_CMD
-  Serial.println(F("OK HELP+ CC"));
-#endif
-#if FEAT_TRANSFER_FN_CMD
-  Serial.println(F("OK HELP+ TF"));
-#endif
-#if FEAT_AUTOTUNE_HELPERS
-  Serial.println(F("OK HELP+ MOTOR_TEST PREARM_CHECK"));
+#if FEAT_AUTORUN_CMD && FEAT_PREARM_CMD
+  Serial.println(F("OK HELP GET ARM DISARM ESTOP PID SETPOINT LIMITS MOTION SLEW RAMP MOTIONCFG GSCHED DCFG AZCFG AZFAST AZLIMS CAL ZERO AUTOZERO AUTORUN PREARM_CHECK SAVECFG LOADCFG DEFAULTCFG FAULTCLR"));
+#elif FEAT_AUTORUN_CMD
+  Serial.println(F("OK HELP GET ARM DISARM ESTOP PID SETPOINT LIMITS MOTION SLEW RAMP MOTIONCFG GSCHED DCFG AZCFG AZFAST AZLIMS CAL ZERO AUTOZERO AUTORUN SAVECFG LOADCFG DEFAULTCFG FAULTCLR"));
+#else
+  Serial.println(F("OK HELP GET ARM DISARM ESTOP PID SETPOINT LIMITS MOTION SLEW RAMP MOTIONCFG GSCHED DCFG AZCFG AZFAST AZLIMS CAL ZERO AUTOZERO SAVECFG LOADCFG DEFAULTCFG FAULTCLR"));
 #endif
 }
-
-#if FEAT_TRANSFER_FN_CMD
-static void printTf() {
-  Serial.println(F("TF controller C(s)=Kp + Ki/s + Kd*s/(tau_d*s+1)"));
-  Serial.println(F("TF plant_model G(s)=K/(T*s+1)*e^(-L*s)"));
-  Serial.println(F("TF closed_loop T(s)=C(s)G(s)/(1+C(s)G(s))"));
-}
-#endif
 
 static uint8_t splitTokens(char* text, char* tokens[], uint8_t max_tokens) {
   uint8_t count = 0;
@@ -719,6 +979,18 @@ static bool parseIntStrict(const char* text, int* out) {
   if (end == text || *end != '\0') return false;
   *out = static_cast<int>(v);
   return true;
+}
+
+static void startArmedRun() {
+  g_state.estop_latched = false;
+  g_state.armed = true;
+  g_arm_enter_ms = millis();
+  g_autozero_holdoff_until_ms = g_arm_enter_ms + g_autozero_arm_holdoff_ms;
+  g_autozero_prev_out_sign = 0;
+  g_i_state = 0.0f;
+  g_prev_err = 0.0f;
+  g_d_init = false;
+  resetMotionState();
 }
 
 static bool parseCommandFloats(const char* line, const char* cmd, uint8_t min_vals, uint8_t max_vals, float values[], uint8_t* count_out) {
@@ -776,17 +1048,6 @@ static bool parseSetpoint(const char* line) {
   return false;
 }
 
-static bool parseMotion(const char* line) {
-  float vals[2];
-  if (parseCommandFloats(line, "MOTION", 2, 2, vals, nullptr)) {
-    g_motion_kv = clampf(vals[0], -5.0f, 5.0f);
-    g_motion_kx = clampf(vals[1], -1.0f, 1.0f);
-    Serial.println(F("OK MOTION"));
-    return true;
-  }
-  return false;
-}
-
 static bool parseLimits(const char* line) {
   float vals[4];
   uint8_t n = 0;
@@ -802,69 +1063,119 @@ static bool parseLimits(const char* line) {
   return false;
 }
 
-static bool parseFilter(const char* line) {
-  char buf[128];
-  strncpy(buf, line, sizeof(buf) - 1);
-  buf[sizeof(buf) - 1] = '\0';
-  char* toks[5];
-  uint8_t n = splitTokens(buf, toks, 5);
-  if (n < 3 || n > 4) return false;
-  if (strcmp(toks[0], "FILTER") != 0) return false;
-
-  float cutoff = 0.0f;
-  int cond_i = 0;
-  float kaw = g_cfg.kaw;
-  if (!parseFloatStrict(toks[1], &cutoff)) return false;
-  if (!parseIntStrict(toks[2], &cond_i)) return false;
-  if (n == 4 && !parseFloatStrict(toks[3], &kaw)) return false;
-
-  g_cfg.d_cutoff_hz = cutoff;
-  g_conditional_i = (cond_i != 0);
-  if (n == 4) g_cfg.kaw = kaw;
-  cfgSanitize();
-  Serial.println(F("OK FILTER"));
-  return true;
-}
-
-static bool parseKal(const char* line) {
-  float vals[3];
-  if (parseCommandFloats(line, "KAL", 3, 3, vals, nullptr)) {
-    g_cfg.q_angle = vals[0];
-    g_cfg.q_bias = vals[1];
-    g_cfg.r_measure = vals[2];
-    cfgSanitize();
-    Serial.println(F("OK KAL"));
+static bool parseMotion(const char* line) {
+  float vals[2];
+  if (parseCommandFloats(line, "MOTION", 2, 2, vals, nullptr)) {
+    g_motion_kv = clampf(vals[0], 0.0f, 0.20f);
+    g_motion_kx = clampf(vals[1], 0.0f, 0.02f);
+    Serial.println(F("OK MOTION"));
     return true;
   }
   return false;
 }
 
-#if FEAT_COHEN_COON_CMD
-static bool parseCohenCoon(const char* line) {
-  float vals[3];
-  if (!parseCommandFloats(line, "CC", 3, 3, vals, nullptr)) return false;
-  float K = vals[0];
-  float T = vals[1];
-  float L = vals[2];
-  if (fabs(K) < 1e-6f || T <= 0.0f || L <= 0.0f) {
-    Serial.println(F("ERR CC invalid_params"));
+static bool parseSlew(const char* line) {
+  float vals[1];
+  if (parseCommandFloats(line, "SLEW", 1, 1, vals, nullptr)) {
+    g_out_slew_per_s = vals[0];
+    runtimeTuneSanitize();
+    Serial.println(F("OK SLEW"));
     return true;
   }
-  float r = L / T;
-  float kp = (1.0f / K) * (T / L) * ((4.0f / 3.0f) + (r / 4.0f));
-  float Ti = L * ((32.0f + 6.0f * r) / (13.0f + 8.0f * r));
-  float Td = L * (4.0f / (11.0f + 2.0f * r));
-  float ki = kp / Ti;
-  float kd = kp * Td;
-  Serial.print(F("CC PID kp="));
-  Serial.print(kp, 5);
-  Serial.print(F(" ki="));
-  Serial.print(ki, 5);
-  Serial.print(F(" kd="));
-  Serial.println(kd, 5);
-  return true;
+  return false;
 }
-#endif
+
+static bool parseRamp(const char* line) {
+  int v = 0;
+  if (parseCommandInt(line, "RAMP", &v)) {
+    g_arm_engage_ramp_ms = static_cast<uint16_t>(v);
+    runtimeTuneSanitize();
+    Serial.println(F("OK RAMP"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseMotionCfg(const char* line) {
+  float vals[2];
+  if (parseCommandFloats(line, "MOTIONCFG", 2, 2, vals, nullptr)) {
+    g_motion_angle_gate_deg = vals[0];
+    g_motion_term_max_deg = vals[1];
+    runtimeTuneSanitize();
+    Serial.println(F("OK MOTIONCFG"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseGsched(const char* line) {
+  float vals[2];
+  if (parseCommandFloats(line, "GSCHED", 2, 2, vals, nullptr)) {
+    g_sched_err_deg = vals[0];
+    g_sched_boost = vals[1];
+    runtimeTuneSanitize();
+    Serial.println(F("OK GSCHED"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseDcfg(const char* line) {
+  float vals[2];
+  if (parseCommandFloats(line, "DCFG", 2, 2, vals, nullptr)) {
+    g_cfg.d_cutoff_hz = vals[0];
+    g_cfg.kaw = vals[1];
+    cfgSanitize();
+    Serial.println(F("OK DCFG"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseAzcfg(const char* line) {
+  float vals[8];
+  if (parseCommandFloats(line, "AZCFG", 8, 8, vals, nullptr)) {
+    g_autozero_step_max_deg_per_s = vals[0];
+    g_autozero_angle_gate_deg = vals[1];
+    g_autozero_gyro_gate_dps = vals[2];
+    g_autozero_out_frac_gate = vals[3];
+    g_autozero_arm_holdoff_ms = static_cast<uint16_t>(constrain(static_cast<int>(vals[4]), 0, 10000));
+    g_autozero_reversal_holdoff_ms = static_cast<uint16_t>(constrain(static_cast<int>(vals[5]), 0, 5000));
+    g_autozero_out_sign_deadband = vals[6];
+    g_autozero_wspd_gate_counts = vals[7];
+    runtimeTuneSanitize();
+    Serial.println(F("OK AZCFG"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseAzfast(const char* line) {
+  float vals[5];
+  if (parseCommandFloats(line, "AZFAST", 5, 5, vals, nullptr)) {
+    g_autozero_fast_window_ms = static_cast<uint32_t>(constrain(static_cast<long>(vals[0]), 0L, 30000L));
+    g_autozero_fast_step_max_deg_per_s = vals[1];
+    g_autozero_fast_angle_gate_deg = vals[2];
+    g_autozero_fast_gyro_gate_dps = vals[3];
+    g_autozero_fast_out_frac_gate = vals[4];
+    runtimeTuneSanitize();
+    Serial.println(F("OK AZFAST"));
+    return true;
+  }
+  return false;
+}
+
+static bool parseAzlims(const char* line) {
+  float vals[2];
+  if (parseCommandFloats(line, "AZLIMS", 2, 2, vals, nullptr)) {
+    g_autozero_trim_max_deg = vals[0];
+    g_autozero_err_deadband_deg = vals[1];
+    runtimeTuneSanitize();
+    Serial.println(F("OK AZLIMS"));
+    return true;
+  }
+  return false;
+}
 
 static void runCalZero() {
   if (!g_imu_ok) {
@@ -891,6 +1202,7 @@ static void runCalZero() {
   Serial.println(g_cfg.angle_zero_deg, 4);
 }
 
+#if FEAT_IMU_SERVICE_CMDS
 static void runImuLoad() {
   if (!g_imu_ok) {
     Serial.println(F("ERR IMU_LOAD imu_not_ready"));
@@ -993,6 +1305,43 @@ static void runImuInfo() {
   Serial.print(F(" az="));
   Serial.println(g_mpu.getAccZoffset(), 4);
 }
+#endif
+
+#if FEAT_PREARM_CMD
+static void runPrearmCheck() {
+  // Minimal MVP prearm: no wheel spin side effects, just readiness and latch semantics.
+  g_state.armed = false;
+  g_out = 0.0f;
+  applyMotorOutput(0.0f);
+  clearFault();  // leaves estop latched, fault clear
+
+  const bool stand = true;
+  const bool imu_ready = g_imu_ok;
+  const bool estop_latch_ok = g_state.estop_latched;
+  const bool fault_clear = (g_state.active_fault == FAULT_NONE);
+
+  g_state.estop_latched = false;
+  const bool estop_unlatch_ok = !g_state.estop_latched;
+  g_state.estop_latched = true;
+
+  const bool ok = stand && imu_ready && estop_latch_ok && estop_unlatch_ok && fault_clear;
+  Serial.print(F("OK PREARM_CHECK"));
+  Serial.print(F(" ok="));
+  Serial.print(ok ? 1 : 0);
+  Serial.print(F(" stand="));
+  Serial.print(stand ? 1 : 0);
+  Serial.print(F(" imu_ready="));
+  Serial.print(imu_ready ? 1 : 0);
+  Serial.print(F(" estop_latch="));
+  Serial.print(estop_latch_ok ? 1 : 0);
+  Serial.print(F(" estop_unlatch="));
+  Serial.print(estop_unlatch_ok ? 1 : 0);
+  Serial.print(F(" fault="));
+  Serial.print(g_state.active_fault);
+  Serial.print(F(" detail="));
+  Serial.println(ok ? F("prearm_pass") : F("prearm_fail"));
+}
+#endif
 
 #if FEAT_AUTOTUNE_HELPERS
 static void runMotorTest(const char* line) {
@@ -1084,7 +1433,7 @@ static bool pulseWheelProbe(char side, int pwm, int duration_ms, long* outDL, lo
   return labs(primary_delta) >= 1;
 }
 
-static void runPrearmCheck() {
+static void runPrearmCheckWithWheels() {
   // Atomic firmware-side prearm probe: ensures safe state then validates wheel pulses.
   g_state.armed = false;
   g_out = 0.0f;
@@ -1147,31 +1496,19 @@ static void handleCommandLine(char* line) {
 
   if (strcmp(line, "GET") == 0) { emitStatus(); return; }
   if (strcmp(line, "HELP") == 0) { printHelp(); return; }
-  if (strcmp(line, "IDENT") == 0) {
-    Serial.print(F("UPRIGHT_PROFILED_RUNTIME_V1_1"));
-    Serial.print(F(" runtime="));
-    Serial.print(F(UPRIGHT_RUNTIME_VERSION));
-    Serial.print(F(" tune="));
-    Serial.print(F(UPRIGHT_TUNE_VERSION));
-    Serial.print(F(" build="));
-    Serial.print(F(UPRIGHT_BUILD_ID));
-    Serial.print(F(" hash="));
-    Serial.println(F(UPRIGHT_BUILD_HASH));
-    return;
-  }
 
   if (strcmp(line, "ARM") == 0) {
     if (g_state.active_fault != FAULT_NONE) {
       Serial.println(F("ERR FAULT_LATCHED"));
       return;
     }
-    g_state.estop_latched = false;
-    g_state.armed = true;
-    g_arm_enter_ms = millis();
-    g_i_state = 0.0f;
-    g_prev_err = 0.0f;
-    g_d_init = false;
-    resetMotionState();
+#if FEAT_AUTORUN_CMD
+    g_autorun_pending = false;
+#endif
+#if FEAT_BOOT_AUTORUN
+    g_boot_autorun_pending = false;
+#endif
+    startArmedRun();
     Serial.println(F("OK ARM"));
     return;
   }
@@ -1179,6 +1516,12 @@ static void handleCommandLine(char* line) {
   if (strcmp(line, "DISARM") == 0) {
     g_state.armed = false;
     g_arm_enter_ms = 0;
+#if FEAT_AUTORUN_CMD
+    g_autorun_pending = false;
+#endif
+#if FEAT_BOOT_AUTORUN
+    g_boot_autorun_pending = false;
+#endif
     g_out = 0.0f;
     resetMotionState();
     applyMotorOutput(0.0f);
@@ -1186,36 +1529,40 @@ static void handleCommandLine(char* line) {
     return;
   }
 
-  if (strcmp(line, "AUTOZERO STATUS") == 0) {
-    Serial.print(F("OK AUTOZERO enabled="));
-    Serial.print(g_autozero_enabled ? 1 : 0);
-    Serial.print(F(" trim_deg="));
-    Serial.print(g_autozero_trim_deg, 4);
-    Serial.print(F(" set_eff_deg="));
-    Serial.println(g_set_eff_deg, 4);
+#if FEAT_AUTORUN_CMD
+  if (strcmp(line, "AUTORUN STATUS") == 0) {
+    Serial.print(F("OK AUTORUN pending="));
+    Serial.print(g_autorun_pending ? 1 : 0);
+    Serial.print(F(" due_ms="));
+    if (g_autorun_pending) {
+      uint32_t now_ms = millis();
+      if (g_autorun_due_ms > now_ms) Serial.println(g_autorun_due_ms - now_ms);
+      else Serial.println(0);
+    } else {
+      Serial.println(0);
+    }
     return;
   }
 
-  if (strcmp(line, "AUTOZERO CLR") == 0) {
-    clearAutozeroTrim();
-    Serial.println(F("OK AUTOZERO CLR"));
-    return;
-  }
-
-  if (strcmp(line, "AUTOZERO SAVE") == 0) {
-    if (g_state.armed) {
-      Serial.println(F("ERR AUTOZERO unsafe_state"));
+  int autorun_v;
+  if (parseCommandInt(line, "AUTORUN", &autorun_v)) {
+    if (g_state.active_fault != FAULT_NONE) {
+      Serial.println(F("ERR AUTORUN fault_latched"));
       return;
     }
-    g_cfg.set_deg = clampf(g_cfg.set_deg + g_autozero_trim_deg, -30.0f, 30.0f);
-    clearAutozeroTrim();
-    cfgSanitize();
-    cfgSave();
-    g_set_eff_deg = g_cfg.set_deg;
-    Serial.print(F("OK AUTOZERO SAVE set_deg="));
-    Serial.println(g_cfg.set_deg, 4);
+    if (autorun_v < 0) autorun_v = 0;
+    if (autorun_v > static_cast<int>(AUTORUN_DELAY_MAX_MS)) autorun_v = AUTORUN_DELAY_MAX_MS;
+    g_state.armed = false;
+    g_arm_enter_ms = 0;
+    g_out = 0.0f;
+    applyMotorOutput(0.0f);
+    g_autorun_pending = true;
+    g_autorun_due_ms = millis() + static_cast<uint32_t>(autorun_v);
+    Serial.print(F("OK AUTORUN delay_ms="));
+    Serial.println(autorun_v);
     return;
   }
+#endif
 
   int autozero_v;
   if (parseCommandInt(line, "AUTOZERO", &autozero_v)) {
@@ -1254,30 +1601,6 @@ static void handleCommandLine(char* line) {
     return;
   }
 
-  int v;
-  if (parseCommandInt(line, "LOGT", &v)) {
-    g_cfg.log_t = (v != 0) ? 1 : 0;
-    Serial.println(F("OK LOGT"));
-    return;
-  }
-
-  if (parseCommandInt(line, "LOGCSV", &v)) {
-    g_cfg.log_csv = (v != 0) ? 1 : 0;
-    Serial.println(F("OK LOGCSV"));
-    return;
-  }
-
-  if (strcmp(line, "BURSTCSV") == 0) {
-    emitCsv();
-    Serial.println(F("OK BURSTCSV"));
-    return;
-  }
-
-  if (strcmp(line, "CSVHDR") == 0) {
-    Serial.println(F("CSV,ms,mode,estop,set,ang,raw,gyro,out,encL,encR,fault,overrun,jitter_us"));
-    return;
-  }
-
   if (strcmp(line, "SAVECFG") == 0) {
     cfgSave();
     Serial.println(F("OK SAVECFG"));
@@ -1286,6 +1609,8 @@ static void handleCommandLine(char* line) {
 
   if (strcmp(line, "LOADCFG") == 0) {
     if (cfgLoad()) {
+      motionCfgLoad();
+      runtimeTuneSanitize();
       clearAutozeroTrim();
       Serial.println(F("OK LOADCFG"));
     }
@@ -1295,6 +1620,8 @@ static void handleCommandLine(char* line) {
 
   if (strcmp(line, "DEFAULTCFG") == 0) {
     cfgDefaults();
+    runtimeTuneDefaults();
+    runtimeTuneSanitize();
     clearAutozeroTrim();
     cfgSave();
     Serial.println(F("OK DEFAULTCFG"));
@@ -1306,6 +1633,7 @@ static void handleCommandLine(char* line) {
     return;
   }
 
+#if FEAT_IMU_SERVICE_CMDS
   if (strcmp(line, "IMU CAL") == 0) {
     runImuCal();
     return;
@@ -1322,30 +1650,35 @@ static void handleCommandLine(char* line) {
     runImuInfo();
     return;
   }
+#endif
 
 #if FEAT_AUTOTUNE_HELPERS
   if (strncmp(line, "MOTOR_TEST ", 11) == 0) {
     runMotorTest(line);
     return;
   }
+#endif
+#if FEAT_PREARM_CMD
   if (strcmp(line, "PREARM_CHECK") == 0) {
     runPrearmCheck();
     return;
   }
 #endif
 
-#if FEAT_TRANSFER_FN_CMD
-  if (strcmp(line, "TF") == 0) {
-    printTf();
-    return;
-  }
-#endif
-
-#if FEAT_COHEN_COON_CMD
-  if (parseCohenCoon(line)) return;
-#endif
-
-  if (parsePID(line) || parseMotion(line) || parseSetpoint(line) || parseLimits(line) || parseFilter(line) || parseKal(line)) {
+  if (
+    parsePID(line) ||
+    parseSetpoint(line) ||
+    parseLimits(line) ||
+    parseMotion(line) ||
+    parseSlew(line) ||
+    parseRamp(line) ||
+    parseMotionCfg(line) ||
+    parseGsched(line) ||
+    parseDcfg(line) ||
+    parseAzcfg(line) ||
+    parseAzfast(line) ||
+    parseAzlims(line)
+  ) {
     return;
   }
 
@@ -1417,22 +1750,13 @@ static void controlTick() {
     g_last_moving_enc_ms = millis();
   }
 
-  // Translation channel estimate (counts/tick and integrated counts around arm point).
+  // Diagnostic wheel translation estimate.
   const float wheel_delta = 0.5f * static_cast<float>(dL + dR);
-  g_motion_delta_counts = wheel_delta;
-  const float vel_alpha = alphaFromCutoffHz(MOTION_VEL_CUTOFF_HZ, DT_S);
-  if (!g_motion_vel_init) {
-    g_motion_vel_counts = wheel_delta;
-    g_motion_vel_init = true;
-  } else {
-    g_motion_vel_counts = lowPass(wheel_delta, g_motion_vel_counts, vel_alpha);
-  }
-  g_motion_pos_raw_counts += wheel_delta;
-  g_motion_pos_counts = clampf(
-    g_motion_pos_raw_counts,
-    -MOTION_POS_MAX_COUNTS,
-    MOTION_POS_MAX_COUNTS
-  );
+  g_wdelta_tick_counts = wheel_delta;
+  g_wdelta_counts = wheel_delta;
+  g_wspd_counts = wheel_delta / DT_S;
+  g_wpos_unclamped_counts += wheel_delta;
+  g_wpos_raw_counts = g_wpos_unclamped_counts;
 
   g_set_eff_deg = clampf(g_cfg.set_deg + g_autozero_trim_deg, -30.0f, 30.0f);
 
@@ -1440,8 +1764,22 @@ static void controlTick() {
     if (fabs(g_state.angle_deg) > g_cfg.tip_deg) {
       latchFault(FAULT_MODULE_UNHEALTHY, NOTE_TIP_LIMIT, F("tip_limit"));
     } else {
-      g_pid_err = g_set_eff_deg - g_state.angle_deg;
-      g_pid_p = g_cfg.kp * g_pid_err;
+      float motion_term_deg = 0.0f;
+      if (fabs(g_state.angle_deg) <= g_motion_angle_gate_deg) {
+        const float wpos_err = g_wpos_target_counts - g_wpos_unclamped_counts;
+        motion_term_deg = (g_motion_kx * wpos_err) - (g_motion_kv * g_wspd_counts);
+        motion_term_deg = clampf(motion_term_deg, -g_motion_term_max_deg, g_motion_term_max_deg);
+      }
+      float set_cmd_deg = clampf(g_set_eff_deg + motion_term_deg, -30.0f, 30.0f);
+      g_pid_err = set_cmd_deg - g_state.angle_deg;
+      const float err_abs = fabs(g_pid_err);
+      float sched = 0.0f;
+      if (err_abs > g_sched_err_deg) {
+        const float span = max(0.5f, g_cfg.tip_deg - g_sched_err_deg);
+        sched = clampf((err_abs - g_sched_err_deg) / span, 0.0f, 1.0f);
+      }
+      g_sched_scale = 1.0f + (g_sched_boost * sched);
+      g_pid_p = (g_cfg.kp * g_sched_scale) * g_pid_err;
 
       g_d_unfilt = (g_pid_err - g_prev_err) * (1000000.0f / static_cast<float>(LOOP_PERIOD_US));
       g_d_alpha = alphaFromCutoffHz(g_cfg.d_cutoff_hz, static_cast<float>(LOOP_PERIOD_US) * 1.0e-6f);
@@ -1451,7 +1789,8 @@ static void controlTick() {
       } else {
         g_d_filt = lowPass(g_d_unfilt, g_d_filt, g_d_alpha);
       }
-      g_pid_d = g_cfg.kd * g_d_filt;
+      const float kd_scale = 1.0f + (0.50f * g_sched_boost * sched);
+      g_pid_d = (g_cfg.kd * kd_scale) * g_d_filt;
 
       bool pushing_sat = g_output_saturated &&
         ((g_pid_err > 0.0f && g_pid_u_unsat > g_cfg.out_max) ||
@@ -1465,19 +1804,27 @@ static void controlTick() {
       g_pid_i = g_cfg.ki * g_i_state;
       g_pid_i = clampf(g_pid_i, -g_cfg.i_term_max, g_cfg.i_term_max);
 
-      g_motion_term = -(g_motion_kv * g_motion_vel_counts + g_motion_kx * g_motion_pos_counts);
-      float motion_term_max = g_cfg.out_max * MOTION_TERM_FRAC;
-      g_motion_term = clampf(g_motion_term, -motion_term_max, motion_term_max);
-
-      g_pid_u_unsat = g_pid_p + g_pid_i + g_pid_d + g_motion_term;
+      g_pid_u_unsat = g_pid_p + g_pid_i + g_pid_d;
       g_pid_u_sat = clampf(g_pid_u_unsat, -g_cfg.out_max, g_cfg.out_max);
       g_output_saturated = (fabs(g_pid_u_unsat - g_pid_u_sat) > 0.001f);
 
       g_i_state += g_cfg.kaw * (g_pid_u_sat - g_pid_u_unsat) * (static_cast<float>(LOOP_PERIOD_US) * 1.0e-6f);
       g_i_state = clampf(g_i_state, -g_cfg.i_max, g_cfg.i_max);
 
-      float max_step = OUT_SLEW_PER_S * DT_S;
+      float max_step = g_out_slew_per_s * DT_S;
       float target_out = g_pid_u_sat;
+      if (g_arm_enter_ms > 0U) {
+        const uint32_t arm_dt_ms = millis() - g_arm_enter_ms;
+        if (arm_dt_ms < g_arm_engage_ramp_ms) {
+          const float ramp = clampf(
+            static_cast<float>(arm_dt_ms) / static_cast<float>(g_arm_engage_ramp_ms),
+            0.0f,
+            1.0f
+          );
+          const float ramp_limit = max(8.0f, g_cfg.out_max * ramp);
+          target_out = clampf(target_out, -ramp_limit, ramp_limit);
+        }
+      }
       float out_err = target_out - g_out;
       if (out_err > max_step) out_err = max_step;
       if (out_err < -max_step) out_err = -max_step;
@@ -1486,27 +1833,56 @@ static void controlTick() {
       applyMotorOutput(g_out);
       g_prev_err = g_pid_err;
 
+      uint32_t now_ms = millis();
+      bool autozero_fast_window = (g_arm_enter_ms > 0U)
+        ? ((now_ms - g_arm_enter_ms) <= g_autozero_fast_window_ms)
+        : false;
+      g_autozero_fast_active = autozero_fast_window;
+
+      int8_t out_sign = 0;
+      if (g_out > g_autozero_out_sign_deadband) out_sign = 1;
+      else if (g_out < -g_autozero_out_sign_deadband) out_sign = -1;
+      if (
+        out_sign != 0
+        && g_autozero_prev_out_sign != 0
+        && out_sign != g_autozero_prev_out_sign
+      ) {
+        g_autozero_holdoff_until_ms = now_ms + g_autozero_reversal_holdoff_ms;
+      }
+      if (out_sign != 0) g_autozero_prev_out_sign = out_sign;
+
+      float autozero_step_max_deg_per_s = g_autozero_step_max_deg_per_s;
+      float autozero_angle_gate_deg = min(g_autozero_angle_gate_deg, 0.45f * g_cfg.tip_deg);
+      float autozero_gyro_gate_dps = g_autozero_gyro_gate_dps;
+      float autozero_out_gate = g_autozero_out_frac_gate * g_cfg.out_max;
+      if (autozero_fast_window) {
+        autozero_step_max_deg_per_s = g_autozero_fast_step_max_deg_per_s;
+        autozero_angle_gate_deg = min(g_autozero_fast_angle_gate_deg, 0.30f * g_cfg.tip_deg);
+        autozero_gyro_gate_dps = g_autozero_fast_gyro_gate_dps;
+        autozero_out_gate = g_autozero_fast_out_frac_gate * g_cfg.out_max;
+      }
+
       bool autozero_gate = g_autozero_enabled
-        && (fabs(g_state.angle_deg) < min(AUTOZERO_ANGLE_GATE_DEG, 0.45f * g_cfg.tip_deg))
-        && (fabs(g_state.gyro_dps) < AUTOZERO_GYRO_GATE_DPS)
+        && (now_ms >= g_autozero_holdoff_until_ms)
+        && (fabs(g_state.angle_deg) < autozero_angle_gate_deg)
+        && (fabs(g_state.gyro_dps) < autozero_gyro_gate_dps)
+        && (fabs(g_wspd_counts) < g_autozero_wspd_gate_counts)
         && !g_output_saturated
-        && (fabs(g_out) < (AUTOZERO_OUT_FRAC_GATE * g_cfg.out_max))
-        && (g_runaway_score < AUTOZERO_RUNAWAY_GATE);
+        && (fabs(g_out) < autozero_out_gate);
       if (autozero_gate) {
         const float err_to_trim = g_state.angle_deg - g_set_eff_deg;
-        if (fabs(err_to_trim) > AUTOZERO_ERR_DEADBAND_DEG) {
-          const float max_trim_step = AUTOZERO_STEP_MAX_DEG_PER_S * DT_S;
+        if (fabs(err_to_trim) > g_autozero_err_deadband_deg) {
+          const float max_trim_step = autozero_step_max_deg_per_s * DT_S;
           const float trim_step = clampf(err_to_trim, -max_trim_step, max_trim_step);
           g_autozero_trim_deg = clampf(
             g_autozero_trim_deg + trim_step,
-            -AUTOZERO_TRIM_MAX_DEG,
-            AUTOZERO_TRIM_MAX_DEG
+            -g_autozero_trim_max_deg,
+            g_autozero_trim_max_deg
           );
           g_set_eff_deg = clampf(g_cfg.set_deg + g_autozero_trim_deg, -30.0f, 30.0f);
         }
       }
 
-      uint32_t now_ms = millis();
       bool arm_grace_elapsed = (g_arm_enter_ms > 0U)
         ? ((now_ms - g_arm_enter_ms) > ENCODER_STALE_ARM_GRACE_MS)
         : true;
@@ -1528,20 +1904,15 @@ static void controlTick() {
     g_pid_u_unsat = 0.0f;
     g_pid_u_sat = 0.0f;
     g_output_saturated = false;
-    g_motion_term = 0.0f;
-    g_motion_vel_counts = 0.0f;
-    g_motion_pos_counts = 0.0f;
-    g_motion_pos_raw_counts = 0.0f;
-    g_motion_delta_counts = 0.0f;
-    g_motion_vel_init = false;
+    g_autozero_fast_active = false;
+    resetMotionState();
     g_set_eff_deg = clampf(g_cfg.set_deg + g_autozero_trim_deg, -30.0f, 30.0f);
     applyMotorOutput(0.0f);
   }
 
   float a_norm = fabs(g_state.angle_deg) / max(1.0f, g_cfg.tip_deg);
   float o_norm = fabs(g_out) / max(1.0f, g_cfg.out_max);
-  float p_norm = fabs(g_motion_pos_counts) / MOTION_POS_MAX_COUNTS;
-  g_runaway_score = 0.5f * a_norm + 0.3f * o_norm + 0.2f * p_norm;
+  g_runaway_score = 0.7f * a_norm + 0.3f * o_norm;
 
   g_last_step_us = micros() - step_start;
   uint32_t now_ms_for_overrun = millis();
@@ -1567,15 +1938,23 @@ static void controlTick() {
 void setup() {
   Serial.begin(115200);
   delay(120);
-  Serial.println(F("UPRIGHT_PROFILED_RUNTIME_BOOT"));
+  Serial.println(F("UPRIGHT_BALANCE_MVP_BOOT"));
 
   cfgDefaults();
+  runtimeTuneDefaults();
   if (cfgLoad()) {
     Serial.println(F("CFG loaded"));
   } else {
     Serial.println(F("CFG defaults"));
     cfgSave();
   }
+  if (motionCfgLoad()) {
+    Serial.println(F("MOTION_CFG loaded"));
+  } else {
+    Serial.println(F("MOTION_CFG defaults"));
+    motionCfgSave();
+  }
+  runtimeTuneSanitize();
 
   pinMode(Pins::LED, OUTPUT);
   digitalWrite(Pins::LED, LOW);
@@ -1604,10 +1983,12 @@ void setup() {
     ImuCalV1 imu_cal;
     if (imuCalLoad(&imu_cal)) {
       imuCalApply(imu_cal);
+      g_imu_cal_loaded = true;
       Serial.println(F("IMU offsets loaded"));
     } else {
       g_mpu.calcOffsets();
       imuCalSaveFromCurrent(nullptr);
+      g_imu_cal_loaded = true;
       Serial.println(F("IMU offsets auto-calibrated"));
     }
     g_mpu.update();
@@ -1616,6 +1997,7 @@ void setup() {
     g_imu_ok = true;
   } else {
     g_imu_ok = false;
+    g_imu_cal_loaded = false;
     latchFault(FAULT_SENSOR_INVALID, NOTE_IMU_BEGIN_FAILED, F("imu_begin_failed"));
   }
 
@@ -1624,12 +2006,55 @@ void setup() {
   g_last_tick_us = micros();
   g_last_status_ms = millis();
 
+#if FEAT_AUTORUN_CMD
+  // Commanded autorun path keeps original behavior and logging.
+  g_autorun_pending = true;
+  g_autorun_due_ms = millis() + AUTORUN_BOOT_DELAY_MS;
+  Serial.print(F("OK AUTORUN BOOT delay_ms="));
+  Serial.println(AUTORUN_BOOT_DELAY_MS);
+#endif
+#if FEAT_BOOT_AUTORUN
+  // Lightweight boot-only autorun path for constrained Nano builds.
+  g_boot_autorun_pending = true;
+  g_boot_autorun_due_ms = millis() + AUTORUN_BOOT_DELAY_MS;
+#endif
+
   printHelp();
   emitStatus();
 }
 
 void loop() {
   serviceSerial();
+
+#if FEAT_AUTORUN_CMD
+  if (g_autorun_pending) {
+    uint32_t now_ms = millis();
+    if (static_cast<int32_t>(now_ms - g_autorun_due_ms) >= 0) {
+      g_autorun_pending = false;
+      if (g_state.active_fault == FAULT_NONE) {
+        startArmedRun();
+#if FEAT_AUTORUN_CMD
+        Serial.println(F("OK AUTORUN ARM"));
+#endif
+      } else {
+#if FEAT_AUTORUN_CMD
+        Serial.println(F("ERR AUTORUN fault_latched"));
+#endif
+      }
+    }
+  }
+#endif
+#if FEAT_BOOT_AUTORUN
+  if (g_boot_autorun_pending) {
+    uint32_t now_ms = millis();
+    if (static_cast<int32_t>(now_ms - g_boot_autorun_due_ms) >= 0) {
+      g_boot_autorun_pending = false;
+      if (!g_state.armed && g_state.active_fault == FAULT_NONE) {
+        startArmedRun();
+      }
+    }
+  }
+#endif
 
   uint32_t now_us = micros();
   if (static_cast<int32_t>(now_us - g_next_tick_us) >= 0) {
@@ -1659,8 +2084,6 @@ void loop() {
   uint32_t now_ms = millis();
   if (now_ms - g_last_status_ms >= STATUS_PERIOD_MS) {
     g_last_status_ms = now_ms;
-    if (g_cfg.log_t) emitStatus();
-    if (g_cfg.log_csv) emitCsv();
     digitalWrite(Pins::LED, !digitalRead(Pins::LED));
   }
 }

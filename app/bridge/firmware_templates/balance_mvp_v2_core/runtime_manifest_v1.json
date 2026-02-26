@@ -1,0 +1,126 @@
+{
+  "version": "runtime_manifest_v1",
+  "board": {
+    "id": "nano",
+    "family": "arduino_avr",
+    "fqbn": "arduino:avr:nano:cpu=atmega328old",
+    "bootloader": "old"
+  },
+  "release": {
+    "runtime_version": "balance_mvp_v2_core.1.4",
+    "tune_version": "tune_v1",
+    "version_policy": "Bump runtime_version for firmware logic/command contract changes; bump tune_version for tuning-only changes."
+  },
+  "interfaces": {
+    "imu": {
+      "type": "mpu6050",
+      "protocol": "i2c",
+      "pins": {
+        "sda": 18,
+        "scl": 19
+      }
+    },
+    "encoders": {
+      "type": "single_channel_per_wheel",
+      "protocol": "interrupt_gpio",
+      "pins": {
+        "left": 2,
+        "right": 4
+      }
+    },
+    "actuator": {
+      "type": "dual_dc_hbridge_dir_pwm",
+      "protocol": "gpio_pwm",
+      "pins": {
+        "left_pwm": 5,
+        "right_pwm": 6,
+        "left_dir": 7,
+        "right_dir": 12,
+        "stby": 8
+      }
+    }
+  },
+  "telemetry_fields": [
+    "mode",
+    "estop",
+    "armed",
+    "fault",
+    "fault_count",
+    "ang",
+    "raw",
+    "gyro",
+    "set",
+    "set_eff",
+    "out",
+    "kp",
+    "ki",
+    "kd",
+    "kv",
+    "kx",
+    "gse",
+    "gsb",
+    "gss",
+    "sl",
+    "rp",
+    "mg",
+    "mm",
+    "dcf",
+    "kaw",
+    "wspd",
+    "wpos",
+    "wdelta",
+    "runaway",
+    "outL",
+    "outR",
+    "outMax",
+    "tipDeg",
+    "loop_us",
+    "missed",
+    "overrun",
+    "imu_zero",
+    "ar_delay",
+    "at",
+    "tr",
+    "runtime",
+    "tune"
+  ],
+  "commands": [
+    "GET",
+    "IDENT",
+    "HELP",
+    "ARM",
+    "DISARM",
+    "ESTOP",
+    "PID",
+    "SETPOINT",
+    "LIMITS",
+    "MOTION",
+    "SLEW",
+    "RAMP",
+    "MOTIONCFG",
+    "GSCHED",
+    "DCFG",
+    "AUTOTRIM",
+    "TRIMCFG",
+    "TRIMLIMS",
+    "TRIMCLR",
+    "CAL ZERO",
+    "IMU CAL",
+    "IMU LOAD",
+    "IMU SAVE",
+    "IMU INFO",
+    "AUTORUN",
+    "AUTORUN STATUS",
+    "SAVECFG",
+    "LOADCFG",
+    "DEFAULTCFG",
+    "FAULTCLR"
+  ],
+  "telemetry": {
+    "mode": "ascii_lowrate",
+    "transport": "serial_ascii",
+    "status_hz": 10
+  },
+  "generated_by": "balance_mvp_v2_core",
+  "generated_at": 1772042930
+}

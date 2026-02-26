@@ -35,9 +35,13 @@
   #define FEAT_AUTOTUNE_HELPERS 0
   #define FEAT_COHEN_COON_CMD 0
   #define FEAT_TRANSFER_FN_CMD 0
-  #define FEAT_BURST_LOGGING 1
+  #define FEAT_BURST_LOGGING 0
   #define FEAT_EEPROM_CONFIG 1
   #define FEAT_ADAPTIVE_GAINS 0
+  #define FEAT_AUTORUN_CMD 0
+  #define FEAT_BOOT_AUTORUN 1
+  #define FEAT_PREARM_CMD 0
+  #define FEAT_AUTOZERO 0
   // Bench-friendly encoder stale policy for bring-up.
   #define ENCODER_STALE_ARM_GRACE_MS 1800U
   #define ENCODER_STALE_TIMEOUT_MS 700U
@@ -55,6 +59,10 @@
   #define FEAT_BURST_LOGGING 1
   #define FEAT_EEPROM_CONFIG 1
   #define FEAT_ADAPTIVE_GAINS 1
+  #define FEAT_AUTORUN_CMD 1
+  #define FEAT_BOOT_AUTORUN 1
+  #define FEAT_PREARM_CMD 1
+  #define FEAT_AUTOZERO 1
   // Slightly relaxed during lab iteration.
   #define ENCODER_STALE_ARM_GRACE_MS 1600U
   #define ENCODER_STALE_TIMEOUT_MS 650U
@@ -71,6 +79,10 @@
   #define FEAT_BURST_LOGGING 1
   #define FEAT_EEPROM_CONFIG 1
   #define FEAT_ADAPTIVE_GAINS 0
+  #define FEAT_AUTORUN_CMD 1
+  #define FEAT_BOOT_AUTORUN 1
+  #define FEAT_PREARM_CMD 1
+  #define FEAT_AUTOZERO 1
   // Keep field profile conservative.
   #define ENCODER_STALE_ARM_GRACE_MS 500U
   #define ENCODER_STALE_TIMEOUT_MS 500U

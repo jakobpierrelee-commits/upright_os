@@ -1,0 +1,70 @@
+{
+  "version": "runtime_manifest_v1",
+  "board": {
+    "id": "teensy41",
+    "family": "teensy",
+    "fqbn": "teensy:avr:teensy41",
+    "bootloader": "default"
+  },
+  "interfaces": {
+    "imu": {
+      "type": "bno085",
+      "protocol": "i2c",
+      "pins": {
+        "sda": 18,
+        "scl": 19
+      }
+    },
+    "encoders": {
+      "type": "spi_absolute",
+      "protocol": "spi",
+      "pins": {
+        "miso": 12,
+        "mosi": 11,
+        "sck": 13,
+        "cs": 10
+      }
+    },
+    "actuator": {
+      "type": "bldc_foc",
+      "protocol": "can",
+      "pins": {
+        "can_tx": 22,
+        "can_rx": 23
+      }
+    }
+  },
+  "telemetry_fields": [
+    "mode",
+    "ang",
+    "raw",
+    "gyro",
+    "out",
+    "fault",
+    "estop",
+    "kp",
+    "ki",
+    "kd",
+    "set",
+    "wpos",
+    "wspd"
+  ],
+  "commands": [
+    "GET",
+    "ARM",
+    "DISARM",
+    "PID",
+    "SETPOINT",
+    "LIMITS",
+    "CAL ZERO",
+    "SAVECFG",
+    "MOTION"
+  ],
+  "telemetry": {
+    "mode": "binary_highrate",
+    "transport": "binary_framed",
+    "status_hz": 50
+  },
+  "generated_by": "reference_teensy41_profile",
+  "generated_at": 1771900000
+}

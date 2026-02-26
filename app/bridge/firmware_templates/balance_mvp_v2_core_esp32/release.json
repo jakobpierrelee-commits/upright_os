@@ -1,0 +1,5 @@
+{
+  "runtime_version": "balance_mvp_v2_core_esp32.1.0",
+  "tune_version": "tune_v1",
+  "version_policy": "Bump runtime_version for firmware logic/command contract changes; bump tune_version for tuning-only changes."
+}

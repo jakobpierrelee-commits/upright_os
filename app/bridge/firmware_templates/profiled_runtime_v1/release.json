@@ -1,0 +1,5 @@
+{
+  "runtime_version": "profiled_runtime_v1.3.0",
+  "tune_version": "tune_v1",
+  "version_policy": "Bump runtime_version only for structural/scaffold code changes; bump tune_version for variable/tuning-only changes."
+}
