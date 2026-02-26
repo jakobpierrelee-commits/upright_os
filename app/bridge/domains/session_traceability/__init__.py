@@ -19,6 +19,9 @@ except ImportError:
 # Local domain components
 from .checkpoint_manager import CheckpointManager, Checkpoint
 from .config_history import ConfigHistory, ConfigChange
+from .config_history_manager import ConfigHistoryManager
+from .mission_memory import MissionMemoryStore
+from .design_memory import DesignMemoryStore
 
 __all__ = [
     "CodexDB",
@@ -27,4 +30,7 @@ __all__ = [
     "Checkpoint",
     "ConfigHistory",
     "ConfigChange",
+    "ConfigHistoryManager",
+    "MissionMemoryStore",
+    "DesignMemoryStore",
 ]
