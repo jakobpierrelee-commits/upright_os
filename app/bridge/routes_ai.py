@@ -190,3 +190,43 @@ def handle_ai_knowledge_get(
     Returns (status_code, payload).
     """
     return 200, build_ai_knowledge_payload(knowledge=knowledge.context())
+
+
+def handle_agent_mode_set(
+    *,
+    body: Dict[str, Any],
+    agent_mission: Any,
+    build_agent_state_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/mode POST request.
+
+    Returns (status_code, payload).
+    """
+    mode = str(body.get("mode", "")).strip()
+    if not mode:
+        return 400, {"ok": False, "error": "mode_required"}
+    try:
+        state = agent_mission.set_mode(mode)
+    except RuntimeError as exc:
+        if str(exc) == "invalid_mode":
+            return 400, {
+                "ok": False,
+                "error": "invalid_mode",
+                "allowed_modes": agent_mission.status().get("allowed_modes", []),
+            }
+        raise
+    return 200, build_agent_state_payload_fn(agent=state)
+
+
+def handle_session_heartbeat(
+    *,
+    control: Any,
+    build_session_heartbeat_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /session/heartbeat POST request.
+
+    Returns (status_code, payload).
+    """
+    return 200, build_session_heartbeat_payload_fn(control=control.heartbeat())

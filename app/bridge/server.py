@@ -456,6 +456,7 @@ except ImportError:
 try:
     from app.bridge.routes_ai import (
         handle_agent_file_upload,
+        handle_agent_mode_set,
         handle_ai_knowledge_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
@@ -463,10 +464,12 @@ try:
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
+        handle_session_heartbeat,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
         handle_agent_file_upload,
+        handle_agent_mode_set,
         handle_ai_knowledge_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
@@ -474,6 +477,7 @@ except ImportError:
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
+        handle_session_heartbeat,
     )
 try:
     from app.bridge.routes_auth import (
@@ -6242,11 +6246,11 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/session/heartbeat":
-                    return _json(
-                        self,
-                        200,
-                        build_session_heartbeat_payload(control=control.heartbeat()),
+                    code, payload = handle_session_heartbeat(
+                        control=control,
+                        build_session_heartbeat_payload_fn=build_session_heartbeat_payload,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/design-memory/report-success":
                     session_key = (
@@ -6931,26 +6935,12 @@ def build_handler(
                     return
 
                 if u.path == "/agent/mode":
-                    mode = str(body.get("mode", "")).strip()
-                    if not mode:
-                        return _json(self, 400, {"ok": False, "error": "mode_required"})
-                    try:
-                        state = agent_mission.set_mode(mode)
-                    except RuntimeError as exc:
-                        if str(exc) == "invalid_mode":
-                            return _json(
-                                self,
-                                400,
-                                {
-                                    "ok": False,
-                                    "error": "invalid_mode",
-                                    "allowed_modes": agent_mission.status().get(
-                                        "allowed_modes", []
-                                    ),
-                                },
-                            )
-                        raise
-                    return _json(self, 200, build_agent_state_payload(agent=state))
+                    code, payload = handle_agent_mode_set(
+                        body=body,
+                        agent_mission=agent_mission,
+                        build_agent_state_payload_fn=build_agent_state_payload,
+                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/thread/new":
                     guard = _legacy_execution_guard(u.path)
