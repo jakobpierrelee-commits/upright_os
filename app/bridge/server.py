@@ -337,6 +337,7 @@ try:
         build_tool_metrics_payload,
         build_unified_payload,
         build_upload_confirm_success_payload,
+        build_surrogate_simulate_payload,
         build_validation_payload,
     )
 except ImportError:
@@ -376,6 +377,7 @@ except ImportError:
         build_tool_metrics_payload,
         build_unified_payload,
         build_upload_confirm_success_payload,
+        build_surrogate_simulate_payload,
         build_validation_payload,
     )
 try:
@@ -14226,7 +14228,9 @@ def build_handler(
                         return _json(
                             self,
                             code,
-                            {"ok": bool(report.get("ok")), "surrogate": report},
+                            build_surrogate_simulate_payload(
+                                ok=bool(report.get("ok")), surrogate=report
+                            ),
                         )
                     except Exception as exc:
                         return _json(

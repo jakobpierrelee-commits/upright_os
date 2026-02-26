@@ -208,3 +208,9 @@ def build_upload_confirm_success_payload(
             "output": output,
         },
     }
+
+
+def build_surrogate_simulate_payload(
+    *, ok: bool, surrogate: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": ok, "surrogate": surrogate}
