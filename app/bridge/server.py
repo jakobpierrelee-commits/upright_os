@@ -314,6 +314,7 @@ try:
         build_result_control_payload,
         build_result_payload,
         build_revert_control_payload,
+        build_saved_profiles_payload,
         build_sketch_payload,
         build_sketch_write_payload,
         build_setup_check_payload,
@@ -347,6 +348,7 @@ except ImportError:
         build_result_control_payload,
         build_result_payload,
         build_revert_control_payload,
+        build_saved_profiles_payload,
         build_sketch_payload,
         build_sketch_write_payload,
         build_setup_check_payload,
@@ -11627,13 +11629,10 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "capabilities": cached_connect.get(
-                                    "tuning_capabilities"
-                                ),
-                                "source": "connect_probe_cache",
-                            },
+                            build_capabilities_payload(
+                                capabilities=cached_connect.get("tuning_capabilities"),
+                                source="connect_probe_cache",
+                            ),
                         )
                     cached_compat = cached_probe("compat")
                     if isinstance(cached_compat, dict) and isinstance(
@@ -11642,13 +11641,10 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "capabilities": cached_compat.get(
-                                    "tuning_capabilities"
-                                ),
-                                "source": "compat_probe_cache",
-                            },
+                            build_capabilities_payload(
+                                capabilities=cached_compat.get("tuning_capabilities"),
+                                source="compat_probe_cache",
+                            ),
                         )
 
                     status = dict(gateway.health().get("last_status", {}))
@@ -12378,7 +12374,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "saved": saved, "profiles": profiles.list()},
+                        build_saved_profiles_payload(
+                            saved=saved, profiles=profiles.list()
+                        ),
                     )
 
                 if u.path == "/profiles/activate":

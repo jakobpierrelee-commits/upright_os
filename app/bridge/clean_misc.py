@@ -145,3 +145,15 @@ def build_setup_check_payload(
     *, check_key: str, check_result: Dict[str, Any], attempt: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, check_key: check_result, "attempt": attempt}
+
+
+def build_capabilities_payload(
+    *, capabilities: Dict[str, Any], source: str
+) -> Dict[str, Any]:
+    return {"ok": True, "capabilities": capabilities, "source": source}
+
+
+def build_saved_profiles_payload(
+    *, saved: Dict[str, Any], profiles: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    return {"ok": True, "saved": saved, "profiles": profiles}
