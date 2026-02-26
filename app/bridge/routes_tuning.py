@@ -1,7 +1,7 @@
 """
-Tuning route handlers extracted from server.py (Phase C).
+Tuning route handlers extracted from server.py (Phase B/C).
 
-These handlers manage tuning recommendations and preflight checks.
+These handlers manage tuning capabilities, recommendations, and preflight checks.
 """
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import pathlib
@@ -11,11 +11,13 @@ try:
         build_tuning_preflight_payload,
         build_tuning_recommend_payload,
     )
+    from app.bridge.clean_misc import build_capabilities_payload
 except ImportError:
     from clean_tuning import (  # type: ignore
         build_tuning_preflight_payload,
         build_tuning_recommend_payload,
     )
+    from clean_misc import build_capabilities_payload  # type: ignore
 
 
 def _parse_current_params(
@@ -378,3 +380,44 @@ def handle_tuning_preflight(
         surrogate=surrogate_report,
         replay=replay_reports,
     )
+
+
+def handle_tuning_capabilities_get(
+    *,
+    gateway: Any,
+    cached_probe_fn: Callable[[str], Optional[Dict[str, Any]]],
+    detect_tuning_capabilities_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /tooling/tuning/capabilities GET request.
+
+    Returns (status_code, payload).
+    Checks cached probes first, falls back to status-based detection.
+    """
+    cached_connect = cached_probe_fn("connect")
+    if isinstance(cached_connect, dict) and isinstance(
+        cached_connect.get("tuning_capabilities"), dict
+    ):
+        return 200, build_capabilities_payload(
+            capabilities=cached_connect.get("tuning_capabilities"),
+            source="connect_probe_cache",
+        )
+
+    cached_compat = cached_probe_fn("compat")
+    if isinstance(cached_compat, dict) and isinstance(
+        cached_compat.get("tuning_capabilities"), dict
+    ):
+        return 200, build_capabilities_payload(
+            capabilities=cached_compat.get("tuning_capabilities"),
+            source="compat_probe_cache",
+        )
+
+    status = dict(gateway.health().get("last_status", {}))
+    if not status:
+        try:
+            status = gateway.get_status()
+        except Exception:
+            status = {}
+
+    caps = detect_tuning_capabilities_fn(status, [], [])
+    return 200, build_capabilities_payload(capabilities=caps, source="status_only")

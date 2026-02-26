@@ -297,11 +297,13 @@ except ImportError:
     )
 try:
     from app.bridge.routes_tuning import (
+        handle_tuning_capabilities_get,
         handle_tuning_preflight,
         handle_tuning_recommend,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
+        handle_tuning_capabilities_get,
         handle_tuning_preflight,
         handle_tuning_recommend,
     )
@@ -5972,45 +5974,12 @@ def build_handler(
                     store_probe("connect", out)
                     return _json(self, 200, build_probe_payload(probe=out))
                 if u.path == "/tooling/tuning/capabilities":
-                    cached_connect = cached_probe("connect")
-                    if isinstance(cached_connect, dict) and isinstance(
-                        cached_connect.get("tuning_capabilities"), dict
-                    ):
-                        return _json(
-                            self,
-                            200,
-                            build_capabilities_payload(
-                                capabilities=cached_connect.get("tuning_capabilities"),
-                                source="connect_probe_cache",
-                            ),
-                        )
-                    cached_compat = cached_probe("compat")
-                    if isinstance(cached_compat, dict) and isinstance(
-                        cached_compat.get("tuning_capabilities"), dict
-                    ):
-                        return _json(
-                            self,
-                            200,
-                            build_capabilities_payload(
-                                capabilities=cached_compat.get("tuning_capabilities"),
-                                source="compat_probe_cache",
-                            ),
-                        )
-
-                    status = dict(gateway.health().get("last_status", {}))
-                    if not status:
-                        try:
-                            status = gateway.get_status()
-                        except Exception:
-                            status = {}
-                    caps = _detect_tuning_capabilities(status, [], [])
-                    return _json(
-                        self,
-                        200,
-                        build_capabilities_payload(
-                            capabilities=caps, source="status_only"
-                        ),
+                    code, payload = handle_tuning_capabilities_get(
+                        gateway=gateway,
+                        cached_probe_fn=cached_probe,
+                        detect_tuning_capabilities_fn=_detect_tuning_capabilities,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/overwatch/status":
                     q = parse_qs(u.query)
                     force_refresh = str(
