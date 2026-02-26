@@ -9,9 +9,11 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import pathlib
 import re
+import select
 import signal
 import shutil
 import sqlite3
@@ -93,6 +95,197 @@ except ImportError:
         validate_firmware_targets_response,
         validate_prearm_precheck_response,
     )
+try:
+    from app.bridge.clean_preflight import (
+        resolve_manifest_gates,
+        run_clean_preflight,
+    )
+except ImportError:
+    from clean_preflight import (  # type: ignore
+        resolve_manifest_gates,
+        run_clean_preflight,
+    )
+try:
+    from app.bridge.clean_codex_chat import (
+        run_clean_chat,
+        run_clean_chat_stream,
+    )
+except ImportError:
+    from clean_codex_chat import (  # type: ignore
+        run_clean_chat,
+        run_clean_chat_stream,
+    )
+try:
+    from app.bridge.clean_route_helpers import (
+        build_clean_agent_context,
+        build_clean_system_prompt,
+        clean_tool_call,
+        run_clean_auto_tools,
+    )
+except ImportError:
+    from clean_route_helpers import (  # type: ignore
+        build_clean_agent_context,
+        build_clean_system_prompt,
+        clean_tool_call,
+        run_clean_auto_tools,
+    )
+try:
+    from app.bridge.clean_auth_helpers import (
+        codex_cli_login_status,
+        sanitize_agent_attachments,
+    )
+except ImportError:
+    from clean_auth_helpers import (  # type: ignore
+        codex_cli_login_status,
+        sanitize_agent_attachments,
+    )
+try:
+    from app.bridge.clean_legacy_gate import (
+        legacy_execution_block_payload,
+        legacy_execution_enabled,
+    )
+except ImportError:
+    from clean_legacy_gate import (  # type: ignore
+        legacy_execution_block_payload,
+        legacy_execution_enabled,
+    )
+try:
+    from app.bridge.clean_threads import (
+        handle_clean_thread_new,
+        handle_clean_thread_select,
+        handle_clean_threads_get,
+    )
+except ImportError:
+    from clean_threads import (  # type: ignore
+        handle_clean_thread_new,
+        handle_clean_thread_select,
+        handle_clean_threads_get,
+    )
+try:
+    from app.bridge.clean_status import (
+        build_agent_status_payload,
+        build_health_payload,
+        build_clean_status_payload,
+        build_status_payload,
+    )
+except ImportError:
+    from clean_status import (  # type: ignore
+        build_agent_status_payload,
+        build_health_payload,
+        build_clean_status_payload,
+        build_status_payload,
+    )
+try:
+    from app.bridge.clean_profiles import (
+        build_profiles_hardware_payload,
+        build_profiles_payload,
+        build_runtime_manifest_compat_payload,
+    )
+except ImportError:
+    from clean_profiles import (  # type: ignore
+        build_profiles_hardware_payload,
+        build_profiles_payload,
+        build_runtime_manifest_compat_payload,
+    )
+try:
+    from app.bridge.clean_firmware import (
+        build_firmware_artifacts_payload,
+        build_firmware_sketch_folders_payload,
+        build_firmware_status_payload,
+        build_runtime_manifest_validate_payload,
+    )
+except ImportError:
+    from clean_firmware import (  # type: ignore
+        build_firmware_artifacts_payload,
+        build_firmware_sketch_folders_payload,
+        build_firmware_status_payload,
+        build_runtime_manifest_validate_payload,
+    )
+try:
+    from app.bridge.clean_safety import (
+        build_arm_precheck_payload,
+        build_status_control_payload,
+    )
+except ImportError:
+    from clean_safety import (  # type: ignore
+        build_arm_precheck_payload,
+        build_status_control_payload,
+    )
+try:
+    from app.bridge.clean_tuning import (
+        build_burst_status_payload,
+        build_commissioning_artifacts_payload,
+        build_commissioning_status_payload,
+        build_lines_payload,
+    )
+except ImportError:
+    from clean_tuning import (  # type: ignore
+        build_burst_status_payload,
+        build_commissioning_artifacts_payload,
+        build_commissioning_status_payload,
+        build_lines_payload,
+    )
+try:
+    from app.bridge.clean_probe import (
+        build_compat_probe_payload,
+        build_design_memory_best_payload,
+        build_design_memory_payload,
+        build_probe_payload,
+        build_tooling_traces_payload,
+        build_tuning_capabilities_payload,
+    )
+except ImportError:
+    from clean_probe import (  # type: ignore
+        build_compat_probe_payload,
+        build_design_memory_best_payload,
+        build_design_memory_payload,
+        build_probe_payload,
+        build_tooling_traces_payload,
+    )
+try:
+    from app.bridge.clean_ai import (
+        build_ai_knowledge_payload,
+        build_ai_profiles_payload,
+        build_ai_status_payload,
+        build_ai_threads_payload,
+        build_auth_openai_status_payload,
+        build_auth_user_payload,
+        build_session_heartbeat_payload,
+    )
+except ImportError:
+    from clean_ai import (  # type: ignore
+        build_ai_knowledge_payload,
+        build_ai_profiles_payload,
+        build_ai_status_payload,
+        build_auth_user_payload,
+        build_session_heartbeat_payload,
+    )
+try:
+    from app.bridge.clean_serial import (
+        build_diag_serial_payload,
+        build_telemetry_adapters_payload,
+        build_unified_schema_payload,
+    )
+except ImportError:
+    from clean_serial import (  # type: ignore
+        build_diag_serial_payload,
+        build_telemetry_adapters_payload,
+        build_unified_schema_payload,
+    )
+try:
+    from app.bridge.clean_request_parsers import (
+        parse_clean_chat_request,
+        parse_clean_preflight_request,
+    )
+except ImportError:
+    from clean_request_parsers import (  # type: ignore
+        parse_clean_chat_request,
+        parse_clean_preflight_request,
+    )
+try:
+    from app.bridge.clean_sse import apply_sse_headers, make_sse_emitter
+except ImportError:
+    from clean_sse import apply_sse_headers, make_sse_emitter  # type: ignore
 
 try:
     from app.bridge.codex_agent import CodexAgent, create_codex_agent
@@ -512,6 +705,139 @@ class FirmwareManager:
                 self._append_log(line)
         return False, None, last_err
 
+    @staticmethod
+    def _extract_cmd_arg(cmd: list[str], flag: str) -> Optional[str]:
+        try:
+            idx = cmd.index(flag)
+        except ValueError:
+            return None
+        if idx + 1 >= len(cmd):
+            return None
+        val = str(cmd[idx + 1] or "").strip()
+        return val or None
+
+    @staticmethod
+    def _runtime_identity_from_log(log_lines: list[str]) -> Dict[str, Any]:
+        mode_re = re.compile(r"\bmode=([A-Za-z0-9_]+)")
+        estop_re = re.compile(r"\bestop=([0-9]+)")
+        fault_re = re.compile(r"\bfault=([0-9]+)")
+        ident_re = re.compile(r"\bident=([A-Za-z0-9_.:-]+)")
+        hash_re = re.compile(r"\bhash=([A-Za-z0-9_.:-]+)")
+        runtime_re = re.compile(r"\bruntime=([A-Za-z0-9_.:-]+)")
+        tune_re = re.compile(r"\btune=([A-Za-z0-9_.:-]+)")
+        for raw in reversed(log_lines):
+            line = str(raw or "").strip()
+            if not line:
+                continue
+            if "STATUS " in line:
+                mode_m = mode_re.search(line)
+                estop_m = estop_re.search(line)
+                fault_m = fault_re.search(line)
+                ident_m = ident_re.search(line)
+                hash_m = hash_re.search(line)
+                runtime_m = runtime_re.search(line)
+                tune_m = tune_re.search(line)
+                return {
+                    "source": "status_line",
+                    "mode": mode_m.group(1) if mode_m else None,
+                    "estop": int(estop_m.group(1)) if estop_m else None,
+                    "fault": int(fault_m.group(1)) if fault_m else None,
+                    "ident": ident_m.group(1) if ident_m else None,
+                    "hash": hash_m.group(1) if hash_m else None,
+                    "runtime_version": runtime_m.group(1) if runtime_m else None,
+                    "tune_version": tune_m.group(1) if tune_m else None,
+                }
+            m = re.search(r"bridge reconnected:\s*mode=([A-Za-z0-9_]+)", line)
+            if m:
+                ident_m = ident_re.search(line)
+                hash_m = hash_re.search(line)
+                runtime_m = runtime_re.search(line)
+                tune_m = tune_re.search(line)
+                return {
+                    "source": "reconnect_line",
+                    "mode": m.group(1),
+                    "estop": None,
+                    "fault": None,
+                    "ident": ident_m.group(1) if ident_m else None,
+                    "hash": hash_m.group(1) if hash_m else None,
+                    "runtime_version": runtime_m.group(1) if runtime_m else None,
+                    "tune_version": tune_m.group(1) if tune_m else None,
+                }
+        return {
+            "source": "unavailable",
+            "mode": None,
+            "estop": None,
+            "fault": None,
+            "ident": None,
+            "hash": None,
+            "runtime_version": None,
+            "tune_version": None,
+        }
+
+    def _snapshot_hardware_fingerprint(
+        self, *, cmd: list[str], log_lines: list[str]
+    ) -> Dict[str, Any]:
+        selected_port = self._extract_cmd_arg(cmd, "-p")
+        selected_fqbn = self._extract_cmd_arg(cmd, "--fqbn")
+        selected_sketch: Optional[str] = None
+        if cmd:
+            tail = str(cmd[-1] or "").strip()
+            if tail and not tail.startswith("-"):
+                selected_sketch = tail
+        out: Dict[str, Any] = {
+            "captured_at": time.time(),
+            "selected_port": selected_port,
+            "selected_fqbn": selected_fqbn,
+            "selected_sketch": selected_sketch,
+            "detected_board": None,
+            "runtime_identity": self._runtime_identity_from_log(log_lines),
+        }
+        if not selected_port:
+            return out
+        boards = self.list_boards()
+        if not bool(boards.get("ok", False)):
+            out["board_scan_error"] = str(boards.get("error", "board_scan_failed"))
+            return out
+        detected_ports = (
+            ((boards.get("raw") or {}).get("detected_ports") or [])
+            if isinstance(boards, dict)
+            else []
+        )
+        matched: Optional[Dict[str, Any]] = None
+        for row in detected_ports:
+            if not isinstance(row, dict):
+                continue
+            port_node = row.get("port") or {}
+            if not isinstance(port_node, dict):
+                continue
+            address = str(port_node.get("address") or "").strip()
+            if address != selected_port:
+                continue
+            props = port_node.get("properties") or {}
+            if not isinstance(props, dict):
+                props = {}
+            boards_node = row.get("matching_boards") or []
+            has_board = (
+                isinstance(boards_node, list)
+                and bool(boards_node)
+                and isinstance(boards_node[0], dict)
+            )
+            board0 = boards_node[0] if has_board else {}
+            matched = {
+                "address": address,
+                "label": port_node.get("label"),
+                "protocol": port_node.get("protocol"),
+                "board_name": board0.get("name"),
+                "fqbn": board0.get("fqbn"),
+                "vid": props.get("vid"),
+                "pid": props.get("pid"),
+                "serial_number": props.get("serialNumber")
+                or props.get("serial_number"),
+            }
+            break
+        out["detected_board"] = matched
+        return out
+
     def _record_run_artifact(
         self,
         *,
@@ -533,6 +859,9 @@ class FirmwareManager:
             rid = f"{stamp}_{str(phase or 'run')}_{outcome}"
             meta_path = self._run_artifacts_dir / f"{rid}.json"
             log_path = self._run_artifacts_dir / f"{rid}.log"
+            hardware_fingerprint = self._snapshot_hardware_fingerprint(
+                cmd=cmd, log_lines=log_lines
+            )
             payload = {
                 "run_id": rid,
                 "phase": str(phase or ""),
@@ -550,6 +879,7 @@ class FirmwareManager:
                 "line_count": len(log_lines),
                 "op_id": str(op_id or ""),
                 "idempotency_key": str(idempotency_key or ""),
+                "hardware_fingerprint": hardware_fingerprint,
             }
             log_path.write_text(
                 "\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8"
@@ -744,6 +1074,7 @@ class FirmwareManager:
             board,
             sketch_path,
         ]
+        upload_policy = self._resolve_upload_strategy(board)
 
         started, snap, op_id = self._begin_operation(
             phase="upload_guarded", cmd=cmd, idempotency_key=idempotency_key
@@ -757,6 +1088,7 @@ class FirmwareManager:
             rc = -1
             reconnect_ok = False
             local_log: list[str] = []
+            artifact_cmd = list(cmd)
             try:
                 s0 = "guarded flash: disarm -> close serial -> upload -> reconnect"
                 local_log.append(s0)
@@ -776,23 +1108,134 @@ class FirmwareManager:
                 local_log.append(s2)
                 self._append_log(s2)
 
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=str(self.repo_root),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
+                max_upload_attempts = max(
+                    1, int(upload_policy.get("max_attempts", 1) or 1)
                 )
-                assert proc.stdout is not None
-                for ln in proc.stdout:
-                    line = ln.rstrip()
-                    local_log.append(line)
-                    self._append_log(line)
-                rc = proc.wait()
-                s3 = f"upload return code={rc}"
-                local_log.append(s3)
-                self._append_log(s3)
+                retryable_classes = {
+                    str(x).strip()
+                    for x in list(upload_policy.get("retryable_classes", []) or [])
+                    if str(x).strip()
+                }
+                retry_backoff_s = max(
+                    0.0, float(upload_policy.get("retry_backoff_s", 0.35) or 0.35)
+                )
+                last_failure_class = "unknown"
+                for attempt in range(1, max_upload_attempts + 1):
+                    attempt_header = f"upload attempt {attempt}/{max_upload_attempts}"
+                    local_log.append(attempt_header)
+                    self._append_log(attempt_header)
+                    proc = subprocess.Popen(
+                        cmd,
+                        cwd=str(self.repo_root),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+                    assert proc.stdout is not None
+                    attempt_lines: list[str] = []
+                    for ln in proc.stdout:
+                        line = ln.rstrip()
+                        attempt_lines.append(line)
+                        local_log.append(line)
+                        self._append_log(line)
+                    rc = proc.wait()
+                    s3 = f"upload return code={rc}"
+                    local_log.append(s3)
+                    self._append_log(s3)
+                    if rc == 0:
+                        artifact_cmd = list(cmd)
+                        break
+                    failure_class = self._classify_upload_failure(
+                        attempt_lines, returncode=rc
+                    )
+                    last_failure_class = failure_class
+                    class_line = (
+                        f"upload failure class={failure_class}; retryable="
+                        f"{'yes' if failure_class in retryable_classes else 'no'}"
+                    )
+                    local_log.append(class_line)
+                    self._append_log(class_line)
+                    if (
+                        failure_class in retryable_classes
+                        and attempt < max_upload_attempts
+                    ):
+                        retry_line = f"warn: transient {failure_class} detected; auto-retrying upload"
+                        local_log.append(retry_line)
+                        self._append_log(retry_line)
+                        time.sleep(retry_backoff_s)
+                        continue
+                    break
+
+                if rc != 0 and last_failure_class == "bootloader_sync":
+                    fallback_cmd = self._nano_bootloader_fallback_cmd(cmd)
+                    if fallback_cmd is not None:
+                        fallback_attempts = 2
+                        fb_rc = 1
+                        fb_class = "unknown"
+                        fb_cmd_last = list(fallback_cmd)
+                        for fb_attempt in range(1, fallback_attempts + 1):
+                            fallback_port = self._resolve_port_for_retry(upload_port)
+                            fb_cmd = self._cmd_with_port(
+                                fallback_cmd, fallback_port or upload_port
+                            )
+                            fb_cmd_last = list(fb_cmd)
+                            if fallback_port and fallback_port != upload_port:
+                                port_line = f"fallback upload port updated: {upload_port} -> {fallback_port}"
+                                local_log.append(port_line)
+                                self._append_log(port_line)
+                            if fb_attempt > 1:
+                                fb_attempt_line = f"fallback upload attempt {fb_attempt}/{fallback_attempts}"
+                                local_log.append(fb_attempt_line)
+                                self._append_log(fb_attempt_line)
+                            fb_hdr = "bootloader fallback: retrying upload with alternate Nano bootloader fqbn"
+                            local_log.append(fb_hdr)
+                            self._append_log(fb_hdr)
+                            proc = subprocess.Popen(
+                                fb_cmd,
+                                cwd=str(self.repo_root),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                bufsize=1,
+                            )
+                            assert proc.stdout is not None
+                            fb_lines: list[str] = []
+                            for ln in proc.stdout:
+                                line = ln.rstrip()
+                                fb_lines.append(line)
+                                local_log.append(line)
+                                self._append_log(line)
+                            fb_rc = proc.wait()
+                            fb_rc_line = f"upload fallback return code={fb_rc}"
+                            local_log.append(fb_rc_line)
+                            self._append_log(fb_rc_line)
+                            if fb_rc == 0:
+                                rc = 0
+                                artifact_cmd = list(fb_cmd)
+                                note = "note: upload succeeded with alternate Nano bootloader; consider switching bootloader selection."
+                                local_log.append(note)
+                                self._append_log(note)
+                                break
+                            fb_class = self._classify_upload_failure(
+                                fb_lines, returncode=fb_rc
+                            )
+                            retryable_fb = fb_class in retryable_classes
+                            fb_class_line = (
+                                f"upload fallback failure class={fb_class}; retryable="
+                                f"{'yes' if retryable_fb else 'no'}"
+                            )
+                            local_log.append(fb_class_line)
+                            self._append_log(fb_class_line)
+                            if retryable_fb and fb_attempt < fallback_attempts:
+                                fb_retry_line = f"warn: transient fallback {fb_class} detected; retrying fallback upload"
+                                local_log.append(fb_retry_line)
+                                self._append_log(fb_retry_line)
+                                time.sleep(retry_backoff_s)
+                                continue
+                            break
+                        if rc != 0:
+                            artifact_cmd = list(fb_cmd_last)
             except Exception as exc:
                 s4 = f"ERROR: guarded upload failed: {exc}"
                 local_log.append(s4)
@@ -803,13 +1246,75 @@ class FirmwareManager:
                         self._reconnect_gateway_after_flash(
                             gateway=gateway,
                             local_log=local_log,
-                            attempts=6,
-                            ready_timeout_s=3.0,
+                            attempts=max(
+                                1,
+                                int(
+                                    upload_policy.get("reconnect_attempts_success", 6)
+                                    or 6
+                                ),
+                            ),
+                            ready_timeout_s=max(
+                                0.5,
+                                float(
+                                    upload_policy.get("reconnect_ready_timeout_s", 3.0)
+                                    or 3.0
+                                ),
+                            ),
                             settle_s=0.2,
                         )
                     )
+                    # Some boards/USB stacks need longer post-upload settle time.
+                    # Retry once with a wider window before declaring guarded flash failure.
+                    if not reconnect_ok:
+                        retry_line = "warn: reconnect failed after upload; running extended reconnect sweep"
+                        local_log.append(retry_line)
+                        self._append_log(retry_line)
+                        reconnect_ok, ready, reconnect_err = (
+                            self._reconnect_gateway_after_flash(
+                                gateway=gateway,
+                                local_log=local_log,
+                                attempts=max(
+                                    8,
+                                    int(
+                                        upload_policy.get(
+                                            "reconnect_attempts_success", 6
+                                        )
+                                        or 6
+                                    ),
+                                ),
+                                ready_timeout_s=max(
+                                    2.0,
+                                    float(
+                                        upload_policy.get(
+                                            "reconnect_ready_timeout_s", 3.0
+                                        )
+                                        or 3.0
+                                    )
+                                    * 1.8,
+                                ),
+                                settle_s=0.45,
+                            )
+                        )
                     if reconnect_ok and isinstance(ready, dict):
-                        s5 = f"bridge reconnected: mode={ready.get('mode', 'UNKNOWN')}"
+                        mode = str(ready.get("mode", "UNKNOWN") or "UNKNOWN")
+                        ident = str(ready.get("ident", "") or "").strip()
+                        build_hash_value = str(ready.get("hash", "") or "").strip()
+                        runtime_version = str(
+                            ready.get("runtime", ready.get("runtime_version", "")) or ""
+                        ).strip()
+                        tune_version = str(
+                            ready.get("tune", ready.get("tune_version", "")) or ""
+                        ).strip()
+                        parts = [f"bridge reconnected: mode={mode}"]
+                        if ident:
+                            parts.append(f"ident={ident}")
+                        if build_hash_value:
+                            parts.append(f"hash={build_hash_value}")
+                        if runtime_version:
+                            parts.append(f"runtime={runtime_version}")
+                        if tune_version:
+                            parts.append(f"tune={tune_version}")
+                        s5 = " ".join(parts)
                         local_log.append(s5)
                         self._append_log(s5)
                     else:
@@ -856,7 +1361,7 @@ class FirmwareManager:
                 )
                 self._record_run_artifact(
                     phase="upload_guarded",
-                    cmd=cmd,
+                    cmd=artifact_cmd,
                     returncode=final_rc,
                     state=final_state,
                     started_at=started_at,
@@ -869,6 +1374,145 @@ class FirmwareManager:
         t = threading.Thread(target=worker, daemon=True)
         t.start()
         return self.status()
+
+    def _resolve_upload_strategy(self, fqbn: str) -> Dict[str, Any]:
+        targets = self.list_targets()
+        board = self._match_target_for_fqbn(fqbn)
+        family_id = str(board.get("family", "")).strip()
+        families = list(targets.get("families") or [])
+        family_row = next(
+            (
+                row
+                for row in families
+                if isinstance(row, dict) and str(row.get("id", "")).strip() == family_id
+            ),
+            {},
+        )
+        policy: Dict[str, Any] = {}
+        if isinstance(family_row, dict) and isinstance(
+            family_row.get("upload_strategy"), dict
+        ):
+            policy.update(dict(family_row.get("upload_strategy") or {}))
+        if isinstance(board.get("upload_strategy"), dict):
+            policy.update(dict(board.get("upload_strategy") or {}))
+        if "max_attempts" not in policy:
+            policy["max_attempts"] = 1
+        if "retryable_classes" not in policy:
+            policy["retryable_classes"] = []
+        if "retry_backoff_s" not in policy:
+            policy["retry_backoff_s"] = 0.35
+        if "reconnect_attempts_success" not in policy:
+            policy["reconnect_attempts_success"] = 6
+        if "reconnect_ready_timeout_s" not in policy:
+            policy["reconnect_ready_timeout_s"] = 3.0
+        return policy
+
+    @staticmethod
+    def _classify_upload_failure(lines: list[str], *, returncode: int) -> str:
+        if returncode == 0:
+            return "none"
+        blob = "\n".join([str(x) for x in list(lines or [])]).lower()
+        if any(
+            tok in blob
+            for tok in (
+                "device or resource busy",
+                "resource busy",
+                "permission denied",
+                "multiple access on port",
+            )
+        ):
+            return "port_busy"
+        if any(
+            tok in blob
+            for tok in (
+                "no such file or directory",
+                "can't open device",
+                "cannot open",
+                "unable to open port",
+                "serial port not found",
+            )
+        ):
+            return "port_missing"
+        if any(
+            tok in blob
+            for tok in (
+                "programmer is out of sync",
+                "protocol expects sync byte",
+                "not in sync",
+            )
+        ):
+            return "bootloader_sync"
+        if any(
+            tok in blob
+            for tok in (
+                "unknown fqbn",
+                "platform not installed",
+                "core not installed",
+            )
+        ):
+            return "toolchain_config"
+        return "unknown"
+
+    @staticmethod
+    def _nano_bootloader_fallback_cmd(cmd: list[str]) -> Optional[list[str]]:
+        try:
+            idx = cmd.index("--fqbn")
+        except ValueError:
+            return None
+        if idx + 1 >= len(cmd):
+            return None
+        fqbn = str(cmd[idx + 1]).strip()
+        if not fqbn.startswith("arduino:avr:nano"):
+            return None
+        alt = (
+            "arduino:avr:nano"
+            if fqbn.endswith(":cpu=atmega328old")
+            else "arduino:avr:nano:cpu=atmega328old"
+        )
+        if alt == fqbn:
+            return None
+        out = list(cmd)
+        out[idx + 1] = alt
+        return out
+
+    def _resolve_port_for_retry(self, preferred_port: str) -> str:
+        selected = str(preferred_port or "").strip()
+        deadline = time.time() + 2.5
+        while True:
+            try:
+                boards = self.list_boards()
+            except Exception:
+                boards = {"ports": [], "recommended_port": ""}
+            ports = []
+            for row in list(boards.get("ports") or []):
+                if not isinstance(row, dict):
+                    continue
+                addr = str(row.get("address", "")).strip()
+                if addr:
+                    ports.append(addr)
+            if selected and selected in ports:
+                return selected
+            recommended = str(boards.get("recommended_port", "")).strip()
+            if recommended and recommended in ports:
+                return recommended
+            if ports:
+                return ports[0]
+            if time.time() >= deadline:
+                break
+            time.sleep(0.25)
+        return selected
+
+    @staticmethod
+    def _cmd_with_port(cmd: list[str], port: str) -> list[str]:
+        out = list(cmd)
+        try:
+            idx = out.index("-p")
+            if idx + 1 < len(out):
+                out[idx + 1] = str(port)
+                return out
+        except ValueError:
+            pass
+        return out
 
     def install_cli(self) -> Dict[str, Any]:
         script = r"""
@@ -960,19 +1604,44 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             raise RuntimeError("sketch_write_size_mismatch")
         return written
 
+    def _ensure_manifest_after_write(
+        self,
+        *,
+        sketch_folder: str,
+        fqbn: str,
+        profile: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        try:
+            return self.ensure_runtime_manifest(
+                sketch=sketch_folder,
+                fqbn=fqbn,
+                profile=profile if isinstance(profile, dict) else None,
+                force_update=False,
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if profile is None and msg.startswith("runtime_manifest_invalid:"):
+                raise RuntimeError(
+                    "profile_required_for_manifest: provide profile.board/profile.hardware/profile.pins when writing sketches to folders without a valid runtime manifest"
+                ) from exc
+            raise
+
     def write_sketch(
-        self, *, content: str, path: Optional[str] = None
+        self,
+        *,
+        content: str,
+        path: Optional[str] = None,
+        profile: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("sketch_content_empty")
         target = pathlib.Path(path) if path else self._default_sketch_file()
         target.parent.mkdir(parents=True, exist_ok=True)
         bytes_written = self._write_text_atomic(target, content)
-        manifest = self.ensure_runtime_manifest(
-            sketch=str(target.parent),
+        manifest = self._ensure_manifest_after_write(
+            sketch_folder=str(target.parent),
             fqbn=self.default_fqbn,
-            profile=None,
-            force_update=False,
+            profile=profile,
         )
         return {
             "path": str(target),
@@ -981,7 +1650,12 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         }
 
     def write_sketch_with_backup(
-        self, *, content: str, path: Optional[str] = None, source: str = "assistant"
+        self,
+        *,
+        content: str,
+        path: Optional[str] = None,
+        source: str = "assistant",
+        profile: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("sketch_content_empty")
@@ -995,11 +1669,10 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         if target.exists() and target.is_file():
             shutil.copy2(target, backup_path)
         bytes_written = self._write_text_atomic(target, content)
-        manifest = self.ensure_runtime_manifest(
-            sketch=str(target.parent),
+        manifest = self._ensure_manifest_after_write(
+            sketch_folder=str(target.parent),
             fqbn=self.default_fqbn,
-            profile=None,
-            force_update=False,
+            profile=profile,
         )
         return {
             "path": str(target),
@@ -1024,6 +1697,7 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                 addr = p.get("port", {}).get("address")
                 label = p.get("port", {}).get("label")
                 protocol = p.get("port", {}).get("protocol")
+                props = p.get("port", {}).get("properties", {}) or {}
                 boards = p.get("matching_boards", []) or []
                 fqbn = boards[0].get("fqbn") if boards else None
                 name = boards[0].get("name") if boards else None
@@ -1034,6 +1708,10 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                         "protocol": protocol,
                         "fqbn": fqbn,
                         "board_name": name,
+                        "vid": props.get("vid"),
+                        "pid": props.get("pid"),
+                        "serial_number": props.get("serialNumber")
+                        or props.get("serial_number"),
                     }
                 )
             recommended = next((p for p in simplified if p.get("fqbn")), None)
@@ -1062,10 +1740,62 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             "ok": True,
             "version": 1,
             "families": [
-                {"id": "arduino_avr", "label": "Arduino AVR"},
-                {"id": "esp32", "label": "ESP32"},
-                {"id": "rp2040", "label": "RP2040"},
-                {"id": "teensy", "label": "Teensy"},
+                {
+                    "id": "arduino_avr",
+                    "label": "Arduino AVR",
+                    "upload_strategy": {
+                        "uploader": "arduino_cli_upload",
+                        "reset_method": "dtr_autoreset",
+                        "max_attempts": 2,
+                        "retryable_classes": [
+                            "bootloader_sync",
+                            "port_busy",
+                            "port_missing",
+                        ],
+                        "retry_backoff_s": 0.35,
+                        "reconnect_attempts_success": 6,
+                        "reconnect_ready_timeout_s": 3.0,
+                    },
+                },
+                {
+                    "id": "esp32",
+                    "label": "ESP32",
+                    "upload_strategy": {
+                        "uploader": "arduino_cli_upload",
+                        "reset_method": "manual_boot_en",
+                        "max_attempts": 2,
+                        "retryable_classes": ["port_busy"],
+                        "retry_backoff_s": 0.35,
+                        "reconnect_attempts_success": 6,
+                        "reconnect_ready_timeout_s": 3.0,
+                    },
+                },
+                {
+                    "id": "rp2040",
+                    "label": "RP2040",
+                    "upload_strategy": {
+                        "uploader": "arduino_cli_upload",
+                        "reset_method": "manual_bootsel",
+                        "max_attempts": 1,
+                        "retryable_classes": ["port_busy"],
+                        "retry_backoff_s": 0.35,
+                        "reconnect_attempts_success": 6,
+                        "reconnect_ready_timeout_s": 3.0,
+                    },
+                },
+                {
+                    "id": "teensy",
+                    "label": "Teensy",
+                    "upload_strategy": {
+                        "uploader": "arduino_cli_upload",
+                        "reset_method": "manual_program_button",
+                        "max_attempts": 1,
+                        "retryable_classes": ["port_busy"],
+                        "retry_backoff_s": 0.35,
+                        "reconnect_attempts_success": 6,
+                        "reconnect_ready_timeout_s": 3.0,
+                    },
+                },
             ],
             "boards": [
                 {
@@ -1082,6 +1812,14 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                             "fqbn_suffix": ":cpu=atmega328old",
                         },
                     ],
+                    "upload_strategy": {
+                        "max_attempts": 2,
+                        "retryable_classes": [
+                            "bootloader_sync",
+                            "port_busy",
+                            "port_missing",
+                        ],
+                    },
                 },
                 {
                     "id": "uno",
@@ -1269,13 +2007,104 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
         except Exception:
             return int(default)
 
+    @staticmethod
+    def _default_release_meta() -> Dict[str, str]:
+        return {
+            "runtime_version": "runtime_v1.0.0",
+            "tune_version": "tune_v1",
+            "version_policy": (
+                "Bump runtime_version only for structural/scaffold code changes; "
+                "bump tune_version for variable/tuning-only changes."
+            ),
+        }
+
+    def _load_release_meta(self, *, sketch: Optional[str] = None) -> Dict[str, str]:
+        out = dict(self._default_release_meta())
+        candidates: list[pathlib.Path] = []
+        if isinstance(sketch, str) and sketch.strip():
+            candidates.append(
+                self._resolve_sketch_folder(sketch=sketch) / "release.json"
+            )
+        candidates.append(pathlib.Path(self.default_sketch) / "release.json")
+        seen: set[str] = set()
+        for path in candidates:
+            key = str(path.resolve()) if path.exists() else str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                node = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(node, dict):
+                continue
+            runtime_version = str(node.get("runtime_version", "")).strip()
+            tune_version = str(node.get("tune_version", "")).strip()
+            version_policy = str(node.get("version_policy", "")).strip()
+            if runtime_version:
+                out["runtime_version"] = runtime_version
+            if tune_version:
+                out["tune_version"] = tune_version
+            if version_policy:
+                out["version_policy"] = version_policy
+            return out
+        return out
+
     def _build_runtime_manifest_from_profile(
-        self, *, fqbn: str, profile: Optional[Dict[str, Any]] = None
+        self,
+        *,
+        fqbn: str,
+        profile: Optional[Dict[str, Any]] = None,
+        sketch: Optional[str] = None,
     ) -> Dict[str, Any]:
         target = self._match_target_for_fqbn(fqbn)
         pins = profile.get("pins", {}) if isinstance(profile, dict) else {}
         board = profile.get("board", {}) if isinstance(profile, dict) else {}
         hardware = profile.get("hardware", {}) if isinstance(profile, dict) else {}
+        profile_probe = profile.get("probe", {}) if isinstance(profile, dict) else {}
+        profile_probe_commands = (
+            profile_probe.get("commands", []) if isinstance(profile_probe, dict) else []
+        )
+        release_defaults = self._load_release_meta(sketch=sketch)
+        release = profile.get("release", {}) if isinstance(profile, dict) else {}
+        runtime_version = str(
+            (profile or {}).get("runtime_version")
+            or (release.get("runtime_version") if isinstance(release, dict) else "")
+            or release_defaults.get("runtime_version", "")
+            or "runtime_v1.0.0"
+        ).strip()
+        tune_version = str(
+            (profile or {}).get("tune_version")
+            or (release.get("tune_version") if isinstance(release, dict) else "")
+            or release_defaults.get("tune_version", "")
+            or "tune_v1"
+        ).strip()
+        version_policy = str(
+            (profile or {}).get("version_policy")
+            or (release.get("version_policy") if isinstance(release, dict) else "")
+            or release_defaults.get("version_policy", "")
+            or self._default_release_meta().get("version_policy", "")
+        ).strip()
+        manifest_commands_base = [
+            "GET",
+            "ARM",
+            "DISARM",
+            "PID",
+            "SETPOINT",
+            "LIMITS",
+            "CAL ZERO",
+            "SAVECFG",
+        ]
+        manifest_commands: list[str] = []
+        seen_commands: set[str] = set()
+        for raw_cmd in [*manifest_commands_base, *list(profile_probe_commands or [])]:
+            cmd = str(raw_cmd or "").strip().upper()
+            if not cmd or cmd in seen_commands:
+                continue
+            seen_commands.add(cmd)
+            manifest_commands.append(cmd)
         imu_protocol = str(hardware.get("imu_protocol", "i2c") or "i2c").strip().lower()
         encoder_protocol = (
             str(hardware.get("encoder_protocol", "quadrature") or "quadrature")
@@ -1300,6 +2129,36 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             .strip()
             .lower()
         )
+        family = str(target.get("family", "arduino_avr")).strip() or "arduino_avr"
+        family_caps = _family_capabilities().get(family, {})
+        profile_firmware = (
+            profile.get("firmware", {}) if isinstance(profile, dict) else {}
+        )
+        telemetry_mode = (
+            str(
+                (
+                    profile_firmware.get("telemetry_mode")
+                    if isinstance(profile_firmware, dict)
+                    else ""
+                )
+                or (
+                    profile_probe.get("telemetry_mode")
+                    if isinstance(profile_probe, dict)
+                    else ""
+                )
+                or family_caps.get("default_telemetry_mode", "ascii_lowrate")
+            )
+            .strip()
+            .lower()
+        )
+        if telemetry_mode not in {"ascii_lowrate", "binary_highrate"}:
+            telemetry_mode = (
+                str(family_caps.get("default_telemetry_mode", "ascii_lowrate"))
+                .strip()
+                .lower()
+                or "ascii_lowrate"
+            )
+        telemetry_status_hz = 10 if telemetry_mode == "ascii_lowrate" else 50
         manifest = {
             "version": "runtime_manifest_v1",
             "board": {
@@ -1358,6 +2217,10 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
             },
             "telemetry_fields": [
                 "mode",
+                "ident",
+                "hash",
+                "runtime",
+                "tune",
                 "ang",
                 "raw",
                 "gyro",
@@ -1372,15 +2235,20 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                 "encR",
             ],
             "commands": [
-                "GET",
-                "ARM",
-                "DISARM",
-                "PID",
-                "SETPOINT",
-                "LIMITS",
-                "CAL ZERO",
-                "SAVECFG",
+                *manifest_commands,
             ],
+            "telemetry": {
+                "mode": telemetry_mode,
+                "transport": "serial_ascii"
+                if telemetry_mode == "ascii_lowrate"
+                else "binary_framed",
+                "status_hz": telemetry_status_hz,
+            },
+            "release": {
+                "runtime_version": runtime_version,
+                "tune_version": tune_version,
+                "version_policy": version_policy,
+            },
             "generated_by": "firmware_manager",
             "generated_at": int(time.time()),
         }
@@ -1414,7 +2282,7 @@ echo "Installed at $HOME/.local/bin/arduino-cli"
                 "validation": current,
             }
         manifest = self._build_runtime_manifest_from_profile(
-            fqbn=effective_fqbn, profile=profile
+            fqbn=effective_fqbn, profile=profile, sketch=sketch
         )
         written = self.write_runtime_manifest(
             sketch=sketch, manifest=manifest, validate=True
@@ -2731,11 +3599,13 @@ class AIManager:
                     raise RuntimeError(f"codex_cli_timeout:{max_wait_s}s")
                 if proc.stdout is None:
                     break
+                ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+                if not ready:
+                    continue
                 line = proc.stdout.readline()
                 if line == "" and proc.poll() is not None:
                     break
                 if not line:
-                    time.sleep(0.02)
                     continue
                 raw = line.rstrip("\r\n")
                 low = raw.strip().lower()
@@ -2865,6 +3735,395 @@ class MissionMemoryStore:
             node["source"] = source
             self._save_locked()
             return {str(k): str(v) for k, v in facts.items() if isinstance(k, str)}
+
+
+class DesignMemoryStore:
+    """Durable design iteration memory: auto observations + operator ratings."""
+
+    def __init__(self, repo_root: pathlib.Path, max_entries: int = 600) -> None:
+        self.path = repo_root / "app" / "bridge" / "design_memory.json"
+        self.max_entries = max(50, int(max_entries))
+        self._lock = threading.Lock()
+        self._entries: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            entries = raw.get("entries", []) if isinstance(raw, dict) else []
+            if not isinstance(entries, list):
+                entries = []
+            parsed: Dict[str, Dict[str, Any]] = {}
+            for node in entries:
+                if not isinstance(node, dict):
+                    continue
+                design_id = str(node.get("design_id", "")).strip()
+                if not design_id:
+                    continue
+                parsed[design_id] = dict(node)
+            self._entries = parsed
+        except Exception:
+            self._entries = {}
+
+    def _save_locked(self) -> None:
+        rows = sorted(
+            self._entries.values(),
+            key=lambda r: float(r.get("updated_at", 0.0) or 0.0),
+            reverse=True,
+        )[: self.max_entries]
+        payload = {
+            "version": 1,
+            "updated_at": time.time(),
+            "entries": rows,
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    @staticmethod
+    def _normalize_obs(observation: Dict[str, Any]) -> Dict[str, str]:
+        keys = [
+            "runtime_version",
+            "tune_version",
+            "ident",
+            "hash",
+            "sketch_hash",
+            "sketch_revision",
+            "profile_id",
+            "profile_label",
+            "fqbn",
+            "port",
+            "board_id",
+            "test_type",
+        ]
+        out: Dict[str, str] = {}
+        for key in keys:
+            val = str(observation.get(key, "") or "").strip()
+            if val:
+                out[key] = val
+        return out
+
+    @staticmethod
+    def _design_id_from_obs(obs: Dict[str, str]) -> str:
+        material = "|".join(
+            [
+                obs.get("runtime_version", ""),
+                obs.get("tune_version", ""),
+                obs.get("ident", ""),
+                obs.get("hash", ""),
+                obs.get("sketch_hash", ""),
+                obs.get("profile_id", ""),
+                obs.get("fqbn", ""),
+            ]
+        )
+        if not material.replace("|", "").strip():
+            material = f"unknown|{time.time():.6f}|{secrets.token_hex(6)}"
+        return "design_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+    @staticmethod
+    def _event_score_raw(node: Dict[str, Any]) -> float:
+        success = int(node.get("success_count", 0) or 0)
+        failure = int(node.get("failure_count", 0) or 0)
+        up = int(node.get("user_positive", 0) or 0)
+        down = int(node.get("user_negative", 0) or 0)
+        return float((success * 3) + (up * 5) - (failure * 2) - (down * 6))
+
+    @staticmethod
+    def _event_score_norm(node: Dict[str, Any]) -> float:
+        raw = DesignMemoryStore._event_score_raw(node)
+        # Center near 50 and scale by observed event deltas; clamp to 0..100.
+        return max(0.0, min(100.0, 50.0 + (raw * 5.0)))
+
+    @staticmethod
+    def _evidence_score(node: Dict[str, Any]) -> float:
+        evidence = node.get("evidence")
+        if not isinstance(evidence, dict):
+            return 0.0
+        checks = evidence.get("checks")
+        if not isinstance(checks, dict):
+            return 0.0
+
+        weights: Dict[str, float] = {
+            "upload_ok": 25.0,
+            "reconnect_ok": 20.0,
+            "preflight_ok": 15.0,
+            "prearm_ok": 15.0,
+            "telemetry_feed_ok": 10.0,
+            "no_fault": 10.0,
+            "safe_mode_ok": 5.0,
+        }
+        score = 0.0
+        for key, weight in weights.items():
+            if bool(checks.get(key, False)):
+                score += weight
+        return max(0.0, min(100.0, score))
+
+    @staticmethod
+    def _balance_score(node: Dict[str, Any]) -> float:
+        evidence = node.get("evidence")
+        if not isinstance(evidence, dict):
+            return 50.0
+        sources = evidence.get("sources")
+        if not isinstance(sources, dict):
+            return 50.0
+
+        status_snapshot = sources.get("status_snapshot")
+        s = status_snapshot if isinstance(status_snapshot, dict) else {}
+
+        def _f(*keys: str) -> Optional[float]:
+            for k in keys:
+                v = s.get(k)
+                try:
+                    return float(v)
+                except Exception:
+                    continue
+            return None
+
+        ang = _f("ang")
+        out_sat_flag = str(s.get("output_saturated", "")).strip().lower()
+        out_sat = out_sat_flag in {"1", "true", "yes"}
+        u_unsat = _f("pid_u_unsat")
+        u_sat = _f("pid_u_sat", "out")
+        loop_hz = _f("loop_hz", "loopHz", "hz")
+        if loop_hz is None:
+            period_us = _f("period_us", "loop_period_us")
+            if period_us is not None and period_us > 0:
+                loop_hz = 1_000_000.0 / period_us
+        overrun = str(s.get("overrun", "0")).strip() not in {"", "0", "false", "False"}
+        fault = str(s.get("fault", "")).strip() not in {"", "0"}
+
+        score = 100.0
+        if fault:
+            score -= 25.0
+        if ang is None:
+            score -= 20.0
+        else:
+            a = abs(float(ang))
+            if a > 12.0:
+                score -= 35.0
+            elif a > 6.0:
+                score -= 22.0
+            elif a > 3.0:
+                score -= 12.0
+            elif a > 1.5:
+                score -= 6.0
+        if out_sat:
+            score -= 10.0
+        if u_unsat is not None and u_sat is not None and abs(u_unsat - u_sat) >= 6.0:
+            score -= 8.0
+        if overrun:
+            score -= 12.0
+        if loop_hz is None:
+            score -= 15.0
+        elif loop_hz < 20.0:
+            score -= 20.0
+        elif loop_hz < 40.0:
+            score -= 10.0
+
+        # Blend with most recent Overwatch control score when available.
+        ow = sources.get("overwatch_score_pct")
+        try:
+            owf = float(ow)
+            if 0.0 <= owf <= 100.0:
+                score = (score * 0.6) + (owf * 0.4)
+        except Exception:
+            pass
+
+        return round(max(0.0, min(100.0, score)), 2)
+
+    @staticmethod
+    def _score(node: Dict[str, Any]) -> float:
+        # Balance performance is weighted highest, then runtime evidence, then operator events.
+        balance = DesignMemoryStore._balance_score(node)
+        event_norm = DesignMemoryStore._event_score_norm(node)
+        evidence = DesignMemoryStore._evidence_score(node)
+        return round((balance * 0.5) + (evidence * 0.3) + (event_norm * 0.2), 2)
+
+    def report(
+        self,
+        *,
+        session_key: str,
+        observation: Dict[str, Any],
+        success: bool,
+        source: str,
+        note: str = "",
+    ) -> Dict[str, Any]:
+        session = str(session_key or "global").strip() or "global"
+        obs = self._normalize_obs(observation if isinstance(observation, dict) else {})
+        design_id = self._design_id_from_obs(obs)
+        now = time.time()
+        with self._lock:
+            row = self._entries.get(design_id)
+            if not isinstance(row, dict):
+                row = {
+                    "design_id": design_id,
+                    "created_at": now,
+                    "updated_at": now,
+                    "last_session_key": session,
+                    "sources": [],
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "user_positive": 0,
+                    "user_negative": 0,
+                    "notes": [],
+                }
+                self._entries[design_id] = row
+            for k, v in obs.items():
+                row[k] = v
+            evidence = observation.get("evidence")
+            if isinstance(evidence, dict):
+                row["evidence"] = dict(evidence)
+            row["updated_at"] = now
+            row["last_session_key"] = session
+            src = str(source or "unknown").strip() or "unknown"
+            sources = row.get("sources")
+            if not isinstance(sources, list):
+                sources = []
+            if src not in sources:
+                sources.append(src)
+            row["sources"] = sources[-12:]
+            if success:
+                row["success_count"] = int(row.get("success_count", 0) or 0) + 1
+            else:
+                row["failure_count"] = int(row.get("failure_count", 0) or 0) + 1
+            if note:
+                notes = row.get("notes")
+                if not isinstance(notes, list):
+                    notes = []
+                notes.append(
+                    {
+                        "at": now,
+                        "source": src,
+                        "text": str(note)[:320],
+                    }
+                )
+                row["notes"] = notes[-16:]
+            row["event_score_raw"] = self._event_score_raw(row)
+            row["event_score"] = self._event_score_norm(row)
+            row["evidence_score"] = self._evidence_score(row)
+            row["balance_score"] = self._balance_score(row)
+            row["score"] = self._score(row)
+            self._save_locked()
+            return dict(row)
+
+    def rate(
+        self,
+        *,
+        design_id: str,
+        rating: str,
+        note: str = "",
+        source: str = "user_input",
+        session_key: str = "global",
+    ) -> Dict[str, Any]:
+        did = str(design_id or "").strip()
+        if not did:
+            raise RuntimeError("design_id_required")
+        r = str(rating or "").strip().lower()
+        if r not in {"positive", "negative"}:
+            raise RuntimeError("rating_invalid")
+        now = time.time()
+        with self._lock:
+            row = self._entries.get(did)
+            if not isinstance(row, dict):
+                raise RuntimeError("design_not_found")
+            if r == "positive":
+                row["user_positive"] = int(row.get("user_positive", 0) or 0) + 1
+            else:
+                row["user_negative"] = int(row.get("user_negative", 0) or 0) + 1
+            row["updated_at"] = now
+            row["last_session_key"] = str(session_key or "global").strip() or "global"
+            if note:
+                notes = row.get("notes")
+                if not isinstance(notes, list):
+                    notes = []
+                notes.append(
+                    {
+                        "at": now,
+                        "source": str(source or "user_input"),
+                        "text": str(note)[:320],
+                    }
+                )
+                row["notes"] = notes[-16:]
+            row["event_score_raw"] = self._event_score_raw(row)
+            row["event_score"] = self._event_score_norm(row)
+            row["evidence_score"] = self._evidence_score(row)
+            row["balance_score"] = self._balance_score(row)
+            row["score"] = self._score(row)
+            self._save_locked()
+            return dict(row)
+
+    def best(
+        self,
+        *,
+        session_key: str = "",
+        profile_id: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        session = str(session_key or "").strip()
+        pid = str(profile_id or "").strip()
+        with self._lock:
+            rows = list(self._entries.values())
+        if pid:
+            rows = [r for r in rows if str(r.get("profile_id", "")).strip() == pid]
+        if session:
+            scoped = [
+                r for r in rows if str(r.get("last_session_key", "")).strip() == session
+            ]
+            if scoped:
+                rows = scoped
+        if not rows:
+            return None
+        rows.sort(
+            key=lambda r: (
+                float(r.get("score", self._score(r)) or 0.0),
+                float(r.get("updated_at", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
+        top = dict(rows[0])
+        top["event_score_raw"] = float(
+            top.get("event_score_raw", self._event_score_raw(top)) or 0.0
+        )
+        top["event_score"] = float(
+            top.get("event_score", self._event_score_norm(top)) or 0.0
+        )
+        top["evidence_score"] = float(
+            top.get("evidence_score", self._evidence_score(top)) or 0.0
+        )
+        top["balance_score"] = float(
+            top.get("balance_score", self._balance_score(top)) or 0.0
+        )
+        top["score"] = float(top.get("score", self._score(top)) or 0.0)
+        return top
+
+    def list_recent(self, *, limit: int = 30) -> list[Dict[str, Any]]:
+        take = max(1, min(int(limit), self.max_entries))
+        with self._lock:
+            rows = sorted(
+                self._entries.values(),
+                key=lambda r: float(r.get("updated_at", 0.0) or 0.0),
+                reverse=True,
+            )[:take]
+        out: list[Dict[str, Any]] = []
+        for row in rows:
+            node = dict(row)
+            node["event_score_raw"] = float(
+                node.get("event_score_raw", self._event_score_raw(node)) or 0.0
+            )
+            node["event_score"] = float(
+                node.get("event_score", self._event_score_norm(node)) or 0.0
+            )
+            node["evidence_score"] = float(
+                node.get("evidence_score", self._evidence_score(node)) or 0.0
+            )
+            node["balance_score"] = float(
+                node.get("balance_score", self._balance_score(node)) or 0.0
+            )
+            node["score"] = float(node.get("score", self._score(node)) or 0.0)
+            out.append(node)
+        return out
 
 
 class HardwareContextStore:
@@ -3332,31 +4591,11 @@ def _agent_upload_from_body(
 
 
 def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
-    if not isinstance(raw, list):
-        return []
-    out: list[Dict[str, Any]] = []
-    for item in raw[:8]:
-        if not isinstance(item, dict):
-            continue
-        name = _safe_upload_filename(str(item.get("name", "")))
-        mime = str(item.get("mime", "")).strip() or "application/octet-stream"
-        kind = str(item.get("kind", "")).strip().lower() or _attachment_kind(mime, name)
-        path = str(item.get("path", "")).strip()
-        text_excerpt = str(item.get("text_excerpt", ""))[:16000]
-        size = int(item.get("size", 0) or 0)
-        if not name or (not path and not text_excerpt):
-            continue
-        out.append(
-            {
-                "name": name,
-                "mime": mime,
-                "kind": kind,
-                "path": path,
-                "size": size,
-                "text_excerpt": text_excerpt,
-            }
-        )
-    return out
+    return sanitize_agent_attachments(
+        raw=raw,
+        safe_upload_filename_fn=_safe_upload_filename,
+        attachment_kind_fn=_attachment_kind,
+    )
 
 
 class ConfigHistoryManager:
@@ -3607,10 +4846,12 @@ def _apply_assistant_plan(
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("apply_sketch_content_missing")
         path = sketch.get("path")
+        profile = sketch.get("profile")
         out = firmware.write_sketch_with_backup(
             content=content,
             path=str(path) if isinstance(path, str) and path.strip() else None,
             source="assistant",
+            profile=profile if isinstance(profile, dict) else None,
         )
         applied.append("sketch")
         artifacts["sketch_path"] = out.get("path")
@@ -3720,12 +4961,52 @@ class HostCaptureManager:
         self._finished_at: Optional[float] = None
         self._last_error: Optional[str] = None
         self._latest_run: Optional[str] = None
+        self._latest_summary: Optional[Dict[str, Any]] = None
         self._current_path: Optional[pathlib.Path] = None
         self._fh: Optional[Any] = None
+        # compat/nano capture path:
+        # Host-side trigger/diagnosis intentionally lives outside firmware control loops
+        # so higher-capability MCU telemetry paths can replace it additively later.
+        self._ring: collections.deque[Dict[str, Any]] = collections.deque(maxlen=280)
+        self._trigger_enabled = True
+        self._prebuffer_lines = 24
+        self._trigger_angle_deg = 8.0
+        self._trigger_out_frac = 0.90
+        self._trigger_runaway = 0.65
+        self._post_trigger_lines = 20
+        self._trigger_latched = False
+        self._capture_reason = "delay"
+        self._capture_stale_timeout_s = 2.5
+        self._capture_started_host_ts: Optional[float] = None
+        self._fault_count_start = 0
+        self._fault_count_end = 0
+        self._max_abs_ang = 0.0
+        self._max_abs_gyro = 0.0
+        self._max_abs_out = 0.0
+        self._max_runaway = 0.0
+        self._saturation_hits = 0
+        self._drift_bias_sum = 0.0
+        self._drift_bias_n = 0
+        self._fall_detected = False
+        self._runaway_detected = False
+        self._incoherent_event = False
+        self._fall_streak = 0
+        self._runaway_streak = 0
+        self._runaway_wpos_prev = 0.0
+        self._runaway_wpos_prev_sign = 0
+        self._operator_outcome = ""
+        self._operator_assisted = False
+        self._operator_notes = ""
+        self._run_intent = "unassisted_tuning"
+        self._changed_params: list[str] = []
 
     @staticmethod
     def _header() -> str:
-        return "host_ts,mode,estop,ang,raw,gyro,set,out,pid,mot,wspd,wpos,kp,ki,kd,kv,kx,encL,encR,volRaw"
+        return (
+            "host_ts,mode,estop,fault,fault_count,ang,raw,gyro,set,out,pid,mot,wspd,wpos,"
+            "wposRaw,wposRawU,wdelta,wdeltaTick,runaway,kp,ki,kd,kv,kx,encL,encR,volRaw,"
+            "outL,outR,engage_ramp,fault_ang,fault_out,fault_runaway,fault_wpos"
+        )
 
     def _close_file_unlocked(self) -> None:
         if self._fh is not None:
@@ -3743,6 +5024,7 @@ class HostCaptureManager:
         self._close_file_unlocked()
         if self._current_path is not None:
             self._latest_run = str(self._current_path)
+            self._write_summary_unlocked()
         self._current_path = None
 
     def status(self) -> Dict[str, Any]:
@@ -3756,10 +5038,400 @@ class HostCaptureManager:
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
                 "latest_run": self._latest_run,
+                "latest_summary": self._latest_summary,
                 "last_error": self._last_error,
+                "trigger_enabled": self._trigger_enabled,
+                "prebuffer_lines": self._prebuffer_lines,
+                "trigger_angle_deg": self._trigger_angle_deg,
+                "trigger_out_frac": self._trigger_out_frac,
+                "trigger_runaway": self._trigger_runaway,
+                "post_trigger_lines": self._post_trigger_lines,
+                "capture_stale_timeout_s": self._capture_stale_timeout_s,
+                "operator_outcome": self._operator_outcome,
+                "operator_assisted": self._operator_assisted,
+                "operator_notes": self._operator_notes,
+                "run_intent": self._run_intent,
+                "changed_params": list(self._changed_params),
             }
 
-    def arm(self, *, delay_ms: int, lines: int, freq_hz: float = 8.0) -> Dict[str, Any]:
+    @staticmethod
+    def _f(status: Dict[str, Any], key: str, default: float = 0.0) -> float:
+        try:
+            return float(status.get(key, default))
+        except Exception:
+            return float(default)
+
+    @staticmethod
+    def _i(status: Dict[str, Any], key: str, default: int = 0) -> int:
+        try:
+            return int(float(status.get(key, default)))
+        except Exception:
+            return int(default)
+
+    @classmethod
+    def _to_row(cls, status: Dict[str, Any], host_ts: float) -> Dict[str, Any]:
+        return {
+            "host_ts": host_ts,
+            "mode": str(status.get("mode", "")),
+            "estop": str(status.get("estop", "")),
+            "ang": cls._f(status, "ang"),
+            "raw": cls._f(status, "raw"),
+            "gyro": cls._f(status, "gyro"),
+            "set": cls._f(status, "set"),
+            "out": cls._f(status, "out"),
+            "pid": str(status.get("pid", "")),
+            "mot": cls._f(status, "mot"),
+            "wspd": cls._f(status, "wspd"),
+            "wpos": cls._f(status, "wpos"),
+            "wpos_raw": cls._f(status, "wposRaw", cls._f(status, "wpos_raw")),
+            "wpos_raw_u": cls._f(
+                status,
+                "wposRawU",
+                cls._f(
+                    status,
+                    "wpos_raw_u",
+                    cls._f(status, "wposRaw", cls._f(status, "wpos_raw")),
+                ),
+            ),
+            "wdelta": cls._f(status, "wdelta"),
+            "wdelta_tick": cls._f(
+                status,
+                "wdeltaTick",
+                cls._f(status, "wdelta_tick", cls._f(status, "wdelta")),
+            ),
+            "kp": cls._f(status, "kp"),
+            "ki": cls._f(status, "ki"),
+            "kd": cls._f(status, "kd"),
+            "kv": cls._f(status, "kv"),
+            "kx": cls._f(status, "kx"),
+            "encL": cls._i(status, "encL"),
+            "encR": cls._i(status, "encR"),
+            "volRaw": cls._f(status, "volRaw"),
+            "runaway": cls._f(status, "runaway"),
+            "out_l": cls._f(status, "outL", cls._f(status, "out_l")),
+            "out_r": cls._f(status, "outR", cls._f(status, "out_r")),
+            "engage_ramp": cls._f(status, "engage_ramp"),
+            "fault_ang": cls._f(status, "fault_ang"),
+            "fault_out": cls._f(status, "fault_out"),
+            "fault_runaway": cls._f(status, "fault_runaway"),
+            "fault_wpos": cls._f(status, "fault_wpos"),
+            "out_max": cls._f(status, "outMax", cls._f(status, "out_max", 0.0)),
+            "fault": cls._i(status, "fault"),
+            "fault_count": cls._i(status, "fault_count"),
+        }
+
+    @staticmethod
+    def _row_csv(row: Dict[str, Any]) -> str:
+        return ",".join(
+            [
+                f"{float(row.get('host_ts', 0.0)):.6f}",
+                str(row.get("mode", "")),
+                str(row.get("estop", "")),
+                str(row.get("fault", "")),
+                str(row.get("fault_count", "")),
+                str(row.get("ang", "")),
+                str(row.get("raw", "")),
+                str(row.get("gyro", "")),
+                str(row.get("set", "")),
+                str(row.get("out", "")),
+                str(row.get("pid", "")),
+                str(row.get("mot", "")),
+                str(row.get("wspd", "")),
+                str(row.get("wpos", "")),
+                str(row.get("wpos_raw", "")),
+                str(row.get("wpos_raw_u", "")),
+                str(row.get("wdelta", "")),
+                str(row.get("wdelta_tick", "")),
+                str(row.get("runaway", "")),
+                str(row.get("kp", "")),
+                str(row.get("ki", "")),
+                str(row.get("kd", "")),
+                str(row.get("kv", "")),
+                str(row.get("kx", "")),
+                str(row.get("encL", "")),
+                str(row.get("encR", "")),
+                str(row.get("volRaw", "")),
+                str(row.get("out_l", "")),
+                str(row.get("out_r", "")),
+                str(row.get("engage_ramp", "")),
+                str(row.get("fault_ang", "")),
+                str(row.get("fault_out", "")),
+                str(row.get("fault_runaway", "")),
+                str(row.get("fault_wpos", "")),
+            ]
+        )
+
+    @staticmethod
+    def _classify_summary(summary: Dict[str, Any]) -> str:
+        if bool(summary.get("invalid_window", False)):
+            return "invalid_window_low_signal"
+        if bool(summary.get("bad_data_incoherent_event", False)):
+            return "bad_data_incoherent_event"
+        if int(summary.get("fault_count_delta", 0)) > 0:
+            return "tip_event"
+        if bool(summary.get("runaway_detected", False)):
+            return "runaway_event"
+        sat = float(summary.get("output_saturation_pct", 0.0))
+        runaway = float(summary.get("max_runaway", 0.0))
+        drift = float(summary.get("drift_bias_mean", 0.0))
+        max_ang = float(summary.get("max_abs_ang_deg", 0.0))
+        if sat >= 45.0 and runaway >= 0.7:
+            return "saturation_runaway"
+        if max_ang >= 6.0 and abs(drift) >= 25.0:
+            return "drift_bias"
+        if sat >= 25.0:
+            return "underdamped"
+        return "stable_or_low_signal"
+
+    def _write_summary_unlocked(self) -> None:
+        if self._latest_run is None:
+            return
+        duration_s = 0.0
+        if self._capture_started_host_ts is not None and self._rows > 0:
+            duration_s = max(0.0, time.time() - self._capture_started_host_ts)
+        sat_pct = 0.0
+        if self._rows > 0:
+            sat_pct = max(
+                0.0,
+                min(100.0, 100.0 * float(self._saturation_hits) / float(self._rows)),
+            )
+        drift_bias = 0.0
+        if self._drift_bias_n > 0:
+            drift_bias = self._drift_bias_sum / float(self._drift_bias_n)
+        fault_delta = max(0, int(self._fault_count_end) - int(self._fault_count_start))
+        coherence_channels = 0
+        if fault_delta > 0:
+            coherence_channels += 1
+        if self._max_abs_ang >= 8.0:
+            coherence_channels += 1
+        if self._max_abs_gyro >= 20.0:
+            coherence_channels += 1
+        if self._max_abs_out >= 20.0:
+            coherence_channels += 1
+        if self._max_runaway >= 0.10:
+            coherence_channels += 1
+        if abs(drift_bias) >= 15.0:
+            coherence_channels += 1
+        data_coherence_ok = coherence_channels >= 2
+        event_detected = bool(self._fall_detected or self._runaway_detected)
+        invalid_window = (
+            not event_detected
+            and self._max_abs_ang < 5.0
+            and self._max_abs_out < 20.0
+            and self._max_runaway < 0.10
+        )
+        bad_data_incoherent_event = bool(event_detected and not data_coherence_ok)
+        operator_assisted = bool(self._operator_assisted)
+        run_invalid_reasons: list[str] = []
+        if bool(invalid_window):
+            run_invalid_reasons.append("invalid_window")
+        if bool(bad_data_incoherent_event):
+            run_invalid_reasons.append("bad_data_incoherent_event")
+        if str(self._run_intent or "unassisted_tuning") != "unassisted_tuning":
+            run_invalid_reasons.append("non_tuning_intent")
+        if operator_assisted:
+            run_invalid_reasons.append("operator_assisted")
+        if len(self._changed_params) > 1:
+            run_invalid_reasons.append("multi_parameter_change")
+        if int(self._rows) < 24:
+            run_invalid_reasons.append("too_few_rows")
+        run_valid_for_tuning = len(run_invalid_reasons) == 0
+        summary: Dict[str, Any] = {
+            "capture_reason": self._capture_reason,
+            "rows": int(self._rows),
+            "duration_s": round(duration_s, 3),
+            "max_abs_ang_deg": round(self._max_abs_ang, 3),
+            "max_abs_gyro_dps": round(self._max_abs_gyro, 3),
+            "max_abs_out": round(self._max_abs_out, 3),
+            "max_runaway": round(self._max_runaway, 3),
+            "output_saturation_pct": round(sat_pct, 3),
+            "drift_bias_mean": round(drift_bias, 3),
+            "fault_count_delta": fault_delta,
+            "fall_detected": bool(self._fall_detected or fault_delta > 0),
+            "runaway_detected": bool(self._runaway_detected),
+            "event_detected": bool(event_detected),
+            "data_coherence_ok": bool(data_coherence_ok),
+            "coherence_channels": int(coherence_channels),
+            "invalid_window": bool(invalid_window),
+            "bad_data_incoherent_event": bool(bad_data_incoherent_event),
+            "operator_outcome": str(self._operator_outcome or ""),
+            "operator_assisted": operator_assisted,
+            "operator_notes": str(self._operator_notes or ""),
+            "run_intent": str(self._run_intent or "unassisted_tuning"),
+            "changed_params": list(self._changed_params),
+            "run_valid_for_tuning": bool(run_valid_for_tuning),
+            "run_invalid_reasons": run_invalid_reasons,
+            "event_contract_version": "v1",
+            "diagnosis": "",
+        }
+        summary["diagnosis"] = self._classify_summary(summary)
+        self._latest_summary = summary
+        try:
+            p = pathlib.Path(self._latest_run)
+            meta_path = p.with_suffix(".summary.json")
+            meta_path.write_text(
+                json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _reset_metrics_unlocked(self) -> None:
+        self._capture_started_host_ts = None
+        self._fault_count_start = 0
+        self._fault_count_end = 0
+        self._max_abs_ang = 0.0
+        self._max_abs_gyro = 0.0
+        self._max_abs_out = 0.0
+        self._max_runaway = 0.0
+        self._saturation_hits = 0
+        self._drift_bias_sum = 0.0
+        self._drift_bias_n = 0
+        self._fall_detected = False
+        self._runaway_detected = False
+        self._incoherent_event = False
+        self._fall_streak = 0
+        self._runaway_streak = 0
+        self._runaway_wpos_prev = 0.0
+        self._runaway_wpos_prev_sign = 0
+        self._operator_outcome = ""
+        self._operator_assisted = False
+        self._operator_notes = ""
+        self._run_intent = "unassisted_tuning"
+        self._changed_params = []
+
+    def label_latest_run(
+        self,
+        *,
+        outcome: str = "",
+        assisted: bool = False,
+        notes: str = "",
+        run_intent: str = "",
+        changed_params: Optional[list[str]] = None,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            self._operator_outcome = str(outcome or "").strip()
+            self._operator_assisted = bool(assisted)
+            self._operator_notes = str(notes or "").strip()
+            if str(run_intent or "").strip():
+                self._run_intent = str(run_intent).strip()
+            if changed_params is not None:
+                self._changed_params = [
+                    str(x).strip() for x in list(changed_params) if str(x).strip()
+                ][:4]
+            if self._latest_run:
+                self._write_summary_unlocked()
+            return {
+                "state": self._state,
+                "delay_ms": self._delay_ms,
+                "freq_hz": self._freq_hz,
+                "target_lines": self._target_lines,
+                "rows": self._rows,
+                "started_at": self._started_at,
+                "finished_at": self._finished_at,
+                "latest_run": self._latest_run,
+                "latest_summary": self._latest_summary,
+                "last_error": self._last_error,
+                "trigger_enabled": self._trigger_enabled,
+                "prebuffer_lines": self._prebuffer_lines,
+                "trigger_angle_deg": self._trigger_angle_deg,
+                "trigger_out_frac": self._trigger_out_frac,
+                "trigger_runaway": self._trigger_runaway,
+                "post_trigger_lines": self._post_trigger_lines,
+                "capture_stale_timeout_s": self._capture_stale_timeout_s,
+                "operator_outcome": self._operator_outcome,
+                "operator_assisted": self._operator_assisted,
+                "operator_notes": self._operator_notes,
+                "run_intent": self._run_intent,
+                "changed_params": list(self._changed_params),
+            }
+
+    def _ingest_metrics_unlocked(self, row: Dict[str, Any]) -> None:
+        ang = abs(float(row.get("ang", 0.0)))
+        gyro = abs(float(row.get("gyro", 0.0)))
+        out = abs(float(row.get("out", 0.0)))
+        runaway = max(0.0, float(row.get("runaway", 0.0)))
+        self._max_abs_ang = max(self._max_abs_ang, ang)
+        self._max_abs_gyro = max(self._max_abs_gyro, gyro)
+        self._max_abs_out = max(self._max_abs_out, out)
+        self._max_runaway = max(self._max_runaway, runaway)
+        out_max = abs(float(row.get("out_max", 0.0)))
+        if out_max > 1e-3 and out >= (out_max * self._trigger_out_frac):
+            self._saturation_hits += 1
+        self._drift_bias_sum += float(
+            row.get("wpos_raw_u", row.get("wpos_raw", row.get("wpos", 0.0)))
+        )
+        self._drift_bias_n += 1
+        fault = int(row.get("fault", 0))
+        self._fault_count_end = int(row.get("fault_count", self._fault_count_end))
+
+        # Event contract v1:
+        # - fall: fault latched OR sustained high angle
+        # - runaway: sustained high output + monotonic wheel-position growth
+        sample_s = 1.0 / max(1.0, float(self._freq_hz))
+        fall_need = max(2, int(math.ceil(0.10 / sample_s)))
+        runaway_need = max(3, int(math.ceil(0.25 / sample_s)))
+        fall_angle_deg = 25.0
+
+        if fault > 0 or ang >= fall_angle_deg:
+            self._fall_streak += 1
+        else:
+            self._fall_streak = 0
+        if self._fall_streak >= fall_need:
+            self._fall_detected = True
+
+        wpos = float(row.get("wpos_raw_u", row.get("wpos_raw", row.get("wpos", 0.0))))
+        wsign = 1 if wpos > 0.0 else (-1 if wpos < 0.0 else 0)
+        prev_abs = abs(self._runaway_wpos_prev)
+        curr_abs = abs(wpos)
+        monotonic = (
+            self._runaway_wpos_prev_sign != 0
+            and wsign == self._runaway_wpos_prev_sign
+            and curr_abs >= (prev_abs + 0.2)
+        )
+        out_ref = out_max if out_max > 1.0 else 120.0
+        out_hi = out >= (0.50 * out_ref)
+        runaway_step = out_hi and monotonic and curr_abs >= 4.0
+        if runaway_step:
+            self._runaway_streak += 1
+        else:
+            self._runaway_streak = 0
+        if self._runaway_streak >= runaway_need:
+            self._runaway_detected = True
+        self._runaway_wpos_prev = wpos
+        self._runaway_wpos_prev_sign = wsign
+
+    def _trigger_hit_unlocked(self, row: Dict[str, Any]) -> bool:
+        if not self._trigger_enabled:
+            return False
+        ang = abs(float(row.get("ang", 0.0)))
+        out = abs(float(row.get("out", 0.0)))
+        out_max = abs(float(row.get("out_max", 0.0)))
+        runaway = max(0.0, float(row.get("runaway", 0.0)))
+        fault = int(row.get("fault", 0))
+        by_ang = ang >= self._trigger_angle_deg
+        by_out = out_max > 1e-3 and out >= (out_max * self._trigger_out_frac)
+        by_runaway = runaway >= self._trigger_runaway
+        by_fault = fault > 0
+        return bool(by_ang or by_out or by_runaway or by_fault)
+
+    def arm(
+        self,
+        *,
+        delay_ms: int,
+        lines: int,
+        freq_hz: float = 8.0,
+        trigger_enabled: bool = True,
+        prebuffer_lines: int = 24,
+        trigger_angle_deg: float = 8.0,
+        trigger_out_frac: float = 0.90,
+        trigger_runaway: float = 0.65,
+        post_trigger_lines: int = 20,
+        operator_outcome: str = "",
+        operator_assisted: bool = False,
+        operator_notes: str = "",
+        run_intent: str = "unassisted_tuning",
+        changed_params: Optional[list[str]] = None,
+    ) -> Dict[str, Any]:
         d = max(0, min(int(delay_ms), 60_000))
         n = max(1, min(int(lines), 3_000))
         hz = max(1.0, min(float(freq_hz), 100.0))
@@ -3777,6 +5449,25 @@ class HostCaptureManager:
             self._finished_at = None
             self._last_error = None
             self._current_path = None
+            self._trigger_enabled = bool(trigger_enabled)
+            self._prebuffer_lines = max(6, min(int(prebuffer_lines), 120))
+            self._trigger_angle_deg = max(2.0, min(float(trigger_angle_deg), 25.0))
+            self._trigger_out_frac = max(0.25, min(float(trigger_out_frac), 1.0))
+            self._trigger_runaway = max(0.03, min(float(trigger_runaway), 2.0))
+            self._post_trigger_lines = max(5, min(int(post_trigger_lines), 250))
+            self._trigger_latched = False
+            self._capture_reason = "delay"
+            self._latest_summary = None
+            self._reset_metrics_unlocked()
+            self._operator_outcome = str(operator_outcome or "").strip()
+            self._operator_assisted = bool(operator_assisted)
+            self._operator_notes = str(operator_notes or "").strip()
+            self._run_intent = (
+                str(run_intent or "unassisted_tuning").strip() or "unassisted_tuning"
+            )
+            self._changed_params = [
+                str(x).strip() for x in list(changed_params or []) if str(x).strip()
+            ][:4]
             return {
                 "state": self._state,
                 "delay_ms": self._delay_ms,
@@ -3786,30 +5477,68 @@ class HostCaptureManager:
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
                 "latest_run": self._latest_run,
+                "latest_summary": self._latest_summary,
                 "last_error": self._last_error,
+                "trigger_enabled": self._trigger_enabled,
+                "prebuffer_lines": self._prebuffer_lines,
+                "trigger_angle_deg": self._trigger_angle_deg,
+                "trigger_out_frac": self._trigger_out_frac,
+                "trigger_runaway": self._trigger_runaway,
+                "post_trigger_lines": self._post_trigger_lines,
+                "capture_stale_timeout_s": self._capture_stale_timeout_s,
+                "operator_outcome": self._operator_outcome,
+                "operator_assisted": self._operator_assisted,
+                "operator_notes": self._operator_notes,
+                "run_intent": self._run_intent,
+                "changed_params": list(self._changed_params),
             }
 
-    def _start_capture_unlocked(self) -> None:
+    def _start_capture_unlocked(self, reason: str = "delay") -> None:
         ts = int(time.time())
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / f"host_run_{ts}.csv"
         self._fh = path.open("w", encoding="utf-8")
         self._fh.write(self._header() + "\n")
+        pre_rows = list(self._ring)[-self._prebuffer_lines :]
+        for row in pre_rows:
+            self._fh.write(self._row_csv(row) + "\n")
+        self._rows = len(pre_rows)
         self._fh.flush()
         self._current_path = path
         self._started_at = time.time()
         self._last_row_mono = None
+        self._capture_reason = reason
+        self._capture_started_host_ts = time.time()
+        self._fault_count_start = (
+            int(pre_rows[-1].get("fault_count", 0)) if pre_rows else 0
+        )
+        self._fault_count_end = self._fault_count_start
+        self._max_abs_ang = 0.0
+        self._max_abs_gyro = 0.0
+        self._max_abs_out = 0.0
+        self._max_runaway = 0.0
+        self._saturation_hits = 0
+        self._drift_bias_sum = 0.0
+        self._drift_bias_n = 0
+        for row in pre_rows:
+            self._ingest_metrics_unlocked(row)
         self._state = "capturing"
 
     def ingest(self, status: Dict[str, Any]) -> None:
         if not status:
             return
+        row = self._to_row(status, host_ts=time.time())
         with self._lock:
+            self._ring.append(row)
             if self._state not in {"armed", "capturing"}:
                 return
             mode = str(status.get("mode", ""))
             estop = str(status.get("estop", "1"))
             if mode != "BALANCING" or estop == "1":
+                if self._state == "capturing" and self._last_row_mono is not None:
+                    timeout_s = max(0.6, float(self._capture_stale_timeout_s))
+                    if (time.monotonic() - self._last_row_mono) >= timeout_s:
+                        self._finish_unlocked("done")
                 # Require continuous BALANCING window for queued-delay logic.
                 if self._state == "armed":
                     self._armed_mono = None
@@ -3818,10 +5547,20 @@ class HostCaptureManager:
                 if self._armed_mono is None:
                     self._armed_mono = time.monotonic()
                 elapsed_ms = (time.monotonic() - self._armed_mono) * 1000.0
-                if elapsed_ms < float(self._delay_ms):
+                if self._trigger_hit_unlocked(row):
+                    self._trigger_latched = True
+                    self._capture_reason = "event_trigger"
+                    self._target_lines = min(
+                        3000,
+                        max(
+                            self._target_lines,
+                            self._prebuffer_lines + self._post_trigger_lines,
+                        ),
+                    )
+                if elapsed_ms < float(self._delay_ms) and not self._trigger_latched:
                     return
                 try:
-                    self._start_capture_unlocked()
+                    self._start_capture_unlocked(reason=self._capture_reason)
                 except Exception as exc:
                     self._last_error = str(exc)
                     self._finish_unlocked("failed")
@@ -3835,38 +5574,10 @@ class HostCaptureManager:
                 and (now_mono - self._last_row_mono) < period_s
             ):
                 return
-
-            def g(key: str) -> str:
-                v = status.get(key)
-                return "" if v is None else str(v)
-
-            row = ",".join(
-                [
-                    f"{time.time():.6f}",
-                    g("mode"),
-                    g("estop"),
-                    g("ang"),
-                    g("raw"),
-                    g("gyro"),
-                    g("set"),
-                    g("out"),
-                    g("pid"),
-                    g("mot"),
-                    g("wspd"),
-                    g("wpos"),
-                    g("kp"),
-                    g("ki"),
-                    g("kd"),
-                    g("kv"),
-                    g("kx"),
-                    g("encL"),
-                    g("encR"),
-                    g("volRaw"),
-                ]
-            )
-            self._fh.write(row + "\n")
+            self._fh.write(self._row_csv(row) + "\n")
             self._rows += 1
             self._last_row_mono = now_mono
+            self._ingest_metrics_unlocked(row)
             if self._rows >= self._target_lines:
                 self._finish_unlocked("done")
 
@@ -4487,86 +6198,14 @@ def _install_runtime_diagnostics() -> None:
         pass
 
 
-_codex_login_cache_lock = threading.Lock()
-_codex_login_cache: Dict[str, Any] = {
-    "checked_at_monotonic": 0.0,
-    "status": {"available": False, "logged_in": False, "detail": "not_checked"},
-    "last_good_at_monotonic": 0.0,
-}
-
-
 def _codex_cli_login_status() -> Dict[str, Any]:
-    now = time.monotonic()
-    with _codex_login_cache_lock:
-        checked_at = float(_codex_login_cache.get("checked_at_monotonic", 0.0) or 0.0)
-        cached = _codex_login_cache.get("status")
-        if isinstance(cached, dict) and (now - checked_at) < 20.0:
-            return dict(cached)
+    return codex_cli_login_status()
 
-    prior_status: Dict[str, Any] = {}
-    prior_good_at = 0.0
-    with _codex_login_cache_lock:
-        if isinstance(_codex_login_cache.get("status"), dict):
-            prior_status = dict(_codex_login_cache["status"])
-        prior_good_at = float(
-            _codex_login_cache.get("last_good_at_monotonic", 0.0) or 0.0
-        )
 
-    status: Dict[str, Any]
-    try:
-        proc = subprocess.run(
-            ["codex", "login", "status"],
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-    except FileNotFoundError:
-        status = {
-            "available": False,
-            "logged_in": False,
-            "detail": "codex_not_installed",
-        }
-    except Exception as exc:
-        status = {
-            "available": True,
-            "logged_in": False,
-            "detail": f"codex_status_error:{exc}",
-        }
-    else:
-        txt = f"{proc.stdout}\n{proc.stderr}".strip()
-        logged_in = proc.returncode == 0 and "logged in" in txt.lower()
-        status = {
-            "available": True,
-            "logged_in": bool(logged_in),
-            "detail": txt[:240],
-        }
-
-    detail_norm = str(status.get("detail", "")).strip().lower()
-    explicitly_logged_out = ("not logged in" in detail_norm) or (
-        "login required" in detail_norm
-    )
-    transient_probe_failure = detail_norm.startswith("codex_status_error:")
-    if (
-        not bool(status.get("logged_in"))
-        and not explicitly_logged_out
-        and transient_probe_failure
-        and bool(prior_status.get("logged_in"))
-        and (prior_good_at > 0.0)
-    ):
-        status = {
-            "available": True,
-            "logged_in": True,
-            "detail": f"stale_login_cache:{str(status.get('detail', 'status_probe_failed'))[:180]}",
-            "stale": True,
-        }
-
-    with _codex_login_cache_lock:
-        _codex_login_cache["checked_at_monotonic"] = now
-        _codex_login_cache["status"] = dict(status)
-        if bool(status.get("logged_in")):
-            _codex_login_cache["last_good_at_monotonic"] = now
-
-    return dict(status)
+def _legacy_execution_guard(path: str) -> Optional[Dict[str, Any]]:
+    if legacy_execution_enabled():
+        return None
+    return legacy_execution_block_payload(path)
 
 
 def _extract_mission_facts(history: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -5209,6 +6848,8 @@ def _family_capabilities() -> Dict[str, Dict[str, Any]]:
     return {
         "arduino_avr": {
             "default_telemetry_hz": 200,
+            "default_telemetry_mode": "ascii_lowrate",
+            "telemetry_modes": ["ascii_lowrate"],
             "imu_protocols": ["i2c"],
             "encoder_protocols": ["quadrature", "hall"],
             "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm"],
@@ -5216,6 +6857,8 @@ def _family_capabilities() -> Dict[str, Dict[str, Any]]:
         },
         "esp32": {
             "default_telemetry_hz": 250,
+            "default_telemetry_mode": "binary_highrate",
+            "telemetry_modes": ["ascii_lowrate", "binary_highrate"],
             "imu_protocols": ["i2c", "spi"],
             "encoder_protocols": ["quadrature", "hall", "spi"],
             "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm", "can"],
@@ -5227,6 +6870,8 @@ def _family_capabilities() -> Dict[str, Dict[str, Any]]:
         },
         "rp2040": {
             "default_telemetry_hz": 250,
+            "default_telemetry_mode": "binary_highrate",
+            "telemetry_modes": ["ascii_lowrate", "binary_highrate"],
             "imu_protocols": ["i2c", "spi"],
             "encoder_protocols": ["quadrature", "hall", "spi"],
             "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm"],
@@ -5234,6 +6879,8 @@ def _family_capabilities() -> Dict[str, Dict[str, Any]]:
         },
         "teensy": {
             "default_telemetry_hz": 400,
+            "default_telemetry_mode": "binary_highrate",
+            "telemetry_modes": ["ascii_lowrate", "binary_highrate"],
             "imu_protocols": ["i2c", "spi", "uart"],
             "encoder_protocols": ["quadrature", "hall", "spi"],
             "actuator_protocols": ["gpio_pwm", "gpio_dir_pwm", "can"],
@@ -5361,6 +7008,10 @@ def _validate_runtime_manifest_v1(
     if mcu_topology is not None and not isinstance(mcu_topology, dict):
         errors.append("mcu_topology_invalid")
         mcu_topology = {}
+    telemetry = manifest.get("telemetry")
+    if telemetry is not None and not isinstance(telemetry, dict):
+        errors.append("telemetry.invalid")
+        telemetry = {}
 
     board_id = str(board.get("id", "")).strip()
     board_family = str(board.get("family", "")).strip()
@@ -5400,6 +7051,23 @@ def _validate_runtime_manifest_v1(
         str((target_board or {}).get("family", "")).strip() or board_family,
         {},
     )
+    telemetry_mode = ""
+    if isinstance(telemetry, dict):
+        telemetry_mode = str(telemetry.get("mode", "")).strip().lower()
+    if telemetry_mode:
+        if telemetry_mode not in {"ascii_lowrate", "binary_highrate"}:
+            errors.append(f"telemetry.mode_invalid:{telemetry_mode}")
+        allowed_modes = set(
+            str(x).strip().lower()
+            for x in list(family_caps.get("telemetry_modes") or [])
+            if str(x).strip()
+        )
+        if allowed_modes and telemetry_mode not in allowed_modes:
+            errors.append(
+                f"telemetry.mode_not_supported_for_family:{board_family}:{telemetry_mode}"
+            )
+    else:
+        warnings.append("telemetry.mode_missing:assume_ascii_lowrate")
 
     required_cmds = {"GET", "ARM", "DISARM", "PID", "SETPOINT"}
     cmd_set = {str(c).strip().upper() for c in commands if str(c).strip()}
@@ -5713,6 +7381,49 @@ def _runtime_manifest_profile_compatibility(
         ),
     }
 
+    telemetry_node = (
+        manifest.get("telemetry") if isinstance(manifest.get("telemetry"), dict) else {}
+    )
+    manifest_telemetry_mode = str(telemetry_node.get("mode", "")).strip().lower()
+    profile_firmware = (
+        active_profile.get("firmware")
+        if isinstance(active_profile.get("firmware"), dict)
+        else {}
+    )
+    profile_telemetry_mode = (
+        str(
+            profile_firmware.get("telemetry_mode")
+            or profile_probe.get("telemetry_mode")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+    expected_family = profile_family or manifest_family or "arduino_avr"
+    family_caps = _family_capabilities().get(expected_family, {})
+    expected_mode = (
+        profile_telemetry_mode
+        or str(family_caps.get("default_telemetry_mode", "ascii_lowrate"))
+        .strip()
+        .lower()
+    )
+    if (
+        manifest_telemetry_mode
+        and expected_mode
+        and manifest_telemetry_mode != expected_mode
+    ):
+        errors.append(
+            "telemetry_mode_mismatch:"
+            + f"profile={expected_mode},manifest={manifest_telemetry_mode}"
+        )
+    if not manifest_telemetry_mode:
+        warnings.append("telemetry_mode_missing")
+    checks["telemetry_mode"] = {
+        "profile": expected_mode,
+        "manifest": manifest_telemetry_mode,
+        "ok": not any(str(e).startswith("telemetry_mode_mismatch:") for e in errors),
+    }
+
     profile_commands = [
         str(x).strip().upper()
         for x in list(profile_probe.get("commands") or [])
@@ -5940,6 +7651,12 @@ def _build_hardware_registry(targets: Dict[str, Any]) -> Dict[str, Any]:
                 "bootloaders": list(row.get("bootloaders") or []),
                 "capabilities": {
                     "default_telemetry_hz": int(caps.get("default_telemetry_hz", 200)),
+                    "default_telemetry_mode": str(
+                        caps.get("default_telemetry_mode", "ascii_lowrate")
+                    ),
+                    "telemetry_modes": list(
+                        caps.get("telemetry_modes") or ["ascii_lowrate"]
+                    ),
                     "imu_protocols": list(caps.get("imu_protocols") or []),
                     "encoder_protocols": list(caps.get("encoder_protocols") or []),
                     "actuator_protocols": list(caps.get("actuator_protocols") or []),
@@ -6029,7 +7746,7 @@ def _build_hardware_registry(targets: Dict[str, Any]) -> Dict[str, Any]:
             "required_pinmap_fields": ["imu_bus", "motor", "encoders"],
             "required_runtime_commands": ["GET", "ARM", "DISARM", "PID", "SETPOINT"],
             "required_runtime_telemetry": list(telemetry_core_fields),
-            "optional_profile_fields": ["mcu_topology"],
+            "optional_profile_fields": ["mcu_topology", "firmware.telemetry_mode"],
             "mcu_topology_schema": {
                 "required_when_present": ["control_mcu"],
                 "control_mcu_required_fields": ["id"],
@@ -6053,6 +7770,8 @@ def _build_hardware_registry(targets: Dict[str, Any]) -> Dict[str, Any]:
                 "board_family": "teensy",
                 "sensor_ids": ["imu_bno085", "enc_spi_abs"],
                 "actuator_ids": ["bldc_foc"],
+                "reference_firmware_template": "app/bridge/firmware_templates/teensy41_reference_v1/teensy41_reference_v1.ino",
+                "reference_runtime_manifest": "app/bridge/firmware_templates/teensy41_reference_v1/runtime_manifest_v1.json",
             },
             {
                 "id": "esp32_balancer_v1",
@@ -6347,6 +8066,7 @@ class TelemetryHub:
         self.enabled = websockets is not None
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._last_refresh_mono = 0.0
 
     def start(self) -> None:
         if not self.enabled:
@@ -6375,13 +8095,39 @@ class TelemetryHub:
             while not self._stop_evt.is_set():
                 cached_status: Dict[str, Any] = {}
                 queue_depth = 0
+                last_status_age_ms: Optional[float] = None
                 try:
                     h = self.gateway.health()
                     cached_status = dict(h.get("last_status", {}))
                     queue_depth = int(h.get("queue_depth", 0) or 0)
+                    age_val = h.get("last_status_age_ms")
+                    if isinstance(age_val, (int, float)):
+                        last_status_age_ms = float(age_val)
                 except Exception:
                     cached_status = {}
                     queue_depth = 0
+                    last_status_age_ms = None
+
+                # Keep host-capture diagnostics fed with fresh status during tuning runs.
+                # If cached status is stale while capture is active/armed, request one GET refresh
+                # at a bounded cadence to avoid monopolizing the serial worker.
+                try:
+                    cap_state = str(self.host_capture.status().get("state", ""))
+                    now_mono = time.monotonic()
+                    needs_refresh = cap_state in {"armed", "capturing"} and (
+                        last_status_age_ms is None or last_status_age_ms > 450.0
+                    )
+                    if needs_refresh and (now_mono - self._last_refresh_mono) >= 0.35:
+                        try:
+                            self.gateway.command("GET", timeout=0.35)
+                            self._last_refresh_mono = now_mono
+                            h2 = self.gateway.health()
+                            cached_status = dict(h2.get("last_status", cached_status))
+                            queue_depth = int(h2.get("queue_depth", queue_depth) or 0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 payload = {
                     "ts": time.time(),
                     "status": cached_status,
@@ -6804,6 +8550,52 @@ def _blocked_while_latched(cmd: str) -> bool:
     return not c.startswith(safe_prefixes)
 
 
+def _classify_imu_command_result(
+    res: Dict[str, Any], *, cmd_name: str
+) -> Dict[str, Any]:
+    lines = list(res.get("lines", [])) if isinstance(res, dict) else []
+    matched = str(res.get("matched", "")) if isinstance(res, dict) else ""
+    candidates: list[str] = []
+    if matched:
+        candidates.append(matched)
+    candidates.extend(reversed(lines))
+    imu_line = ""
+    for ln in candidates:
+        txt = str(ln or "").strip()
+        if "IMU" in txt.upper():
+            imu_line = txt
+            break
+    if not imu_line:
+        return {
+            "ok": False,
+            "error": f"imu_{cmd_name.lower()}_no_response",
+            "detail": "",
+        }
+
+    up = imu_line.upper()
+    if up.startswith("OK IMU_"):
+        return {"ok": True, "error": "", "detail": imu_line}
+    if "ERR UNKNOWN" in up and "IMU" in up:
+        return {
+            "ok": False,
+            "error": "imu_command_unsupported:flash_runtime_with_imu_calibration_support",
+            "detail": imu_line,
+        }
+    if "EEPROM_UNAVAILABLE" in up:
+        return {
+            "ok": False,
+            "error": "imu_eeprom_unavailable",
+            "detail": imu_line,
+        }
+    if "IMU_NOT_READY" in up:
+        return {"ok": False, "error": "imu_not_ready", "detail": imu_line}
+    return {
+        "ok": False,
+        "error": f"imu_{cmd_name.lower()}_failed",
+        "detail": imu_line,
+    }
+
+
 TUNING_BAL_BOUNDS = {
     "kp": 1.0,
     "ki": 0.05,
@@ -7103,6 +8895,150 @@ def _validate_tuning_recommendation_contract(rec: Dict[str, Any]) -> list[str]:
     if rec.get("readiness") not in {"good", "watch", "risky"}:
         errs.append("readiness_invalid")
     return errs
+
+
+def _evaluate_tuning_recommendation_quality(
+    *,
+    recommendation: Dict[str, Any],
+    telemetry: Dict[str, Any],
+    trace_paths: list[pathlib.Path],
+    replay_reports: list[Dict[str, Any]],
+    surrogate_report: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    telemetry_map = telemetry if isinstance(telemetry, dict) else {}
+    rec_map = recommendation if isinstance(recommendation, dict) else {}
+    replay_rows = replay_reports if isinstance(replay_reports, list) else []
+    trace_rows = trace_paths if isinstance(trace_paths, list) else []
+    surrogate_map = surrogate_report if isinstance(surrogate_report, dict) else {}
+
+    dims: Dict[str, Dict[str, Any]] = {
+        "completeness": {"ok": True, "reasons": []},
+        "confidence": {"ok": True, "reasons": []},
+        "actionability": {"ok": True, "reasons": []},
+    }
+
+    def add_reason(dim: str, reason: str) -> None:
+        node = dims.get(dim)
+        if not isinstance(node, dict):
+            return
+        bucket = node.get("reasons")
+        if not isinstance(bucket, list):
+            bucket = []
+            node["reasons"] = bucket
+        if reason not in bucket:
+            bucket.append(reason)
+        node["ok"] = False
+
+    # Completeness: require core telemetry keys and at least one replay trace.
+    required_telemetry = [
+        "angle_variance",
+        "output_saturation_pct",
+        "oscillation_detected",
+        "oscillation_freq_hz",
+    ]
+    missing_telemetry = [k for k in required_telemetry if k not in telemetry_map]
+    if missing_telemetry:
+        add_reason(
+            "completeness",
+            "telemetry_fields_missing:" + ",".join(missing_telemetry[:8]),
+        )
+    if not trace_rows:
+        add_reason("completeness", "evidence_missing_trace_paths")
+
+    # Confidence: ensure recommendation score and evidence quality are sufficient.
+    try:
+        rec_score = int(rec_map.get("score_pct", 0))
+    except Exception:
+        rec_score = 0
+    if rec_score < 60:
+        add_reason("confidence", "recommendation_score_low")
+
+    replay_fail_count = sum(
+        1
+        for rep in replay_rows
+        if not bool(
+            ((rep.get("result") or {}) if isinstance(rep, dict) else {}).get(
+                "pass", False
+            )
+        )
+    )
+    if replay_fail_count > 0:
+        add_reason("confidence", f"replay_failures:{replay_fail_count}")
+
+    if surrogate_map:
+        if bool(surrogate_map.get("ok", False)):
+            sim = (
+                surrogate_map.get("simulation")
+                if isinstance(surrogate_map.get("simulation"), dict)
+                else {}
+            )
+            sim_metrics = (
+                sim.get("metrics") if isinstance(sim.get("metrics"), dict) else {}
+            )
+            if bool(sim_metrics.get("faceplant", False)):
+                add_reason("confidence", "surrogate_faceplant_risk")
+            model = (
+                surrogate_map.get("model")
+                if isinstance(surrogate_map.get("model"), dict)
+                else {}
+            )
+            try:
+                model_conf = float(model.get("confidence", 0.0) or 0.0)
+            except Exception:
+                model_conf = 0.0
+            if model_conf < 0.35:
+                add_reason("confidence", "surrogate_confidence_low")
+        else:
+            if trace_rows:
+                add_reason("confidence", "surrogate_unavailable")
+
+    # Actionability: recommendation and procedure should be directly executable.
+    rec_items = rec_map.get("recommendations")
+    if not isinstance(rec_items, list) or not rec_items:
+        add_reason("actionability", "recommendations_missing")
+    else:
+        actionable_count = 0
+        for row in rec_items:
+            if not isinstance(row, dict):
+                continue
+            action = str(row.get("action", "")).strip()
+            rationale = str(row.get("rationale", "")).strip()
+            if action and rationale:
+                actionable_count += 1
+        if actionable_count == 0:
+            add_reason("actionability", "recommendations_not_actionable")
+
+    procedure = rec_map.get("procedure")
+    if not isinstance(procedure, list) or len(procedure) < 3:
+        add_reason("actionability", "procedure_incomplete")
+
+    variables = rec_map.get("variables_available")
+    if not isinstance(variables, dict) or not variables:
+        add_reason("actionability", "variables_available_missing")
+
+    reasons: list[str] = []
+    for dim in ("completeness", "confidence", "actionability"):
+        node = dims.get(dim) or {}
+        for reason in list(node.get("reasons") or []):
+            s = str(reason).strip()
+            if s and s not in reasons:
+                reasons.append(s)
+
+    gate_ok = len(reasons) == 0
+    return {
+        "gate_ok": gate_ok,
+        "reasons": reasons,
+        "dimensions": dims,
+        "evidence": {
+            "trace_count": len(trace_rows),
+            "replay_count": len(replay_rows),
+            "replay_fail_count": replay_fail_count,
+            "surrogate_ok": bool(surrogate_map.get("ok", False))
+            if surrogate_map
+            else False,
+            "recommendation_score_pct": rec_score,
+        },
+    }
 
 
 def _build_tuning_apply_signature(family: str, target: Dict[str, Any]) -> str:
@@ -7597,6 +9533,10 @@ def _default_compat_policy() -> Dict[str, Any]:
                     "LOGCSV",
                     "BURSTCSV",
                     "CSVHDR",
+                    "IMU CAL",
+                    "IMU LOAD",
+                    "IMU SAVE",
+                    "IMU INFO",
                 ],
                 "warn_only_missing_commands": ["MOTION"],
             },
@@ -7623,6 +9563,10 @@ def _default_compat_policy() -> Dict[str, Any]:
                     "CSVHDR",
                     "LOADCFG",
                     "DEFAULTCFG",
+                    "IMU CAL",
+                    "IMU LOAD",
+                    "IMU SAVE",
+                    "IMU INFO",
                 ],
                 "warn_only_missing_commands": ["MOTION"],
             },
@@ -7649,6 +9593,10 @@ def _default_compat_policy() -> Dict[str, Any]:
                     "CSVHDR",
                     "CC",
                     "TF",
+                    "IMU CAL",
+                    "IMU LOAD",
+                    "IMU SAVE",
+                    "IMU INFO",
                 ],
                 "warn_only_missing_commands": [],
             },
@@ -8108,31 +10056,27 @@ def run_connect_probe(gateway: NanoSerialGateway) -> Dict[str, Any]:
     report["v2_present_fields"] = v2_readiness["v2_present_fields"]
     report["readiness_checks"] = v2_readiness["readiness_checks"]
 
-    # Recommended next action for v2 readiness
+    # Recommended next action for Phase 2 readiness.
+    phase2_recommended_action: Optional[str] = None
     if not v2_readiness["phase1_ready"]:
-        report["v2_recommended_action"] = (
-            "Run Calibration Phase 1 (core sensor zero + baseline checks) before arming."
-        )
+        phase2_recommended_action = "Run Calibration Phase 1 (core sensor zero + baseline checks) before arming."
     elif not v2_readiness["v2_ready"]:
         missing = v2_readiness["v2_missing_fields"]
         if "gyro_bias" in missing:
-            report["v2_recommended_action"] = (
-                "Run Calibration Phase 2 to establish gyro bias and advanced anti-drift telemetry."
-            )
+            phase2_recommended_action = "Run Calibration Phase 2 to establish gyro bias and advanced anti-drift telemetry."
         elif "vel_meas" in missing:
-            report["v2_recommended_action"] = (
+            phase2_recommended_action = (
                 "Complete Calibration Phase 2: enable velocity feedback telemetry."
             )
         elif "outer_loop_enabled" in missing:
-            report["v2_recommended_action"] = (
-                "Complete Calibration Phase 2: enable outer velocity loop for anti-drift."
-            )
+            phase2_recommended_action = "Complete Calibration Phase 2: enable outer velocity loop for anti-drift."
         else:
-            report["v2_recommended_action"] = (
+            phase2_recommended_action = (
                 "Complete Calibration Phase 2 for advanced anti-drift capabilities."
             )
-    else:
-        report["v2_recommended_action"] = None
+    report["phase2_recommended_action"] = phase2_recommended_action
+    # Backward-compatible alias retained for migration window.
+    report["v2_recommended_action"] = phase2_recommended_action
 
     return report
 
@@ -8650,6 +10594,7 @@ def build_handler(
     setup_attempt_history = setup_attempt_history_store or SetupAttemptHistoryStore(
         repo_root
     )
+    design_memory = DesignMemoryStore(repo_root)
     prearm_safety = prearm_safety_gate or PreArmSafetyGate(required=True)
     tuning_preflight = TuningPreflightStore(ttl_s=900.0, max_entries=256)
     probe_cache_lock = threading.Lock()
@@ -8692,6 +10637,210 @@ def build_handler(
         except Exception:
             return ""
         return hashlib.sha256(raw).hexdigest()[:16]
+
+    def _current_runtime_identity() -> Dict[str, str]:
+        st = dict(gateway.health().get("last_status", {}))
+        return {
+            "runtime_version": str(
+                st.get("runtime", st.get("runtime_version", "")) or ""
+            ).strip(),
+            "tune_version": str(
+                st.get("tune", st.get("tune_version", "")) or ""
+            ).strip(),
+            "ident": str(st.get("ident", "") or "").strip(),
+            "hash": str(st.get("hash", "") or "").strip(),
+            "mode": str(st.get("mode", "") or "").strip(),
+            "estop": str(st.get("estop", "") or "").strip(),
+            "fault": str(st.get("fault", "") or "").strip(),
+        }
+
+    def _design_evidence_snapshot() -> Dict[str, Any]:
+        fw_status = firmware.status()
+        fw_state = (
+            str(
+                (fw_status.get("state", "") if isinstance(fw_status, dict) else "")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        fw_phase = (
+            str(
+                (fw_status.get("phase", "") if isinstance(fw_status, dict) else "")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        fw_rc = (
+            fw_status.get("returncode", None) if isinstance(fw_status, dict) else None
+        )
+        fw_tail = (
+            list(fw_status.get("log_tail", [])[-20:])
+            if isinstance(fw_status, dict)
+            else []
+        )
+        health = gateway.health()
+        status = dict(health.get("last_status", {}))
+        prearm = prearm_safety.snapshot()
+        recent_attempts = setup_attempt_history.list_recent(limit=8)
+        preflight_ok = any(
+            (
+                isinstance(row, dict)
+                and str(row.get("test_type", "")).strip().lower() == "preflight"
+                and str(row.get("status", "")).strip().lower() == "pass"
+            )
+            for row in recent_attempts
+        )
+        latest_overwatch_score_pct: Optional[float] = None
+        for row in recent_attempts:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("test_type", "")).strip().lower() != "overwatch":
+                continue
+            result = row.get("result")
+            if not isinstance(result, dict):
+                continue
+            ow = result.get("overwatch")
+            if isinstance(ow, dict):
+                try:
+                    latest_overwatch_score_pct = float(ow.get("score_pct"))
+                except Exception:
+                    latest_overwatch_score_pct = None
+            if latest_overwatch_score_pct is not None:
+                break
+        mode = str(status.get("mode", "") or "").strip().upper()
+        fault = str(status.get("fault", "") or "").strip()
+        checks = {
+            "upload_ok": bool(
+                fw_rc == 0 or "upload_guarded_pass" in fw_state or "upload" in fw_phase
+            ),
+            "reconnect_ok": any(
+                "bridge reconnected" in str(line).lower() for line in fw_tail
+            )
+            or bool(health.get("connected", False)),
+            "preflight_ok": bool(preflight_ok),
+            "prearm_ok": bool(prearm.get("passed", False)),
+            "telemetry_feed_ok": bool(status),
+            "no_fault": fault in {"", "0"},
+            "safe_mode_ok": mode in {"SAFE_IDLE", "IDLE", "BALANCING", "BALANCE"},
+        }
+        return {
+            "checks": checks,
+            "sources": {
+                "firmware": {
+                    "state": fw_state,
+                    "phase": fw_phase,
+                    "returncode": fw_rc,
+                },
+                "bridge_connected": bool(health.get("connected", False)),
+                "status_snapshot": dict(status),
+                "status_mode": mode,
+                "status_fault": fault,
+                "prearm_passed": bool(prearm.get("passed", False)),
+                "recent_preflight_ok": bool(preflight_ok),
+                "overwatch_score_pct": latest_overwatch_score_pct,
+            },
+        }
+
+    def _report_design_observation(
+        *,
+        session_key: str,
+        success: bool,
+        source: str,
+        note: str,
+        profile_id: str = "",
+        profile_label: str = "",
+        sketch_revision: str = "",
+        sketch_hash: str = "",
+        test_type: str = "",
+    ) -> Dict[str, Any]:
+        fw_status = firmware.status()
+        fw_defaults = (
+            (fw_status.get("defaults", {}) or {}) if isinstance(fw_status, dict) else {}
+        )
+        runtime = _current_runtime_identity()
+        observation = {
+            "runtime_version": runtime.get("runtime_version", ""),
+            "tune_version": runtime.get("tune_version", ""),
+            "ident": runtime.get("ident", ""),
+            "hash": runtime.get("hash", ""),
+            "profile_id": str(profile_id or "").strip(),
+            "profile_label": str(profile_label or "").strip(),
+            "sketch_revision": str(sketch_revision or "").strip(),
+            "sketch_hash": str(sketch_hash or "").strip() or _current_sketch_hash(),
+            "test_type": str(test_type or "").strip(),
+            "fqbn": str(fw_defaults.get("fqbn", "") or "").strip(),
+            "port": str(fw_defaults.get("port", "") or "").strip(),
+            "evidence": _design_evidence_snapshot(),
+        }
+        return design_memory.report(
+            session_key=session_key,
+            observation=observation,
+            success=bool(success),
+            source=source,
+            note=note,
+        )
+
+    def _active_robot_profile() -> Optional[Dict[str, Any]]:
+        state = profiles.list()
+        active_id = str(state.get("active_profile_id") or "").strip()
+        if not active_id:
+            return None
+        return next(
+            (
+                p
+                for p in list(state.get("profiles") or [])
+                if isinstance(p, dict)
+                and str(p.get("profile_id", "")).strip() == active_id
+            ),
+            None,
+        )
+
+    def _burst_threshold_defaults(
+        active_profile: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        # Nano compatibility lane: trigger-early defaults so brief runaway events are captured.
+        out = {
+            "freq_hz": 25.0,
+            "trigger_enabled": True,
+            "prebuffer_lines": 40,
+            "trigger_angle_deg": 4.5,
+            "trigger_out_frac": 0.55,
+            "trigger_runaway": 0.18,
+            "post_trigger_lines": 100,
+            "profile_family": "arduino_avr",
+        }
+        if not isinstance(active_profile, dict):
+            return out
+        board = active_profile.get("board")
+        if not isinstance(board, dict):
+            return out
+        profile_fqbn = str(board.get("fqbn", "")).strip()
+        fam = _family_for_fqbn(profile_fqbn, firmware.list_targets()) or "arduino_avr"
+        out["profile_family"] = fam
+        if fam in {"esp32", "rp2040", "teensy"}:
+            out.update(
+                {
+                    "freq_hz": 40.0,
+                    "prebuffer_lines": 36,
+                    "trigger_angle_deg": 5.0,
+                    "trigger_out_frac": 0.85,
+                    "trigger_runaway": 0.45,
+                    "post_trigger_lines": 36,
+                }
+            )
+        firmware_node = active_profile.get("firmware")
+        if isinstance(firmware_node, dict):
+            tm = str(firmware_node.get("telemetry_mode", "")).strip().lower()
+            if tm == "binary_highrate" and fam == "arduino_avr":
+                # Guard against impossible profile claims on Nano-class boards.
+                out["profile_family"] = "arduino_avr/compat"
+            if tm == "binary_highrate" and fam in {"esp32", "rp2040", "teensy"}:
+                out.update(
+                    {"freq_hz": 50.0, "prebuffer_lines": 40, "post_trigger_lines": 40}
+                )
+        return out
 
     def burst_status() -> Dict[str, Any]:
         lines = gateway.recent_lines(800)
@@ -8773,119 +10922,31 @@ def build_handler(
         error: str = "",
         started_ms: int = 0,
     ) -> Dict[str, Any]:
-        ended_ms = int(time.time() * 1000)
-        dt = max(0, ended_ms - int(started_ms or ended_ms))
-        return {
-            "name": name,
-            "arguments": arguments,
-            "result": {
-                "ok": bool(ok),
-                "data": data or {},
-                "error": str(error or ""),
-                "execution_time_ms": dt,
-            },
-        }
+        return clean_tool_call(
+            name=name,
+            arguments=arguments,
+            ok=ok,
+            data=data,
+            error=error,
+            started_ms=started_ms,
+        )
 
     def _run_clean_auto_tools(
         *,
         message: str,
         model: str,
     ) -> list[Dict[str, Any]]:
-        txt = str(message or "").lower()
-        calls: list[Dict[str, Any]] = []
-        # Explicit trigger tags keep runtime deterministic and avoid surprise extra latency.
-        wants_connect = "[tool:connect_probe]" in txt
-        wants_compat = "[tool:compat_probe]" in txt
-        wants_compile = "[tool:compile_profiled_runtime_v1]" in txt
-
-        if wants_connect:
-            t0 = int(time.time() * 1000)
-            try:
-                rep = run_connect_probe(gateway)
-                calls.append(
-                    _clean_tool_call(
-                        name="connect_probe",
-                        arguments={},
-                        ok=True,
-                        data={
-                            "ok": bool(rep.get("ok", False)),
-                            "confidence_pct": int(rep.get("confidence_pct", 0) or 0),
-                        },
-                        started_ms=t0,
-                    )
-                )
-            except Exception as exc:
-                calls.append(
-                    _clean_tool_call(
-                        name="connect_probe",
-                        arguments={},
-                        ok=False,
-                        error=str(exc),
-                        started_ms=t0,
-                    )
-                )
-
-        if wants_compat:
-            t0 = int(time.time() * 1000)
-            try:
-                rep = run_compat_probe(gateway)
-                calls.append(
-                    _clean_tool_call(
-                        name="compat_probe",
-                        arguments={},
-                        ok=True,
-                        data={
-                            "ok": bool(rep.get("ok", False)),
-                            "missing_fields": list(rep.get("missing_fields", [])[:12]),
-                            "missing_commands": list(
-                                rep.get("missing_commands", [])[:12]
-                            ),
-                        },
-                        started_ms=t0,
-                    )
-                )
-            except Exception as exc:
-                calls.append(
-                    _clean_tool_call(
-                        name="compat_probe",
-                        arguments={},
-                        ok=False,
-                        error=str(exc),
-                        started_ms=t0,
-                    )
-                )
-
-        if wants_compile:
-            t0 = int(time.time() * 1000)
-            sketch = _clean_default_sketch_path(repo_root, firmware)
-            fqbn = _clean_default_fqbn()
-            try:
-                st = firmware.compile(sketch=sketch, fqbn=fqbn)
-                calls.append(
-                    _clean_tool_call(
-                        name="firmware_compile",
-                        arguments={"sketch": sketch, "fqbn": fqbn},
-                        ok=True,
-                        data={
-                            "state": str(st.get("state", "")),
-                            "phase": str(st.get("phase", "")),
-                            "returncode": st.get("returncode"),
-                        },
-                        started_ms=t0,
-                    )
-                )
-            except Exception as exc:
-                calls.append(
-                    _clean_tool_call(
-                        name="firmware_compile",
-                        arguments={"sketch": sketch, "fqbn": fqbn},
-                        ok=False,
-                        error=str(exc),
-                        started_ms=t0,
-                    )
-                )
-
-        return calls
+        _ = model
+        return run_clean_auto_tools(
+            message=message,
+            gateway=gateway,
+            firmware=firmware,
+            repo_root=repo_root,
+            default_sketch_path_fn=_clean_default_sketch_path,
+            default_fqbn_fn=_clean_default_fqbn,
+            run_connect_probe_fn=run_connect_probe,
+            run_compat_probe_fn=run_compat_probe,
+        )
 
     def _build_clean_agent_context(
         *,
@@ -8895,92 +10956,29 @@ def build_handler(
         attachments: Optional[list[Dict[str, Any]]] = None,
         clean_tool_calls: Optional[list[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        serial_h = gateway.health()
-        cached_status = dict(serial_h.get("last_status", {}))
-        fw = firmware.status()
-        fw_tail = list(fw.get("log_tail", [])[-8:]) if isinstance(fw, dict) else []
-        recent_attempts_raw = setup_attempt_history.list_recent(limit=4)
-        recent_attempts: list[Dict[str, Any]] = []
-        for node in recent_attempts_raw:
-            if not isinstance(node, dict):
-                continue
-            result = node.get("result") if isinstance(node.get("result"), dict) else {}
-            recent_attempts.append(
-                {
-                    "test_type": str(node.get("test_type", "")),
-                    "status": str(node.get("status", "")),
-                    "created_at": node.get("created_at"),
-                    "failure_summary": str(result.get("failure_summary", "")),
-                }
-            )
-
-        telemetry_summary = {
-            "mode": str(cached_status.get("mode", "UNKNOWN")),
-            "angle": str(cached_status.get("ang", "n/a")),
-            "raw": str(cached_status.get("raw", "n/a")),
-            "gyro": str(
-                cached_status.get(
-                    "gyro",
-                    cached_status.get("gyr", cached_status.get("gx", "n/a")),
-                )
-            ),
-            "output": str(cached_status.get("out", "n/a")),
-            "feed_present": bool(cached_status),
-        }
-
-        # Clean lane sessions are local-scoped; persist explicit mission facts for continuity.
-        try:
-            full_history = ai.history(session_key, thread_id) if thread_id else []
-        except Exception:
-            full_history = []
-        extracted_facts = _extract_mission_facts(full_history)
-        if extracted_facts:
-            mission_memory.upsert(
-                session_key, extracted_facts, source="clean_thread_history"
-            )
-        mission_facts = mission_memory.get(session_key)
-
-        ctx: Dict[str, Any] = {
-            "mission_mode": mode,
-            "status": cached_status,
-            "status_source": "gateway.health.last_status_cached",
-            "serial_health": serial_h,
-            "control": control.snapshot(),
-            "firmware": fw,
-            "telemetry_summary": telemetry_summary,
-            "recent_firmware_outcome": {
-                "state": str(fw.get("state", "")) if isinstance(fw, dict) else "",
-                "phase": str(fw.get("phase", "")) if isinstance(fw, dict) else "",
-                "running": bool(fw.get("running", False))
-                if isinstance(fw, dict)
-                else False,
-                "returncode": fw.get("returncode") if isinstance(fw, dict) else None,
-                "last_cmd": list(fw.get("last_cmd", [])[-8:])
-                if isinstance(fw, dict)
-                else [],
-                "log_tail": fw_tail,
-            },
-            "recent_setup_attempts": recent_attempts,
-            "assistant_knowledge": knowledge.context(),
-            "config_snapshots": config_history.list_snapshots(limit=6),
-            "assistant_capabilities": _assistant_capabilities_context(
-                allow_apply=False
-            ),
-        }
-        if mission_facts:
-            ctx["mission_facts"] = mission_facts
-        if attachments:
-            ctx["attachments"] = attachments
-        if clean_tool_calls:
-            ctx["clean_tool_calls"] = clean_tool_calls
-        return ctx
+        return build_clean_agent_context(
+            mode=mode,
+            session_key=session_key,
+            thread_id=thread_id,
+            attachments=attachments,
+            clean_tool_calls=clean_tool_calls,
+            gateway=gateway,
+            firmware=firmware,
+            setup_attempt_history=setup_attempt_history,
+            ai=ai,
+            extract_mission_facts_fn=_extract_mission_facts,
+            mission_memory=mission_memory,
+            knowledge=knowledge,
+            config_history=config_history,
+            control=control,
+            assistant_capabilities_context_fn=_assistant_capabilities_context,
+            best_known_design=design_memory.best(session_key=session_key),
+        )
 
     def _clean_system_prompt(mode: str) -> str:
-        return (
-            "You are Codex for UpRight.os clean console. "
-            "Be concise, practical, and evidence-driven. "
-            "Use mission_facts, telemetry_summary, recent_firmware_outcome, and recent_setup_attempts when relevant. "
-            f"{_agent_mode_system_prompt(mode)}"
+        return build_clean_system_prompt(
+            mode=mode,
+            agent_mode_system_prompt_fn=_agent_mode_system_prompt,
         )
 
     class Handler(BaseHTTPRequestHandler):
@@ -8997,14 +10995,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "health": gateway.health(),
-                            "control": control.snapshot(),
-                            "prearm_safety": prearm_safety.snapshot(),
-                            "telemetry_ws": f"ws://127.0.0.1:{telemetry_port}/telemetry",
-                            "telemetry_enabled": websockets is not None,
-                        },
+                        build_health_payload(
+                            serial_health=gateway.health(),
+                            control_snapshot=control.snapshot(),
+                            prearm_snapshot=prearm_safety.snapshot(),
+                            telemetry_port=telemetry_port,
+                            telemetry_enabled=websockets is not None,
+                        ),
                     )
                 if u.path == "/status":
                     # Keep /status non-blocking: return cached status only.
@@ -9015,20 +11012,19 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": st,
-                            "status_raw": st_raw,
-                            "telemetry_adapter": normalized.get("adapter", {}),
-                            "control": control.snapshot(),
-                            "prearm_safety": prearm_safety.snapshot(),
-                            "action_gates": _resolve_action_gates(
+                        build_status_payload(
+                            status=st,
+                            status_raw=st_raw,
+                            telemetry_adapter=normalized.get("adapter", {}),
+                            control_snapshot=control.snapshot(),
+                            prearm_snapshot=prearm_safety.snapshot(),
+                            action_gates=_resolve_action_gates(
                                 gateway,
                                 control,
                                 prearm_gate=prearm_safety,
                                 status_override=st,
                             ),
-                        },
+                        ),
                     )
                 if u.path == "/telemetry/adapter-map":
                     st_raw = dict(gateway.health().get("last_status", {}))
@@ -9036,41 +11032,59 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "adapter": normalized.get("adapter", {}),
-                            "adapters": RUNTIME_TELEMETRY_ADAPTERS,
-                            "canonical_fields": list(HUD_CANONICAL_FIELDS),
-                        },
+                        build_telemetry_adapters_payload(
+                            adapter=normalized.get("adapter", {}),
+                            adapters=RUNTIME_TELEMETRY_ADAPTERS,
+                            canonical_fields=list(HUD_CANONICAL_FIELDS),
+                        ),
                     )
                 if u.path == "/diag/serial":
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "serial": gateway.health(),
-                            "control": control.snapshot(),
-                        },
+                        build_diag_serial_payload(
+                            serial=gateway.health(),
+                            control=control.snapshot(),
+                        ),
                     )
                 if u.path == "/lines":
                     q = parse_qs(u.query)
                     n = int(q.get("n", ["100"])[0])
                     return _json(
-                        self, 200, {"ok": True, "lines": gateway.recent_lines(n)}
+                        self,
+                        200,
+                        build_lines_payload(lines=gateway.recent_lines(n)),
                     )
                 if u.path == "/burst/status":
-                    return _json(self, 200, {"ok": True, "burst": burst_status()})
+                    return _json(
+                        self,
+                        200,
+                        build_burst_status_payload(burst=burst_status()),
+                    )
                 if u.path == "/commissioning/status":
                     return _json(
-                        self, 200, {"ok": True, "commissioning": commissioning.status()}
+                        self,
+                        200,
+                        build_commissioning_status_payload(
+                            commissioning=commissioning.status()
+                        ),
                     )
                 if u.path == "/commissioning/artifacts":
                     return _json(
-                        self, 200, {"ok": True, "artifacts": commissioning.artifacts()}
+                        self,
+                        200,
+                        build_commissioning_artifacts_payload(
+                            artifacts=commissioning.artifacts()
+                        ),
                     )
                 if u.path == "/firmware/status":
-                    return _json(self, 200, {"ok": True, "firmware": firmware.status()})
+                    return _json(
+                        self,
+                        200,
+                        build_firmware_status_payload(
+                            firmware_status=firmware.status()
+                        ),
+                    )
                 if u.path == "/firmware/artifacts":
                     q = parse_qs(u.query)
                     n_raw = str((q.get("limit") or ["20"])[0]).strip()
@@ -9081,14 +11095,56 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "firmware_artifacts": firmware.list_run_artifacts(limit=n),
-                        },
+                        build_firmware_artifacts_payload(
+                            firmware_artifacts=firmware.list_run_artifacts(limit=n)
+                        ),
+                    )
+                if u.path == "/design-memory":
+                    q = parse_qs(u.query)
+                    n_raw = str((q.get("limit") or ["30"])[0]).strip()
+                    session_key = str((q.get("session_key") or [""])[0]).strip()
+                    profile_id = str((q.get("profile_id") or [""])[0]).strip()
+                    try:
+                        n = int(n_raw)
+                    except Exception:
+                        n = 30
+                    rows = design_memory.list_recent(limit=n)
+                    if session_key:
+                        rows = [
+                            r
+                            for r in rows
+                            if str(r.get("last_session_key", "")).strip() == session_key
+                        ]
+                    if profile_id:
+                        rows = [
+                            r
+                            for r in rows
+                            if str(r.get("profile_id", "")).strip() == profile_id
+                        ]
+                    return _json(
+                        self,
+                        200,
+                        build_design_memory_payload(design_memory=rows),
+                    )
+                if u.path == "/design-memory/best":
+                    q = parse_qs(u.query)
+                    session_key = str((q.get("session_key") or [""])[0]).strip()
+                    profile_id = str((q.get("profile_id") or [""])[0]).strip()
+                    return _json(
+                        self,
+                        200,
+                        build_design_memory_best_payload(
+                            best_design=design_memory.best(
+                                session_key=session_key,
+                                profile_id=profile_id,
+                            )
+                        ),
                     )
                 if u.path == "/firmware/unified-schema":
                     return _json(
-                        self, 200, {"ok": True, "schema": firmware.unified_schema()}
+                        self,
+                        200,
+                        build_unified_schema_payload(schema=firmware.unified_schema()),
                     )
                 if u.path == "/ai/status":
                     tok = _extract_auth_token(self)
@@ -9097,16 +11153,15 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "ai": ai.status(
+                            build_ai_status_payload(
+                                ai_status=ai.status(
                                     configured=False,
                                     model="gpt-5-codex",
                                     session_key="anon",
                                 ),
-                                "history": [],
-                                "threads": [],
-                            },
+                                history=[],
+                                threads=[],
+                            ),
                         )
                     model = str(me.get("openai_model") or "gpt-5-codex")
                     configured = bool(me.get("openai_configured"))
@@ -9116,12 +11171,11 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "ai": st,
-                            "history": ai.history(skey, tid)[-80:],
-                            "threads": ai.list_threads(skey),
-                        },
+                        build_ai_status_payload(
+                            ai_status=st,
+                            history=ai.history(skey, tid)[-80:],
+                            threads=ai.list_threads(skey),
+                        ),
                     )
                 if u.path == "/agent/status":
                     tok = _extract_auth_token(self)
@@ -9160,52 +11214,20 @@ def build_handler(
                     )
                     runtime_configured = has_api_key or bool(use_codex_cli)
                     serial_h = gateway.health()
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "agent": {
-                                "mode": mode_state.get("mode", "robot_dev"),
-                                "allowed_modes": mode_state.get("allowed_modes", []),
-                                "updated_at": mode_state.get("updated_at"),
-                                "openai_configured": runtime_configured,
-                                "openai_model": runtime_model,
-                                "openai_model_allowed": runtime_model_allowed,
-                                "provider": (
-                                    "codex_cli"
-                                    if use_codex_cli
-                                    else str(resolved.get("provider", "openai"))
-                                ),
-                                "executor": str(
-                                    runtime_exec.get("executor", "unknown")
-                                ),
-                                "can_execute": bool(
-                                    runtime_exec.get("can_execute", False)
-                                ),
-                                "degraded": bool(runtime_exec.get("degraded", False)),
-                                "degraded_reason": str(
-                                    runtime_exec.get("degraded_reason", "")
-                                ),
-                                "model_source": (
-                                    "codex_cli"
-                                    if use_codex_cli
-                                    else str(resolved.get("model_source", ""))
-                                ),
-                                "api_key_source": (
-                                    "codex_login"
-                                    if use_codex_cli
-                                    else str(resolved.get("api_key_source", ""))
-                                ),
-                                "codex_login": codex_login,
-                            },
-                            "knowledge": knowledge.context(),
-                            "health": serial_h,
-                            "control": control.snapshot(),
-                            "status": dict(serial_h.get("last_status", {})),
-                            "lines": gateway.recent_lines(80),
-                        },
+                    payload = build_agent_status_payload(
+                        mode_state=mode_state,
+                        resolved=resolved,
+                        codex_login=codex_login,
+                        runtime_exec=runtime_exec,
+                        runtime_model=runtime_model,
+                        runtime_model_allowed=runtime_model_allowed,
+                        runtime_configured=runtime_configured,
+                        serial_health=serial_h,
+                        control_snapshot=control.snapshot(),
+                        knowledge_context=knowledge.context(),
+                        lines=gateway.recent_lines(80),
                     )
+                    return _json(self, 200, payload)
                 if u.path == "/agent/clean/status":
                     mode = (
                         str(
@@ -9218,7 +11240,6 @@ def build_handler(
                     )
                     codex_login = _codex_cli_login_status()
                     serial_h = gateway.health()
-                    status = dict(serial_h.get("last_status", {}))
                     control_state = control.snapshot()
                     model = (
                         str(
@@ -9226,71 +11247,34 @@ def build_handler(
                         ).strip()
                         or "gpt-5-codex"
                     )
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "clean_api": {
-                                "version": 2,
-                                "min_ui_version": 2,
-                                "capabilities": [
-                                    "agent_clean_status_v2",
-                                    "firmware_compile",
-                                    "firmware_upload_guarded",
-                                    "firmware_upload_precheck",
-                                    "runtime_manifest_validate",
-                                    "runtime_manifest_preflight_gate",
-                                    "runtime_manifest_profile_compat",
-                                    "clean_chat_stream",
-                                    "clean_preflight",
-                                ],
-                            },
-                            "agent": {
-                                "mode": mode,
-                                "executor": "codex_cli_exec"
-                                if bool(codex_login.get("logged_in", False))
-                                else "blocked",
-                                "provider": "codex_cli",
-                                "model": model,
-                                "can_chat": bool(codex_login.get("logged_in", False)),
-                                "degraded_reason": ""
-                                if bool(codex_login.get("logged_in", False))
-                                else "codex_login_required",
-                                "codex_login": codex_login,
-                            },
-                            "health": serial_h,
-                            "control": control_state,
-                            "status": status,
-                            "lines": gateway.recent_lines(80),
-                        },
+                    payload = build_clean_status_payload(
+                        mode=mode,
+                        codex_login=codex_login,
+                        serial_health=serial_h,
+                        control_snapshot=control_state,
+                        model=model,
+                        lines=gateway.recent_lines(80),
                     )
+                    return _json(self, 200, payload)
                 if u.path == "/agent/clean/threads":
                     q = parse_qs(u.query)
                     mode = (
                         str((q.get("mode", ["app_dev"]) or ["app_dev"])[0]).strip()
                         or "app_dev"
                     )
-                    session_key = f"local:clean:{mode}"
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "mode": mode,
-                            "threads": ai.list_threads(session_key),
-                            "ai": ai.status(
-                                configured=bool(
-                                    _codex_cli_login_status().get("logged_in", False)
-                                ),
-                                model=str(
-                                    os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                                ),
-                                session_key=session_key,
-                            ),
-                        },
+                    payload = handle_clean_threads_get(
+                        mode=mode,
+                        ai=ai,
+                        codex_logged_in=bool(
+                            _codex_cli_login_status().get("logged_in", False)
+                        ),
+                        model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
                     )
+                    return _json(self, 200, payload)
                 if u.path == "/agent/threads":
+                    guard = _legacy_execution_guard(u.path)
+                    if guard is not None:
+                        return _json(self, 403, guard)
                     q = parse_qs(u.query)
                     mode_state = agent_mission.status()
                     mode = str((q.get("mode", [""]) or [""])[0] or "").strip() or str(
@@ -9369,7 +11353,9 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     return _json(
-                        self, 200, {"ok": True, "profiles": ai_profiles.list()}
+                        self,
+                        200,
+                        build_ai_profiles_payload(profiles=ai_profiles.list()),
                     )
                 if u.path == "/ai/knowledge":
                     tok = _extract_auth_token(self)
@@ -9379,7 +11365,9 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     return _json(
-                        self, 200, {"ok": True, "knowledge": knowledge.context()}
+                        self,
+                        200,
+                        build_ai_knowledge_payload(knowledge=knowledge.context()),
                     )
                 if u.path == "/auth/me":
                     tok = _extract_auth_token(self)
@@ -9388,7 +11376,7 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(self, 200, {"ok": True, "user": me})
+                    return _json(self, 200, build_auth_user_payload(user=me))
                 if u.path == "/auth/openai-key/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -9436,7 +11424,7 @@ def build_handler(
                     payload = {"ok": True, "targets": firmware.list_targets()}
                     validate_firmware_targets_response(payload)
                     return _json(self, 200, payload)
-                if u.path == "/firmware/runtime-manifest":
+                if u.path == "/firmware/runtime-manifest/validate":
                     q = parse_qs(u.query)
                     sketch = (
                         str((q.get("sketch", [""]) or [""])[0] or "").strip() or None
@@ -9447,10 +11435,7 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": bool(check.get("ok", False)),
-                            "validation": check,
-                        },
+                        build_runtime_manifest_validate_payload(check=check),
                     )
                 if u.path == "/firmware/runtime-manifest/compat":
                     q = parse_qs(u.query)
@@ -9460,39 +11445,23 @@ def build_handler(
                     manifest_check = firmware.validate_runtime_manifest(
                         sketch=sketch, require_exists=True
                     )
-                    prof_state = profiles.list()
-                    active_id = str(prof_state.get("active_profile_id") or "").strip()
-                    active_profile = next(
-                        (
-                            p
-                            for p in list(prof_state.get("profiles") or [])
-                            if isinstance(p, dict)
-                            and str(p.get("profile_id", "")).strip() == active_id
-                        ),
-                        None,
-                    )
-                    compat = _runtime_manifest_profile_compatibility(
-                        manifest_validation=manifest_check,
-                        active_profile=active_profile
-                        if isinstance(active_profile, dict)
-                        else None,
-                        targets=firmware.list_targets(),
-                    )
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": bool(compat.get("ok", False)),
-                            "compatibility": compat,
-                            "active_profile_id": active_id or None,
-                            "manifest_validation": manifest_check,
-                        },
+                        build_runtime_manifest_compat_payload(
+                            manifest_check=manifest_check,
+                            profiles_state=profiles.list(),
+                            targets=firmware.list_targets(),
+                            compatibility_fn=_runtime_manifest_profile_compatibility,
+                        ),
                     )
                 if u.path == "/firmware/sketch-folders":
                     return _json(
                         self,
                         200,
-                        {"ok": True, "sketch_folders": firmware.list_sketch_folders()},
+                        build_firmware_sketch_folders_payload(
+                            sketch_folders=firmware.list_sketch_folders()
+                        ),
                     )
                 if u.path == "/probe/compat":
                     q = parse_qs(u.query)
@@ -9517,16 +11486,18 @@ def build_handler(
                             "missing_commands": [],
                             "warnings": ["compat_probe_throttled_queue_busy"],
                         }
-                        return _json(self, 200, {"ok": True, "compat": fallback})
+                        return _json(
+                            self, 200, build_compat_probe_payload(compat=fallback)
+                        )
                     out = run_compat_probe(
                         gateway, profile_override=requested_profile or None
                     )
                     store_probe(cache_key, out)
-                    return _json(self, 200, {"ok": True, "compat": out})
+                    return _json(self, 200, build_compat_probe_payload(compat=out))
                 if u.path == "/probe/connect":
                     cached = cached_probe("connect")
                     if cached is not None:
-                        return _json(self, 200, {"ok": True, "probe": cached})
+                        return _json(self, 200, build_probe_payload(probe=cached))
                     if int(gateway.health().get("queue_depth", 0) or 0) > 2:
                         fallback = {
                             "ok": False,
@@ -9558,10 +11529,10 @@ def build_handler(
                                 {}, [], []
                             ),
                         }
-                        return _json(self, 200, {"ok": True, "probe": fallback})
+                        return _json(self, 200, build_probe_payload(probe=fallback))
                     out = run_connect_probe(gateway)
                     store_probe("connect", out)
-                    return _json(self, 200, {"ok": True, "probe": out})
+                    return _json(self, 200, build_probe_payload(probe=out))
                 if u.path == "/tooling/tuning/capabilities":
                     cached_connect = cached_probe("connect")
                     if isinstance(cached_connect, dict) and isinstance(
@@ -9673,18 +11644,24 @@ def build_handler(
                         },
                     )
                 if u.path == "/profiles":
-                    return _json(self, 200, {"ok": True, "profiles": profiles.list()})
+                    return _json(
+                        self,
+                        200,
+                        build_profiles_payload(profiles_state=profiles.list()),
+                    )
                 if u.path == "/profiles/hardware":
                     targets = firmware.list_targets()
                     registry = _build_hardware_registry(targets)
                     return _json(
                         self,
                         200,
-                        {"ok": True, "registry": registry},
+                        build_profiles_hardware_payload(registry=registry),
                     )
                 if u.path == "/tooling/traces":
                     return _json(
-                        self, 200, {"ok": True, "traces": tooling_trace_candidates()}
+                        self,
+                        200,
+                        build_tooling_traces_payload(traces=tooling_trace_candidates()),
                     )
                 if u.path == "/ai/metrics":
                     tok = _extract_auth_token(self)
@@ -9939,8 +11916,84 @@ def build_handler(
 
                 if u.path == "/session/heartbeat":
                     return _json(
-                        self, 200, {"ok": True, "control": control.heartbeat()}
+                        self,
+                        200,
+                        build_session_heartbeat_payload(control=control.heartbeat()),
                     )
+
+                if u.path == "/design-memory/report-success":
+                    session_key = (
+                        str(body.get("session_key", "")).strip() or "local:app_dev"
+                    )
+                    source = (
+                        str(body.get("source", "user_report")).strip() or "user_report"
+                    )
+                    note = str(body.get("note", "")).strip()
+                    success = bool(body.get("success", True))
+                    profile_id = str(body.get("profile_id", "")).strip()
+                    profile_label = str(body.get("profile_label", "")).strip()
+                    sketch_revision = str(body.get("sketch_revision", "")).strip()
+                    sketch_hash = str(body.get("sketch_hash", "")).strip()
+                    test_type = str(body.get("test_type", "")).strip()
+                    observation = (
+                        body.get("observation")
+                        if isinstance(body.get("observation"), dict)
+                        else {}
+                    )
+                    if not observation:
+                        fw_status = firmware.status()
+                        fw_defaults = (
+                            fw_status.get("defaults", {})
+                            if isinstance(fw_status, dict)
+                            else {}
+                        )
+                        runtime = _current_runtime_identity()
+                        observation = {
+                            "runtime_version": runtime.get("runtime_version", ""),
+                            "tune_version": runtime.get("tune_version", ""),
+                            "ident": runtime.get("ident", ""),
+                            "hash": runtime.get("hash", ""),
+                            "profile_id": profile_id,
+                            "profile_label": profile_label,
+                            "sketch_revision": sketch_revision,
+                            "sketch_hash": sketch_hash or _current_sketch_hash(),
+                            "test_type": test_type,
+                            "fqbn": str(fw_defaults.get("fqbn", "") or "").strip(),
+                            "port": str(fw_defaults.get("port", "") or "").strip(),
+                            "evidence": _design_evidence_snapshot(),
+                        }
+                    elif not isinstance(observation.get("evidence"), dict):
+                        observation["evidence"] = _design_evidence_snapshot()
+                    row = design_memory.report(
+                        session_key=session_key,
+                        observation=observation,
+                        success=success,
+                        source=source,
+                        note=note,
+                    )
+                    return _json(self, 200, {"ok": True, "design": row})
+
+                if u.path == "/design-memory/rate":
+                    session_key = (
+                        str(body.get("session_key", "")).strip() or "local:app_dev"
+                    )
+                    design_id = str(body.get("design_id", "")).strip()
+                    rating = str(body.get("rating", "")).strip().lower()
+                    note = str(body.get("note", "")).strip()
+                    try:
+                        row = design_memory.rate(
+                            design_id=design_id,
+                            rating=rating,
+                            note=note,
+                            source="user_rating",
+                            session_key=session_key,
+                        )
+                    except RuntimeError as exc:
+                        err = str(exc)
+                        if err == "design_not_found":
+                            return _json(self, 404, {"ok": False, "error": err})
+                        return _json(self, 400, {"ok": False, "error": err})
+                    return _json(self, 200, {"ok": True, "design": row})
 
                 if u.path == "/commissioning/run":
                     if gateway.health().get("connected", False):
@@ -10010,7 +12063,12 @@ def build_handler(
                 if u.path == "/firmware/sketch":
                     content = str(body.get("content", ""))
                     path = body.get("path")
-                    sk = firmware.write_sketch(content=content, path=path)
+                    profile = body.get("profile")
+                    sk = firmware.write_sketch(
+                        content=content,
+                        path=path,
+                        profile=profile if isinstance(profile, dict) else None,
+                    )
                     return _json(self, 200, {"ok": True, "sketch": sk})
                 if u.path == "/firmware/sketch-folder/pick":
                     picked = firmware.pick_sketch_folder()
@@ -10088,6 +12146,9 @@ def build_handler(
                         str(body.get("action_source", "setup_page")).strip()
                         or "setup_page"
                     )
+                    session_key = (
+                        str(body.get("session_key", "")).strip() or "local:setup"
+                    )
                     profile_id = str(body.get("profile_id", "")).strip()
                     profile_label = str(body.get("profile_label", "")).strip()
                     out = run_setup_compat_test(gateway)
@@ -10101,6 +12162,21 @@ def build_handler(
                         profile_label=profile_label,
                         result=out,
                     )
+                    try:
+                        _report_design_observation(
+                            session_key=session_key,
+                            success=str(out.get("status", "")).strip().lower()
+                            == "pass",
+                            source="setup_compat_test",
+                            note=str(out.get("failure_summary", "")).strip(),
+                            profile_id=profile_id,
+                            profile_label=profile_label,
+                            sketch_revision=sketch_revision,
+                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+                            test_type="compat",
+                        )
+                    except Exception:
+                        pass
                     return _json(
                         self, 200, {"ok": True, "compat_test": out, "attempt": attempt}
                     )
@@ -10110,6 +12186,9 @@ def build_handler(
                     action_source = (
                         str(body.get("action_source", "setup_page")).strip()
                         or "setup_page"
+                    )
+                    session_key = (
+                        str(body.get("session_key", "")).strip() or "local:setup"
                     )
                     profile_id = str(body.get("profile_id", "")).strip()
                     profile_label = str(body.get("profile_label", "")).strip()
@@ -10124,6 +12203,21 @@ def build_handler(
                         profile_label=profile_label,
                         result=out,
                     )
+                    try:
+                        _report_design_observation(
+                            session_key=session_key,
+                            success=str(out.get("status", "")).strip().lower()
+                            == "pass",
+                            source="setup_smoke_check",
+                            note=str(out.get("failure_summary", "")).strip(),
+                            profile_id=profile_id,
+                            profile_label=profile_label,
+                            sketch_revision=sketch_revision,
+                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+                            test_type="smoke",
+                        )
+                    except Exception:
+                        pass
                     return _json(
                         self, 200, {"ok": True, "smoke_check": out, "attempt": attempt}
                     )
@@ -10133,6 +12227,9 @@ def build_handler(
                     action_source = (
                         str(body.get("action_source", "setup_page")).strip()
                         or "setup_page"
+                    )
+                    session_key = (
+                        str(body.get("session_key", "")).strip() or "local:setup"
                     )
                     profile_id = str(body.get("profile_id", "")).strip()
                     profile_label = str(body.get("profile_label", "")).strip()
@@ -10147,6 +12244,21 @@ def build_handler(
                         profile_label=profile_label,
                         result=out,
                     )
+                    try:
+                        _report_design_observation(
+                            session_key=session_key,
+                            success=str(out.get("status", "")).strip().lower()
+                            == "pass",
+                            source="setup_overwatch_check",
+                            note=str(out.get("failure_summary", "")).strip(),
+                            profile_id=profile_id,
+                            profile_label=profile_label,
+                            sketch_revision=sketch_revision,
+                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+                            test_type="overwatch",
+                        )
+                    except Exception:
+                        pass
                     return _json(
                         self,
                         200,
@@ -10280,6 +12392,58 @@ def build_handler(
                     )
                     return _json(self, code, payload)
 
+                if u.path == "/agent/clean/firmware/release-serial":
+                    try:
+                        confirm = str(body.get("confirm", "")).strip()
+                        if confirm != "I_UNDERSTAND_STOP_BRIDGE":
+                            return _json(
+                                self,
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": "release_serial_confirm_required",
+                                    "hint": "send confirm=I_UNDERSTAND_STOP_BRIDGE to proceed",
+                                },
+                            )
+                        stop_script = repo_root / "tools" / "stop_bridge.sh"
+                        if not stop_script.exists():
+                            return _json(
+                                self,
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": "stop_bridge_script_missing",
+                                    "path": str(stop_script),
+                                },
+                            )
+                        subprocess.Popen(
+                            [
+                                "/bin/bash",
+                                "-lc",
+                                f"sleep 0.25; '{str(stop_script)}' >/dev/null 2>&1",
+                            ],
+                            cwd=str(repo_root),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True,
+                            close_fds=True,
+                        )
+                        return _json(
+                            self,
+                            200,
+                            {
+                                "ok": True,
+                                "released": True,
+                                "note": "bridge stopping in background; use IDE upload now",
+                            },
+                        )
+                    except Exception as exc:
+                        return _json(
+                            self,
+                            500,
+                            {"ok": False, "error": f"release_serial_failed:{exc}"},
+                        )
+
                 if u.path == "/agent/clean/recovery/known-good":
                     requested_port = str(body.get("port", "")).strip()
                     requested_fqbn = (
@@ -10308,842 +12472,209 @@ def build_handler(
                 if u.path == "/agent/clean/thread/new":
                     mode = str(body.get("mode", "")).strip() or "app_dev"
                     title = str(body.get("title", "")).strip() or None
-                    session_key = f"local:clean:{mode}"
-                    thread = ai.create_thread(session_key, title)
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "mode": mode,
-                            "thread": thread,
-                            "threads": ai.list_threads(session_key),
-                            "history": ai.history(session_key, str(thread.get("id")))[
-                                -80:
-                            ],
-                        },
+                    payload = handle_clean_thread_new(
+                        mode=mode,
+                        title=title,
+                        ai=ai,
                     )
+                    return _json(self, 200, payload)
 
                 if u.path == "/agent/clean/thread/select":
                     mode = str(body.get("mode", "")).strip() or "app_dev"
                     thread_id = str(body.get("thread_id", "")).strip()
-                    if not thread_id:
-                        return _json(
-                            self, 400, {"ok": False, "error": "thread_id_required"}
-                        )
-                    session_key = f"local:clean:{mode}"
-                    try:
-                        thread = ai.select_thread(session_key, thread_id)
-                    except RuntimeError as exc:
-                        if str(exc) == "thread_not_found":
-                            return _json(
-                                self, 404, {"ok": False, "error": "thread_not_found"}
-                            )
-                        raise
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "mode": mode,
-                            "thread": thread,
-                            "threads": ai.list_threads(session_key),
-                            "history": ai.history(session_key, thread_id)[-80:],
-                        },
+                    code, payload = handle_clean_thread_select(
+                        mode=mode,
+                        thread_id=thread_id,
+                        ai=ai,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/chat":
-                    msg = str(body.get("message", "")).strip()
-                    if not msg:
-                        return _json(
-                            self, 400, {"ok": False, "error": "missing_message"}
-                        )
-                    mode = str(body.get("mode", "")).strip() or "app_dev"
                     codex_login = _codex_cli_login_status()
-                    if not bool(codex_login.get("logged_in", False)):
-                        return _json(
-                            self,
-                            403,
-                            {
-                                "ok": False,
-                                "error": "codex_login_required",
-                                "executor": "blocked",
-                                "can_execute": False,
-                            },
-                        )
-                    model = (
-                        str(body.get("model", "")).strip()
-                        or str(
+                    err, req = parse_clean_chat_request(
+                        body=body,
+                        codex_login=codex_login,
+                        env_model=str(
                             os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ).strip()
-                        or "gpt-5-codex"
+                        ),
+                        env_timeout=str(
+                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                        ),
+                        sanitize_attachments_fn=_sanitize_agent_attachments,
                     )
-                    clean_timeout_s = int(
-                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    if err is not None:
+                        code, payload = err
+                        return _json(self, code, payload)
+                    assert req is not None
+                    code, payload = run_clean_chat(
+                        msg=str(req["msg"]),
+                        mode=str(req["mode"]),
+                        model=str(req["model"]),
+                        clean_timeout_s=int(req["clean_timeout_s"]),
+                        session_key=str(req["session_key"]),
+                        thread_id=req.get("thread_id"),
+                        attachments=list(req.get("attachments") or []),
+                        auto_tools=bool(req.get("auto_tools", False)),
+                        ai=ai,
+                        run_auto_tools=_run_clean_auto_tools,
+                        build_context=_build_clean_agent_context,
+                        system_prompt_for_mode=_clean_system_prompt,
+                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
                     )
-                    attachments = _sanitize_agent_attachments(body.get("attachments"))
-                    thread_id = str(body.get("thread_id", "")).strip() or None
-                    session_key = f"local:clean:{mode}"
-                    auto_tools = bool(body.get("auto_tools", False))
-                    tool_calls: list[Dict[str, Any]] = []
-                    if auto_tools:
-                        tool_calls = _run_clean_auto_tools(message=msg, model=model)
-                    ctx = _build_clean_agent_context(
-                        mode=mode,
-                        session_key=session_key,
-                        thread_id=thread_id,
-                        attachments=attachments,
-                        clean_tool_calls=tool_calls,
-                    )
-                    try:
-                        out = ai.chat_codex_cli(
-                            message=msg,
-                            context=ctx,
-                            session_key=session_key,
-                            model=model,
-                            thread_id=thread_id,
-                            system_prompt=_clean_system_prompt(mode),
-                            timeout_s_override=max(30, clean_timeout_s),
-                        )
-                    except RuntimeError as exc:
-                        emsg = str(exc)
-                        lower = emsg.lower()
-                        if emsg.startswith("codex_cli_timeout:"):
-                            return _json(
-                                self,
-                                504,
-                                {
-                                    "ok": False,
-                                    "error": emsg,
-                                    "error_kind": "timeout",
-                                    "executor": "codex_cli_exec",
-                                    "tool_calls": tool_calls,
-                                },
-                            )
-                        if ("usage limit" in lower) or (
-                            "purchase more credits" in lower
-                        ):
-                            return _json(
-                                self,
-                                429,
-                                {
-                                    "ok": False,
-                                    "error": "codex_usage_limited",
-                                    "detail": emsg[-420:],
-                                    "error_kind": "quota",
-                                    "executor": "codex_cli_exec",
-                                    "tool_calls": tool_calls,
-                                },
-                            )
-                        return _json(
-                            self,
-                            502,
-                            {
-                                "ok": False,
-                                "error": emsg,
-                                "error_kind": "upstream",
-                                "executor": "codex_cli_exec",
-                                "tool_calls": tool_calls,
-                            },
-                        )
-                    tid = str(out.get("thread_id", "")).strip() or None
-                    hist = ai.history(session_key, tid)[-80:] if tid else []
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": True,
-                            "mode": mode,
-                            "reply": _normalize_reply_for_prompt(
-                                msg, str(out.get("answer", "(no output)"))
-                            ),
-                            "thread_id": tid,
-                            "history": hist,
-                            "threads": ai.list_threads(session_key),
-                            "provider": "codex_cli",
-                            "executor": "codex_cli_exec",
-                            "tool_calls": tool_calls,
-                        },
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/chat/stream":
-                    msg = str(body.get("message", "")).strip()
-                    if not msg:
-                        return _json(
-                            self, 400, {"ok": False, "error": "missing_message"}
-                        )
-                    mode = str(body.get("mode", "")).strip() or "app_dev"
                     codex_login = _codex_cli_login_status()
-                    if not bool(codex_login.get("logged_in", False)):
-                        return _json(
-                            self,
-                            403,
-                            {
-                                "ok": False,
-                                "error": "codex_login_required",
-                                "executor": "blocked",
-                                "can_execute": False,
-                            },
-                        )
-                    model = (
-                        str(body.get("model", "")).strip()
-                        or str(
+                    err, req = parse_clean_chat_request(
+                        body=body,
+                        codex_login=codex_login,
+                        env_model=str(
                             os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ).strip()
-                        or "gpt-5-codex"
+                        ),
+                        env_timeout=str(
+                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                        ),
+                        sanitize_attachments_fn=_sanitize_agent_attachments,
                     )
-                    clean_timeout_s = int(
-                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
-                    )
-                    attachments = _sanitize_agent_attachments(body.get("attachments"))
-                    thread_id = str(body.get("thread_id", "")).strip() or None
-                    session_key = f"local:clean:{mode}"
-                    auto_tools = bool(body.get("auto_tools", False))
-                    tool_calls: list[Dict[str, Any]] = []
-                    if auto_tools:
-                        tool_calls = _run_clean_auto_tools(message=msg, model=model)
-                    ctx = _build_clean_agent_context(
-                        mode=mode,
-                        session_key=session_key,
-                        thread_id=thread_id,
-                        attachments=attachments,
-                        clean_tool_calls=tool_calls,
-                    )
+                    if err is not None:
+                        code, payload = err
+                        return _json(self, code, payload)
+                    assert req is not None
 
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "keep-alive")
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                    self.send_header(
-                        "Access-Control-Allow-Headers",
-                        "Content-Type, Authorization, X-Session-Token",
+                    apply_sse_headers(
+                        send_response=self.send_response,
+                        send_header=self.send_header,
+                        end_headers=self.end_headers,
                     )
-                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-                    self.end_headers()
 
                     disconnected = threading.Event()
                     cancelled = threading.Event()
 
-                    def send_evt(name: str, payload_obj: Dict[str, Any]) -> None:
-                        if disconnected.is_set():
-                            return
-                        blob = (
-                            f"event: {name}\ndata: {json.dumps(payload_obj, ensure_ascii=True)}\n\n"
-                        ).encode("utf-8")
-                        try:
-                            self.wfile.write(blob)
-                            self.wfile.flush()
-                        except Exception:
-                            disconnected.set()
-                            cancelled.set()
+                    send_evt = make_sse_emitter(
+                        wfile=self.wfile,
+                        is_disconnected=lambda: disconnected.is_set(),
+                        on_write_error=lambda: (disconnected.set(), cancelled.set()),
+                    )
 
                     send_evt("start", {"ok": True})
-                    try:
-                        out = ai.chat_codex_cli_stream(
-                            message=msg,
-                            context=ctx,
-                            session_key=session_key,
-                            model=model,
-                            thread_id=thread_id,
-                            system_prompt=_clean_system_prompt(mode),
-                            timeout_s_override=max(30, clean_timeout_s),
-                            cancel_event=cancelled,
-                            on_progress=lambda line: send_evt(
-                                "progress", {"line": line}
-                            ),
-                            on_delta=lambda txt: send_evt("delta", {"text": txt}),
-                        )
-                        if disconnected.is_set():
-                            return
-                        tid = str(out.get("thread_id", "")).strip() or None
-                        hist = ai.history(session_key, tid)[-80:] if tid else []
-                        send_evt(
-                            "done",
-                            {
-                                "ok": True,
-                                "mode": mode,
-                                "reply": _normalize_reply_for_prompt(
-                                    msg, str(out.get("answer", "(no output)"))
-                                ),
-                                "thread_id": tid,
-                                "history": hist,
-                                "threads": ai.list_threads(session_key),
-                                "provider": "codex_cli",
-                                "executor": "codex_cli_exec",
-                                "tool_calls": tool_calls,
-                            },
-                        )
-                    except Exception as exc:
-                        if disconnected.is_set():
-                            return
-                        send_evt(
-                            "error",
-                            {
-                                "ok": False,
-                                "error": str(exc),
-                                "executor": "codex_cli_exec",
-                                "tool_calls": tool_calls,
-                            },
-                        )
+                    run_clean_chat_stream(
+                        msg=str(req["msg"]),
+                        mode=str(req["mode"]),
+                        model=str(req["model"]),
+                        clean_timeout_s=int(req["clean_timeout_s"]),
+                        session_key=str(req["session_key"]),
+                        thread_id=req.get("thread_id"),
+                        attachments=list(req.get("attachments") or []),
+                        auto_tools=bool(req.get("auto_tools", False)),
+                        ai=ai,
+                        run_auto_tools=_run_clean_auto_tools,
+                        build_context=_build_clean_agent_context,
+                        system_prompt_for_mode=_clean_system_prompt,
+                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
+                        emit=send_evt,
+                        is_disconnected=lambda: disconnected.is_set(),
+                        cancel_event=cancelled,
+                    )
                     return
 
                 if u.path == "/agent/clean/preflight":
-                    mode = str(body.get("mode", "")).strip() or "app_dev"
-                    max_ms = max(1000, int(body.get("max_ms", 45000) or 45000))
-                    max_ms_tools = max(
-                        max_ms, int(body.get("max_ms_tools", 120000) or 120000)
-                    )
-                    gate_only = bool(body.get("gate_only", False))
-                    with_compile = bool(body.get("with_compile", False))
                     codex_login = _codex_cli_login_status()
-                    if not bool(codex_login.get("logged_in", False)):
-                        return _json(
-                            self,
-                            403,
-                            {
-                                "ok": False,
-                                "error": "codex_login_required",
-                                "results": [],
-                            },
-                        )
-                    model = (
-                        str(body.get("model", "")).strip()
-                        or str(
+                    err, req = parse_clean_preflight_request(
+                        body=body,
+                        codex_login=codex_login,
+                        env_model=str(
                             os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ).strip()
-                        or "gpt-5-codex"
-                    )
-                    sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    manifest_gate = firmware.validate_runtime_manifest(
-                        sketch=sketch, require_exists=True
-                    )
-                    profile_state = profiles.list()
-                    active_profile_id = str(
-                        profile_state.get("active_profile_id") or ""
-                    ).strip()
-                    active_profile = next(
-                        (
-                            p
-                            for p in list(profile_state.get("profiles") or [])
-                            if isinstance(p, dict)
-                            and str(p.get("profile_id", "")).strip()
-                            == active_profile_id
                         ),
-                        None,
+                        env_timeout=str(
+                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                        ),
+                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
                     )
-                    compat_gate = _runtime_manifest_profile_compatibility(
-                        manifest_validation=manifest_gate,
-                        active_profile=active_profile
-                        if isinstance(active_profile, dict)
-                        else None,
-                        targets=firmware.list_targets(),
+                    if err is not None:
+                        code, payload = err
+                        return _json(self, code, payload)
+                    assert req is not None
+                    manifest_gate, compat_gate, active_profile_id = (
+                        resolve_manifest_gates(
+                            firmware=firmware,
+                            profiles=profiles,
+                            compatibility_fn=_runtime_manifest_profile_compatibility,
+                            sketch=str(req["sketch"]),
+                        )
                     )
-                    if not bool(manifest_gate.get("ok", False)):
-                        reason = "runtime_manifest_invalid:" + ", ".join(
-                            list(manifest_gate.get("errors") or [])[:5]
-                        )
-                        payload = {
-                            "ok": False,
-                            "mode": mode,
-                            "failures": 1,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "gate": {
-                                "runtime_manifest": manifest_gate,
-                                "manifest_profile_compat": compat_gate,
-                                "active_profile_id": active_profile_id or None,
-                                "fail_closed": True,
-                            },
-                            "results": [
-                                {
-                                    "id": "manifest_gate",
-                                    "ok": False,
-                                    "dt_ms": 0,
-                                    "limit_ms": max_ms,
-                                    "expect_tools": False,
-                                    "tool_calls": [],
-                                    "error": reason,
-                                    "reply": "runtime manifest gate blocked preflight",
-                                }
-                            ],
-                        }
-                        validate_clean_preflight_response(payload)
-                        return _json(self, 200, payload)
-                    if not bool(compat_gate.get("ok", False)):
-                        reason = "runtime_manifest_profile_incompatible:" + ", ".join(
-                            list(compat_gate.get("errors") or [])[:5]
-                        )
-                        payload = {
-                            "ok": False,
-                            "mode": mode,
-                            "failures": 1,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "gate": {
-                                "runtime_manifest": manifest_gate,
-                                "manifest_profile_compat": compat_gate,
-                                "active_profile_id": active_profile_id or None,
-                                "fail_closed": True,
-                            },
-                            "results": [
-                                {
-                                    "id": "manifest_profile_compat_gate",
-                                    "ok": False,
-                                    "dt_ms": 0,
-                                    "limit_ms": max_ms,
-                                    "expect_tools": False,
-                                    "tool_calls": [],
-                                    "error": reason,
-                                    "reply": "runtime manifest/profile compatibility gate blocked preflight",
-                                }
-                            ],
-                        }
-                        validate_clean_preflight_response(payload)
-                        return _json(self, 200, payload)
-                    if gate_only:
-                        payload = {
-                            "ok": True,
-                            "mode": mode,
-                            "failures": 0,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "gate": {
-                                "runtime_manifest": manifest_gate,
-                                "manifest_profile_compat": compat_gate,
-                                "active_profile_id": active_profile_id or None,
-                                "fail_closed": True,
-                                "gate_only": True,
-                            },
-                            "results": [
-                                {
-                                    "id": "manifest_gate",
-                                    "ok": True,
-                                    "dt_ms": 0,
-                                    "limit_ms": max_ms,
-                                    "expect_tools": False,
-                                    "tool_calls": [],
-                                    "error": "",
-                                    "reply": "runtime manifest gates passed",
-                                }
-                            ],
-                        }
-                        validate_clean_preflight_response(payload)
-                        return _json(self, 200, payload)
-                    clean_timeout_s = int(
-                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    payload = run_clean_preflight(
+                        mode=str(req["mode"]),
+                        max_ms=int(req["max_ms"]),
+                        max_ms_tools=int(req["max_ms_tools"]),
+                        gate_only=bool(req["gate_only"]),
+                        with_compile=bool(req["with_compile"]),
+                        model=str(req["model"]),
+                        clean_timeout_s=int(req["clean_timeout_s"]),
+                        manifest_gate=manifest_gate,
+                        compat_gate=compat_gate,
+                        active_profile_id=active_profile_id,
+                        ai=ai,
+                        run_auto_tools=_run_clean_auto_tools,
+                        build_context=_build_clean_agent_context,
+                        system_prompt_for_mode=_clean_system_prompt,
+                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
+                        validate_preflight_payload=validate_clean_preflight_response,
                     )
-                    questions = [
-                        "one line only: preflight q1 ok",
-                        "run connect probe [tool:connect_probe] and summarize in one line",
-                        "run compat probe [tool:compat_probe] and summarize in one line",
-                    ]
-                    if with_compile:
-                        questions.append(
-                            "compile profiled runtime [tool:compile_profiled_runtime_v1] and report one-line result"
-                        )
-                    questions.extend(
-                        [
-                            "one line: confirm clean lane is codex-cli runtime",
-                            "one line only: preflight complete",
-                        ]
-                    )
-                    session_key = f"local:clean:{mode}"
-                    thread = ai.create_thread(session_key, "Clean Preflight")
-                    thread_id = str(thread.get("id", "")).strip() or None
-                    results: list[Dict[str, Any]] = []
-                    failures = 0
-                    for idx, prompt in enumerate(questions):
-                        expect_tools = "[tool:" in prompt.lower()
-                        limit_ms = max_ms_tools if expect_tools else max_ms
-                        tool_calls: list[Dict[str, Any]] = []
-                        if expect_tools:
-                            tool_calls = _run_clean_auto_tools(
-                                message=prompt, model=model
-                            )
-                        ctx = _build_clean_agent_context(
-                            mode=mode,
-                            session_key=session_key,
-                            thread_id=thread_id,
-                            attachments=None,
-                            clean_tool_calls=tool_calls,
-                        )
-                        t0 = int(time.time() * 1000)
-                        reply = ""
-                        ok = True
-                        error = ""
-                        try:
-                            out = ai.chat_codex_cli(
-                                message=prompt,
-                                context=ctx,
-                                session_key=session_key,
-                                model=model,
-                                thread_id=thread_id,
-                                system_prompt=_clean_system_prompt(mode),
-                                timeout_s_override=max(30, clean_timeout_s),
-                            )
-                            thread_id = (
-                                str(out.get("thread_id", "")).strip() or thread_id
-                            )
-                            reply = str(out.get("answer", "(no output)"))
-                        except Exception as exc:
-                            ok = False
-                            error = str(exc)
-                        dt_ms = int(time.time() * 1000) - t0
-                        if expect_tools and len(tool_calls) <= 0:
-                            ok = False
-                            error = error or "tool_calls_missing"
-                        if dt_ms > limit_ms:
-                            ok = False
-                            error = error or f"slow:{dt_ms}>{limit_ms}"
-                        if not reply.strip():
-                            ok = False
-                            error = error or "empty_reply"
-                        if not ok:
-                            failures += 1
-                        results.append(
-                            {
-                                "id": f"q{idx + 1}",
-                                "ok": ok,
-                                "dt_ms": dt_ms,
-                                "limit_ms": limit_ms,
-                                "expect_tools": expect_tools,
-                                "tool_calls": tool_calls,
-                                "error": error,
-                                "reply": _normalize_reply_for_prompt(prompt, reply)[
-                                    :240
-                                ],
-                            }
-                        )
-                    payload = {
-                        "ok": failures == 0,
-                        "mode": mode,
-                        "failures": failures,
-                        "max_ms": max_ms,
-                        "max_ms_tools": max_ms_tools,
-                        "results": results,
-                    }
-                    validate_clean_preflight_response(payload)
                     return _json(self, 200, payload)
 
                 if u.path == "/agent/clean/preflight/stream":
-                    mode = str(body.get("mode", "")).strip() or "app_dev"
-                    max_ms = max(1000, int(body.get("max_ms", 45000) or 45000))
-                    max_ms_tools = max(
-                        max_ms, int(body.get("max_ms_tools", 120000) or 120000)
-                    )
-                    gate_only = bool(body.get("gate_only", False))
-                    with_compile = bool(body.get("with_compile", False))
                     codex_login = _codex_cli_login_status()
-                    if not bool(codex_login.get("logged_in", False)):
-                        return _json(
-                            self,
-                            403,
-                            {
-                                "ok": False,
-                                "error": "codex_login_required",
-                                "results": [],
-                            },
-                        )
-                    model = (
-                        str(body.get("model", "")).strip()
-                        or str(
+                    err, req = parse_clean_preflight_request(
+                        body=body,
+                        codex_login=codex_login,
+                        env_model=str(
                             os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ).strip()
-                        or "gpt-5-codex"
-                    )
-                    sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    manifest_gate = firmware.validate_runtime_manifest(
-                        sketch=sketch, require_exists=True
-                    )
-                    profile_state = profiles.list()
-                    active_profile_id = str(
-                        profile_state.get("active_profile_id") or ""
-                    ).strip()
-                    active_profile = next(
-                        (
-                            p
-                            for p in list(profile_state.get("profiles") or [])
-                            if isinstance(p, dict)
-                            and str(p.get("profile_id", "")).strip()
-                            == active_profile_id
                         ),
-                        None,
+                        env_timeout=str(
+                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                        ),
+                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
                     )
-                    compat_gate = _runtime_manifest_profile_compatibility(
-                        manifest_validation=manifest_gate,
-                        active_profile=active_profile
-                        if isinstance(active_profile, dict)
-                        else None,
-                        targets=firmware.list_targets(),
+                    if err is not None:
+                        code, payload = err
+                        return _json(self, code, payload)
+                    assert req is not None
+                    manifest_gate, compat_gate, active_profile_id = (
+                        resolve_manifest_gates(
+                            firmware=firmware,
+                            profiles=profiles,
+                            compatibility_fn=_runtime_manifest_profile_compatibility,
+                            sketch=str(req["sketch"]),
+                        )
                     )
 
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "keep-alive")
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                    self.send_header(
-                        "Access-Control-Allow-Headers",
-                        "Content-Type, Authorization, X-Session-Token",
+                    apply_sse_headers(
+                        send_response=self.send_response,
+                        send_header=self.send_header,
+                        end_headers=self.end_headers,
                     )
-                    self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-                    self.end_headers()
+                    send_evt = make_sse_emitter(wfile=self.wfile)
 
-                    def send_evt(name: str, payload_obj: Dict[str, Any]) -> None:
-                        blob = (
-                            f"event: {name}\ndata: {json.dumps(payload_obj, ensure_ascii=True)}\n\n"
-                        ).encode("utf-8")
-                        self.wfile.write(blob)
-                        self.wfile.flush()
-
-                    send_evt("start", {"ok": True, "mode": mode})
-
-                    if not bool(manifest_gate.get("ok", False)):
-                        reason = "runtime_manifest_invalid:" + ", ".join(
-                            list(manifest_gate.get("errors") or [])[:5]
-                        )
-                        result = {
-                            "id": "manifest_gate",
-                            "ok": False,
-                            "dt_ms": 0,
-                            "limit_ms": max_ms,
-                            "expect_tools": False,
-                            "tool_calls": [],
-                            "error": reason,
-                            "reply": "runtime manifest gate blocked preflight",
-                        }
-                        send_evt(
-                            "check_done", {"index": 1, "total": 1, "result": result}
-                        )
-                        done_payload = {
-                            "ok": False,
-                            "mode": mode,
-                            "failures": 1,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "results": [result],
-                        }
-                        validate_clean_preflight_response(done_payload)
-                        send_evt(
-                            "done",
-                            {
-                                "ok": done_payload["ok"],
-                                "mode": done_payload["mode"],
-                                "failures": done_payload["failures"],
-                                "max_ms": done_payload["max_ms"],
-                                "max_ms_tools": done_payload["max_ms_tools"],
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                },
-                                "results": done_payload["results"],
-                            },
-                        )
-                        return
-
-                    if not bool(compat_gate.get("ok", False)):
-                        reason = "runtime_manifest_profile_incompatible:" + ", ".join(
-                            list(compat_gate.get("errors") or [])[:5]
-                        )
-                        result = {
-                            "id": "manifest_profile_compat_gate",
-                            "ok": False,
-                            "dt_ms": 0,
-                            "limit_ms": max_ms,
-                            "expect_tools": False,
-                            "tool_calls": [],
-                            "error": reason,
-                            "reply": "runtime manifest/profile compatibility gate blocked preflight",
-                        }
-                        send_evt(
-                            "check_done", {"index": 1, "total": 1, "result": result}
-                        )
-                        done_payload = {
-                            "ok": False,
-                            "mode": mode,
-                            "failures": 1,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "results": [result],
-                        }
-                        validate_clean_preflight_response(done_payload)
-                        send_evt(
-                            "done",
-                            {
-                                "ok": done_payload["ok"],
-                                "mode": done_payload["mode"],
-                                "failures": done_payload["failures"],
-                                "max_ms": done_payload["max_ms"],
-                                "max_ms_tools": done_payload["max_ms_tools"],
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                },
-                                "results": done_payload["results"],
-                            },
-                        )
-                        return
-
-                    if gate_only:
-                        result = {
-                            "id": "manifest_gate",
-                            "ok": True,
-                            "dt_ms": 0,
-                            "limit_ms": max_ms,
-                            "expect_tools": False,
-                            "tool_calls": [],
-                            "error": "",
-                            "reply": "runtime manifest gates passed",
-                        }
-                        send_evt(
-                            "check_done", {"index": 1, "total": 1, "result": result}
-                        )
-                        done_payload = {
-                            "ok": True,
-                            "mode": mode,
-                            "failures": 0,
-                            "max_ms": max_ms,
-                            "max_ms_tools": max_ms_tools,
-                            "results": [result],
-                        }
-                        validate_clean_preflight_response(done_payload)
-                        send_evt(
-                            "done",
-                            {
-                                "ok": done_payload["ok"],
-                                "mode": done_payload["mode"],
-                                "failures": done_payload["failures"],
-                                "max_ms": done_payload["max_ms"],
-                                "max_ms_tools": done_payload["max_ms_tools"],
-                                "gate": {
-                                    "runtime_manifest": manifest_gate,
-                                    "manifest_profile_compat": compat_gate,
-                                    "active_profile_id": active_profile_id or None,
-                                    "fail_closed": True,
-                                    "gate_only": True,
-                                },
-                                "results": done_payload["results"],
-                            },
-                        )
-                        return
-
-                    clean_timeout_s = int(
-                        os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
+                    send_evt("start", {"ok": True, "mode": str(req["mode"])})
+                    run_clean_preflight(
+                        mode=str(req["mode"]),
+                        max_ms=int(req["max_ms"]),
+                        max_ms_tools=int(req["max_ms_tools"]),
+                        gate_only=bool(req["gate_only"]),
+                        with_compile=bool(req["with_compile"]),
+                        model=str(req["model"]),
+                        clean_timeout_s=int(req["clean_timeout_s"]),
+                        manifest_gate=manifest_gate,
+                        compat_gate=compat_gate,
+                        active_profile_id=active_profile_id,
+                        ai=ai,
+                        run_auto_tools=_run_clean_auto_tools,
+                        build_context=_build_clean_agent_context,
+                        system_prompt_for_mode=_clean_system_prompt,
+                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
+                        validate_preflight_payload=validate_clean_preflight_response,
+                        emit=send_evt,
                     )
-                    questions = [
-                        "one line only: preflight q1 ok",
-                        "run connect probe [tool:connect_probe] and summarize in one line",
-                        "run compat probe [tool:compat_probe] and summarize in one line",
-                    ]
-                    if with_compile:
-                        questions.append(
-                            "compile profiled runtime [tool:compile_profiled_runtime_v1] and report one-line result"
-                        )
-                    questions.extend(
-                        [
-                            "one line: confirm clean lane is codex-cli runtime",
-                            "one line only: preflight complete",
-                        ]
-                    )
-                    session_key = f"local:clean:{mode}"
-                    thread = ai.create_thread(session_key, "Clean Preflight")
-                    thread_id = str(thread.get("id", "")).strip() or None
-                    results: list[Dict[str, Any]] = []
-                    failures = 0
-                    total = len(questions)
-                    for idx, prompt in enumerate(questions):
-                        expect_tools = "[tool:" in prompt.lower()
-                        send_evt(
-                            "check_start",
-                            {
-                                "index": idx + 1,
-                                "total": total,
-                                "id": f"q{idx + 1}",
-                                "expect_tools": expect_tools,
-                                "prompt": prompt,
-                            },
-                        )
-                        limit_ms = max_ms_tools if expect_tools else max_ms
-                        tool_calls: list[Dict[str, Any]] = []
-                        if expect_tools:
-                            tool_calls = _run_clean_auto_tools(
-                                message=prompt, model=model
-                            )
-                        ctx = _build_clean_agent_context(
-                            mode=mode,
-                            session_key=session_key,
-                            thread_id=thread_id,
-                            attachments=None,
-                            clean_tool_calls=tool_calls,
-                        )
-                        t0 = int(time.time() * 1000)
-                        reply = ""
-                        ok = True
-                        error = ""
-                        try:
-                            out = ai.chat_codex_cli(
-                                message=prompt,
-                                context=ctx,
-                                session_key=session_key,
-                                model=model,
-                                thread_id=thread_id,
-                                system_prompt=_clean_system_prompt(mode),
-                                timeout_s_override=max(30, clean_timeout_s),
-                            )
-                            thread_id = (
-                                str(out.get("thread_id", "")).strip() or thread_id
-                            )
-                            reply = str(out.get("answer", "(no output)"))
-                        except Exception as exc:
-                            ok = False
-                            error = str(exc)
-                        dt_ms = int(time.time() * 1000) - t0
-                        if expect_tools and len(tool_calls) <= 0:
-                            ok = False
-                            error = error or "tool_calls_missing"
-                        if dt_ms > limit_ms:
-                            ok = False
-                            error = error or f"slow:{dt_ms}>{limit_ms}"
-                        if not reply.strip():
-                            ok = False
-                            error = error or "empty_reply"
-                        if not ok:
-                            failures += 1
-                        result = {
-                            "id": f"q{idx + 1}",
-                            "ok": ok,
-                            "dt_ms": dt_ms,
-                            "limit_ms": limit_ms,
-                            "expect_tools": expect_tools,
-                            "tool_calls": tool_calls,
-                            "error": error,
-                            "reply": _normalize_reply_for_prompt(prompt, reply)[:240],
-                        }
-                        results.append(result)
-                        send_evt(
-                            "check_done",
-                            {"index": idx + 1, "total": total, "result": result},
-                        )
-
-                    done_payload = {
-                        "ok": failures == 0,
-                        "mode": mode,
-                        "failures": failures,
-                        "max_ms": max_ms,
-                        "max_ms_tools": max_ms_tools,
-                        "results": results,
-                    }
-                    validate_clean_preflight_response(done_payload)
-                    send_evt("done", done_payload)
                     return
 
                 if u.path == "/agent/mode":
@@ -11169,6 +12700,9 @@ def build_handler(
                     return _json(self, 200, {"ok": True, "agent": state})
 
                 if u.path == "/agent/thread/new":
+                    guard = _legacy_execution_guard(u.path)
+                    if guard is not None:
+                        return _json(self, 403, guard)
                     mode_state = agent_mission.status()
                     mode = str(body.get("mode", "")).strip() or str(
                         mode_state.get("mode", "robot_dev")
@@ -11197,6 +12731,9 @@ def build_handler(
                     )
 
                 if u.path == "/agent/thread/select":
+                    guard = _legacy_execution_guard(u.path)
+                    if guard is not None:
+                        return _json(self, 403, guard)
                     mode_state = agent_mission.status()
                     mode = str(body.get("mode", "")).strip() or str(
                         mode_state.get("mode", "robot_dev")
@@ -11234,6 +12771,9 @@ def build_handler(
                     )
 
                 if u.path == "/agent/chat":
+                    guard = _legacy_execution_guard(u.path)
+                    if guard is not None:
+                        return _json(self, 403, guard)
                     msg = str(body.get("message", "")).strip()
                     if not msg:
                         return _json(
@@ -11471,6 +13011,9 @@ def build_handler(
                     )
 
                 if u.path == "/agent/chat/stream":
+                    guard = _legacy_execution_guard(u.path)
+                    if guard is not None:
+                        return _json(self, 403, guard)
                     msg = str(body.get("message", "")).strip()
                     if not msg:
                         return _json(
@@ -12720,6 +14263,13 @@ def build_handler(
                                 "contract_errors": contract_errors,
                             },
                         )
+                    quality_gate = _evaluate_tuning_recommendation_quality(
+                        recommendation=recommendation,
+                        telemetry=telemetry,
+                        trace_paths=cleaned,
+                        replay_reports=replay_reports,
+                        surrogate_report=surrogate_report,
+                    )
                     return _json(
                         self,
                         200,
@@ -12728,6 +14278,7 @@ def build_handler(
                             "recommendation": recommendation,
                             "surrogate": surrogate_report,
                             "replay": replay_reports,
+                            "quality_gate": quality_gate,
                         },
                     )
 
@@ -12966,44 +14517,15 @@ def build_handler(
                                 "contract_errors": contract_errors,
                             },
                         )
-
-                    reasons: list[str] = []
-                    if not cleaned:
-                        reasons.append("evidence_missing_trace_paths")
-                    replay_fail_count = sum(
-                        1
-                        for rep in replay_reports
-                        if not bool(
-                            (
-                                (rep.get("result") or {})
-                                if isinstance(rep, dict)
-                                else {}
-                            ).get("pass", False)
-                        )
+                    quality_gate = _evaluate_tuning_recommendation_quality(
+                        recommendation=recommendation,
+                        telemetry=telemetry,
+                        trace_paths=cleaned,
+                        replay_reports=replay_reports,
+                        surrogate_report=surrogate_report,
                     )
-                    if replay_fail_count > 0:
-                        reasons.append(f"replay_failures:{replay_fail_count}")
-                    if isinstance(surrogate_report, dict) and surrogate_report.get(
-                        "ok"
-                    ):
-                        sim_metrics = (
-                            (surrogate_report.get("simulation") or {})
-                            if isinstance(surrogate_report.get("simulation"), dict)
-                            else {}
-                        ).get("metrics", {})
-                        model = (
-                            surrogate_report.get("model", {})
-                            if isinstance(surrogate_report.get("model"), dict)
-                            else {}
-                        )
-                        if bool((sim_metrics or {}).get("faceplant", False)):
-                            reasons.append("surrogate_faceplant_risk")
-                        if float((model or {}).get("confidence", 0.0) or 0.0) < 0.35:
-                            reasons.append("surrogate_confidence_low")
-                    if int(recommendation.get("score_pct", 0)) < 60:
-                        reasons.append("recommendation_score_low")
-
-                    gate_ok = len(reasons) == 0
+                    reasons = list(quality_gate.get("reasons") or [])
+                    gate_ok = bool(quality_gate.get("gate_ok", False))
                     preflight_node: Optional[Dict[str, Any]] = None
                     signature = _build_tuning_apply_signature(family, target)
                     if gate_ok:
@@ -13027,6 +14549,7 @@ def build_handler(
                                     recommendation.get("score_pct", 0)
                                 ),
                                 "signature": signature,
+                                "quality_gate": quality_gate,
                                 **(preflight_node or {}),
                             },
                             "recommendation": recommendation,
@@ -13070,9 +14593,59 @@ def build_handler(
                     _require_action_allowed(
                         "burst_arm", gateway, control, prearm_gate=prearm_safety
                     )
-                    delay_ms = int(body.get("delay_ms", 3000) or 3000)
+                    active_profile = _active_robot_profile()
+                    defaults = _burst_threshold_defaults(active_profile)
+                    delay_raw = body.get("delay_ms")
+                    delay_ms = int(delay_raw) if delay_raw is not None else 3000
                     lines = int(body.get("lines", 80) or 80)
-                    freq_hz = float(body.get("freq_hz", 8.0) or 8.0)
+                    freq_hz = (
+                        float(body.get("freq_hz"))
+                        if body.get("freq_hz") is not None
+                        else float(defaults.get("freq_hz", 25.0))
+                    )
+                    trigger_enabled = (
+                        bool(body.get("trigger_enabled"))
+                        if body.get("trigger_enabled") is not None
+                        else bool(defaults.get("trigger_enabled", True))
+                    )
+                    prebuffer_lines = (
+                        int(body.get("prebuffer_lines"))
+                        if body.get("prebuffer_lines") is not None
+                        else int(defaults.get("prebuffer_lines", 24))
+                    )
+                    trigger_angle_deg = (
+                        float(body.get("trigger_angle_deg"))
+                        if body.get("trigger_angle_deg") is not None
+                        else float(defaults.get("trigger_angle_deg", 8.0))
+                    )
+                    trigger_out_frac = (
+                        float(body.get("trigger_out_frac"))
+                        if body.get("trigger_out_frac") is not None
+                        else float(defaults.get("trigger_out_frac", 0.90))
+                    )
+                    trigger_runaway = (
+                        float(body.get("trigger_runaway"))
+                        if body.get("trigger_runaway") is not None
+                        else float(defaults.get("trigger_runaway", 0.65))
+                    )
+                    post_trigger_lines = (
+                        int(body.get("post_trigger_lines"))
+                        if body.get("post_trigger_lines") is not None
+                        else int(defaults.get("post_trigger_lines", 20))
+                    )
+                    run_intent = (
+                        str(body.get("run_intent", "unassisted_tuning")).strip()
+                        or "unassisted_tuning"
+                    )
+                    changed_params_raw = body.get("changed_params", [])
+                    changed_params: list[str] = []
+                    if isinstance(changed_params_raw, list):
+                        changed_params = [
+                            str(x).strip() for x in changed_params_raw if str(x).strip()
+                        ][:4]
+                    operator_outcome = str(body.get("operator_outcome", "")).strip()
+                    operator_assisted = bool(body.get("operator_assisted", False))
+                    operator_notes = str(body.get("operator_notes", "")).strip()
                     h = gateway.health()
                     st = dict(h.get("last_status", {}))
                     if not bool(h.get("connected", False)):
@@ -13081,7 +14654,20 @@ def build_handler(
                         )
                     cmd = f"BURSTCSV {max(0, min(delay_ms, 60000))} {max(1, min(lines, 3000))}"
                     host = host_capture.arm(
-                        delay_ms=delay_ms, lines=lines, freq_hz=freq_hz
+                        delay_ms=delay_ms,
+                        lines=lines,
+                        freq_hz=freq_hz,
+                        trigger_enabled=trigger_enabled,
+                        prebuffer_lines=prebuffer_lines,
+                        trigger_angle_deg=trigger_angle_deg,
+                        trigger_out_frac=trigger_out_frac,
+                        trigger_runaway=trigger_runaway,
+                        post_trigger_lines=post_trigger_lines,
+                        run_intent=run_intent,
+                        changed_params=changed_params,
+                        operator_outcome=operator_outcome,
+                        operator_assisted=operator_assisted,
+                        operator_notes=operator_notes,
                     )
                     fw: Dict[str, Any] = {"ok": True, "cmd": cmd, "queued": True}
                     try:
@@ -13098,6 +14684,35 @@ def build_handler(
                             "queued": True,
                             "status": st,
                             "firmware": fw,
+                            "capture_defaults": defaults,
+                            "burst": burst_status(),
+                            "host_capture": host,
+                        },
+                    )
+
+                if u.path == "/burst/label":
+                    outcome = str(body.get("operator_outcome", "")).strip()
+                    assisted = bool(body.get("operator_assisted", False))
+                    notes = str(body.get("operator_notes", "")).strip()
+                    run_intent = str(body.get("run_intent", "")).strip()
+                    changed_params_raw = body.get("changed_params", None)
+                    changed_params: Optional[list[str]] = None
+                    if isinstance(changed_params_raw, list):
+                        changed_params = [
+                            str(x).strip() for x in changed_params_raw if str(x).strip()
+                        ][:4]
+                    host = host_capture.label_latest_run(
+                        outcome=outcome,
+                        assisted=assisted,
+                        notes=notes,
+                        run_intent=run_intent,
+                        changed_params=changed_params,
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
                             "burst": burst_status(),
                             "host_capture": host,
                         },
@@ -13117,14 +14732,34 @@ def build_handler(
                         prearm = prearm_safety.mark_pass(report)
                     else:
                         prearm = prearm_safety.require("prearm_failed")
-                    payload = {
-                        "ok": bool(report.get("ok", False)),
-                        "prearm_check": report,
-                        "prearm_safety": prearm,
-                        "action_gates": _resolve_action_gates(
+                    try:
+                        _report_design_observation(
+                            session_key=(
+                                str(body.get("session_key", "")).strip()
+                                or "local:prearm"
+                            ),
+                            success=bool(report.get("ok", False)),
+                            source="prearm_check",
+                            note=(
+                                str(report.get("summary", "")).strip()
+                                or str(report.get("error", "")).strip()
+                            ),
+                            profile_id=str(body.get("profile_id", "")).strip(),
+                            profile_label=str(body.get("profile_label", "")).strip(),
+                            sketch_revision=str(
+                                body.get("sketch_revision", "")
+                            ).strip(),
+                            test_type="prearm",
+                        )
+                    except Exception:
+                        pass
+                    payload = build_arm_precheck_payload(
+                        report=report,
+                        prearm_safety=prearm,
+                        action_gates=_resolve_action_gates(
                             gateway, control, prearm_gate=prearm_safety
                         ),
-                    }
+                    )
                     validate_prearm_precheck_response(payload)
                     return _json(
                         self,
@@ -13141,11 +14776,10 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_status_control_payload(
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/arm":
@@ -13157,11 +14791,10 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_status_control_payload(
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/disarm":
@@ -13173,11 +14806,10 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": gateway.get_status(),
-                            "control": control.snapshot(),
-                        },
+                        build_status_control_payload(
+                            status=gateway.get_status(),
+                            control=control.snapshot(),
+                        ),
                     )
 
                 if u.path == "/estop/latch":
@@ -13185,11 +14817,10 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": gateway.get_status(),
-                            "control": control.latch_estop(),
-                        },
+                        build_status_control_payload(
+                            status=gateway.get_status(),
+                            control=control.latch_estop(),
+                        ),
                     )
 
                 if u.path == "/estop/reset":
@@ -13197,11 +14828,10 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "status": gateway.get_status(),
-                            "control": control.reset_estop(),
-                        },
+                        build_status_control_payload(
+                            status=gateway.get_status(),
+                            control=control.reset_estop(),
+                        ),
                     )
 
                 if u.path == "/cal_zero":
@@ -13209,6 +14839,113 @@ def build_handler(
                     res = gateway.command(
                         "CAL ZERO", expect_contains="OK CAL ZERO", timeout=4.0
                     )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
+                    )
+
+                if u.path == "/imu/calibrate":
+                    _require_action_allowed("cal_zero", gateway, control)
+                    res = gateway.command("IMU CAL", expect_contains="IMU", timeout=8.0)
+                    outcome = _classify_imu_command_result(res, cmd_name="cal")
+                    if not bool(outcome.get("ok", False)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": outcome.get("error"),
+                                "detail": outcome.get("detail"),
+                                "result": res,
+                            },
+                        )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
+                    )
+
+                if u.path == "/imu/load":
+                    res = gateway.command(
+                        "IMU LOAD", expect_contains="IMU", timeout=4.0
+                    )
+                    outcome = _classify_imu_command_result(res, cmd_name="load")
+                    if not bool(outcome.get("ok", False)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": outcome.get("error"),
+                                "detail": outcome.get("detail"),
+                                "result": res,
+                            },
+                        )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
+                    )
+
+                if u.path == "/imu/save":
+                    res = gateway.command(
+                        "IMU SAVE", expect_contains="IMU", timeout=4.0
+                    )
+                    outcome = _classify_imu_command_result(res, cmd_name="save")
+                    if not bool(outcome.get("ok", False)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": outcome.get("error"),
+                                "detail": outcome.get("detail"),
+                                "result": res,
+                            },
+                        )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
+                    )
+
+                if u.path == "/imu/info":
+                    res = gateway.command(
+                        "IMU INFO", expect_contains="IMU", timeout=4.0
+                    )
+                    outcome = _classify_imu_command_result(res, cmd_name="info")
+                    if not bool(outcome.get("ok", False)):
+                        return _json(
+                            self,
+                            409,
+                            {
+                                "ok": False,
+                                "error": outcome.get("error"),
+                                "detail": outcome.get("detail"),
+                                "result": res,
+                            },
+                        )
                     return _json(
                         self,
                         200,
@@ -13228,6 +14965,36 @@ def build_handler(
                         self,
                         200,
                         {"ok": True, "result": res, "control": control.snapshot()},
+                    )
+
+                if u.path == "/loadcfg":
+                    res = gateway.command(
+                        "LOADCFG", expect_contains="OK LOADCFG", timeout=2.0
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
+                    )
+
+                if u.path == "/defaultcfg":
+                    res = gateway.command(
+                        "DEFAULTCFG", expect_contains="OK DEFAULTCFG", timeout=2.0
+                    )
+                    return _json(
+                        self,
+                        200,
+                        {
+                            "ok": True,
+                            "result": res,
+                            "status": gateway.get_status(),
+                            "control": control.snapshot(),
+                        },
                     )
 
                 if u.path == "/pid":
@@ -13569,7 +15336,7 @@ def main() -> int:
     _install_runtime_diagnostics()
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--port", default=os.environ.get("NANO_PORT", "/dev/cu.usbserial-2210")
+        "--port", default=os.environ.get("NANO_PORT", "/dev/tty.usbserial-2210")
     )
     ap.add_argument(
         "--baud", type=int, default=int(os.environ.get("NANO_BAUD", "115200"))
