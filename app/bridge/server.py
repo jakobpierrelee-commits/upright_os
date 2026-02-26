@@ -249,6 +249,7 @@ except ImportError:
 try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
+        build_agent_status_payload,
         build_agent_thread_state_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
@@ -263,6 +264,7 @@ try:
 except ImportError:
     from clean_ai import (  # type: ignore
         build_agent_chat_reply_payload,
+        build_agent_status_payload,
         build_agent_thread_state_payload,
         build_ai_knowledge_payload,
         build_ai_profiles_payload,
@@ -11391,16 +11393,15 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "agent": mode_state,
-                            "threads": ai.list_threads(session_key),
-                            "ai": ai.status(
+                        build_agent_status_payload(
+                            agent=mode_state,
+                            threads=ai.list_threads(session_key),
+                            ai=ai.status(
                                 configured=runtime_configured,
                                 model=runtime_model or "(unset)",
                                 session_key=session_key,
                             ),
-                        },
+                        ),
                     )
                 if u.path == "/ai/threads":
                     tok = _extract_auth_token(self)

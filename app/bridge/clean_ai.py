@@ -98,3 +98,12 @@ def build_agent_chat_reply_payload(
         "provider": provider,
         "executor": executor,
     }
+
+
+def build_agent_status_payload(
+    *,
+    agent: Dict[str, Any],
+    threads: List[Dict[str, Any]],
+    ai: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {"ok": True, "agent": agent, "threads": threads, "ai": ai}
