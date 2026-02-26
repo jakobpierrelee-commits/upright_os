@@ -12,12 +12,14 @@ try:
         build_surrogate_simulate_payload,
         build_sweep_payload,
     )
+    from app.bridge.clean_probe import build_tooling_traces_payload
 except ImportError:
     from clean_misc import (  # type: ignore
         build_replay_payload,
         build_surrogate_simulate_payload,
         build_sweep_payload,
     )
+    from clean_probe import build_tooling_traces_payload  # type: ignore
 
 
 def handle_trace_replay(
@@ -148,3 +150,15 @@ def handle_surrogate_simulate(
         )
     except Exception as exc:
         return 500, {"ok": False, "error": f"surrogate_error:{exc}"}
+
+
+def handle_tooling_traces_get(
+    *,
+    tooling_trace_candidates_fn: Callable[[], List[Dict[str, Any]]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /tooling/traces GET request.
+
+    Returns (status_code, payload).
+    """
+    return 200, build_tooling_traces_payload(traces=tooling_trace_candidates_fn())

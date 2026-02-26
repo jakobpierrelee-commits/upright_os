@@ -321,12 +321,14 @@ try:
     from app.bridge.routes_tooling import (
         handle_param_sweep,
         handle_surrogate_simulate,
+        handle_tooling_traces_get,
         handle_trace_replay,
     )
 except ImportError:
     from routes_tooling import (  # type: ignore
         handle_param_sweep,
         handle_surrogate_simulate,
+        handle_tooling_traces_get,
         handle_trace_replay,
     )
 try:
@@ -6078,11 +6080,10 @@ def build_handler(
                     )
                     return _json(self, code, payload)
                 if u.path == "/tooling/traces":
-                    return _json(
-                        self,
-                        200,
-                        build_tooling_traces_payload(traces=tooling_trace_candidates()),
+                    code, payload = handle_tooling_traces_get(
+                        tooling_trace_candidates_fn=tooling_trace_candidates,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/ai/metrics":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
