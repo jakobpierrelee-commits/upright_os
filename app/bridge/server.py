@@ -283,6 +283,16 @@ except ImportError:
         handle_trace_replay,
     )
 try:
+    from app.bridge.routes_commissioning import (
+        handle_commissioning_run,
+        handle_commissioning_step,
+    )
+except ImportError:
+    from routes_commissioning import (  # type: ignore
+        handle_commissioning_run,
+        handle_commissioning_step,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -12130,37 +12140,16 @@ def build_handler(
                     )
 
                 if u.path == "/commissioning/run":
-                    if gateway.health().get("connected", False):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": "serial_port_in_use_by_bridge",
-                                "hint": "Run commissioning_runner.py directly when bridge is stopped, or add step-mode commissioning through the bridge.",
-                            },
-                        )
-                    st = commissioning.run(
-                        port=body.get("port"),
-                        baud=body.get("baud"),
-                        config=body.get("config"),
-                        out_dir=body.get("out_dir"),
-                        auto_prompts=bool(body.get("auto_prompts", True)),
+                    code, payload = handle_commissioning_run(
+                        body=body,
+                        gateway=gateway,
+                        commissioning=commissioning,
                     )
-                    return _json(
-                        self, 200, build_commissioning_run_payload(commissioning=st)
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/commissioning/step":
-                    return _json(
-                        self,
-                        501,
-                        {
-                            "ok": False,
-                            "error": "not_implemented",
-                            "hint": "Use /commissioning/run for now",
-                        },
-                    )
+                    code, payload = handle_commissioning_step()
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/check":
                     return _json(
