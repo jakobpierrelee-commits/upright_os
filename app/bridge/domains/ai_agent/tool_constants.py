@@ -46,6 +46,71 @@ TELEMETRY_FIELDS = {
     "kd": "kd",
 }
 
+# Safe serial commands (allowlist)
+SAFE_COMMANDS = frozenset(
+    [
+        "PID",
+        "SETPOINT",
+        "MOTION",
+        "LIMITS",
+        "CAL ZERO",
+        "ZERO",
+        "ENCMODE",
+        "SAVECFG",
+        "LOADCFG",
+        "GET",
+        "HELP",
+        "LOGT",
+        "LOGCSV",
+    ]
+)
+
+# Blocked serial commands (require UI action)
+BLOCKED_COMMANDS = frozenset(
+    [
+        "ARM",
+        "DISARM",
+        "STATE",
+        "MOTOR",
+        "MOTOROFF",
+        "DEFAULTCFG",
+        "BURSTCSV",
+    ]
+)
+
+# Safe sketch variables (allowlist)
+SAFE_SKETCH_VARIABLES = frozenset(
+    [
+        "qAngle",
+        "qBias",
+        "rMeasure",
+        "LOOP_US",
+        "TEL_MS",
+        "STATUS_MS",
+        "ARM_HOLD_MS",
+        "burstTarget",
+        "burstDelayMs",
+        "BURST_BAL_ERR_DEG",
+        "BURST_STABLE_HOLD_MS",
+        "deadbandPwm",
+    ]
+)
+
+# Blocked sketch variables (pin/mode constants)
+BLOCKED_SKETCH_VARIABLES = frozenset(
+    [
+        "PIN_",
+        "MOTOR_L_PWM",
+        "MOTOR_R_PWM",
+        "IMU_SDA",
+        "IMU_SCL",
+        "MODE_",
+        "STATE_",
+        "CONFIG_MAGIC",
+        "CONFIG_VERSION",
+    ]
+)
+
 
 class T1Errors:
     """T1 (observation) error codes."""
