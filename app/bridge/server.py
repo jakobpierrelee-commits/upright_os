@@ -218,6 +218,7 @@ try:
         build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
+        build_tuning_recommend_payload,
         build_tuning_result_payload,
     )
 except ImportError:
@@ -227,6 +228,7 @@ except ImportError:
         build_commissioning_run_payload,
         build_commissioning_status_payload,
         build_lines_payload,
+        build_tuning_recommend_payload,
         build_tuning_result_payload,
     )
 try:
@@ -14379,13 +14381,12 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "recommendation": recommendation,
-                            "surrogate": surrogate_report,
-                            "replay": replay_reports,
-                            "quality_gate": quality_gate,
-                        },
+                        build_tuning_recommend_payload(
+                            recommendation=recommendation,
+                            surrogate=surrogate_report,
+                            replay=replay_reports,
+                            quality_gate=quality_gate,
+                        ),
                     )
 
                 if u.path == "/tooling/tuning/preflight":
