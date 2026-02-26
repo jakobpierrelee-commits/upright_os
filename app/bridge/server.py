@@ -315,6 +315,20 @@ except ImportError:
         handle_firmware_upload_guarded,
     )
 try:
+    from app.bridge.routes_profiles import (
+        handle_profiles_activate,
+        handle_profiles_delete,
+        handle_profiles_save,
+        handle_profiles_validate,
+    )
+except ImportError:
+    from routes_profiles import (  # type: ignore
+        handle_profiles_activate,
+        handle_profiles_delete,
+        handle_profiles_save,
+        handle_profiles_validate,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -12215,14 +12229,10 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/profiles/validate":
-                    duration_s = float(body.get("duration_s", 12.0))
-                    sample_interval_s = float(body.get("sample_interval_s", 0.25))
-                    report = profiles.validate(
-                        gateway,
-                        duration_s=duration_s,
-                        sample_interval_s=sample_interval_s,
+                    code, payload = handle_profiles_validate(
+                        body=body, profiles=profiles, gateway=gateway
                     )
-                    return _json(self, 200, build_validation_payload(validation=report))
+                    return _json(self, code, payload)
 
                 if u.path == "/firmware/runtime-manifest/validate":
                     sketch = str(body.get("sketch", "")).strip() or None
@@ -12380,55 +12390,16 @@ def build_handler(
                     )
 
                 if u.path == "/profiles/save":
-                    prof = body.get("profile")
-                    if not isinstance(prof, dict):
-                        return _json(
-                            self, 400, {"ok": False, "error": "profile_object_required"}
-                        )
-                    saved = profiles.save(prof)
-                    return _json(
-                        self,
-                        200,
-                        build_saved_profiles_payload(
-                            saved=saved, profiles=profiles.list()
-                        ),
-                    )
+                    code, payload = handle_profiles_save(body=body, profiles=profiles)
+                    return _json(self, code, payload)
 
                 if u.path == "/profiles/activate":
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    if not profile_id:
-                        return _json(
-                            self, 400, {"ok": False, "error": "profile_id_required"}
-                        )
-                    validation = body.get("validation")
-                    if not isinstance(validation, dict) or not bool(
-                        validation.get("ok", False)
-                    ):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": "validation_required_before_activation",
-                            },
-                        )
-                    out = profiles.activate(profile_id)
-                    return _json(
-                        self,
-                        200,
-                        build_active_profiles_payload(
-                            active=out, profiles=profiles.list()
-                        ),
-                    )
+                    code, payload = handle_profiles_activate(body=body, profiles=profiles)
+                    return _json(self, code, payload)
 
                 if u.path == "/profiles/delete":
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    if not profile_id:
-                        return _json(
-                            self, 400, {"ok": False, "error": "profile_id_required"}
-                        )
-                    out = profiles.delete(profile_id)
-                    return _json(self, 200, build_profiles_list_payload(profiles=out))
+                    code, payload = handle_profiles_delete(body=body, profiles=profiles)
+                    return _json(self, code, payload)
 
                 if u.path == "/config/revert":
                     snapshot_id = str(body.get("snapshot_id", "")).strip() or None
