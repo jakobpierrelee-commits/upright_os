@@ -61,3 +61,33 @@ def build_tuning_recommend_payload(
         "replay": replay,
         "quality_gate": quality_gate,
     }
+
+
+def build_tuning_preflight_payload(
+    *,
+    gate_ok: bool,
+    family: str,
+    reasons: List[str],
+    recommendation_score_pct: int,
+    signature: str,
+    quality_gate: Dict[str, Any],
+    preflight_node: Optional[Dict[str, Any]],
+    recommendation: Dict[str, Any],
+    surrogate: Optional[Dict[str, Any]],
+    replay: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "preflight": {
+            "gate_ok": gate_ok,
+            "family": family,
+            "reasons": reasons,
+            "recommendation_score_pct": recommendation_score_pct,
+            "signature": signature,
+            "quality_gate": quality_gate,
+            **(preflight_node or {}),
+        },
+        "recommendation": recommendation,
+        "surrogate": surrogate,
+        "replay": replay,
+    }
