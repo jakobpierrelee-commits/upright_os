@@ -302,11 +302,13 @@ try:
         build_attempt_history_payload,
         build_attachment_payload,
         build_boards_payload,
+        build_burst_label_payload,
         build_capabilities_payload,
         build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
         build_firmware_check_payload,
+        build_firmware_cmd_status_payload,
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
@@ -337,11 +339,13 @@ except ImportError:
         build_attempt_history_payload,
         build_attachment_payload,
         build_boards_payload,
+        build_burst_label_payload,
         build_capabilities_payload,
         build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
         build_firmware_check_payload,
+        build_firmware_cmd_status_payload,
         build_firmware_result_payload,
         build_overwatch_payload,
         build_picked_payload,
@@ -14778,15 +14782,13 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "queued": True,
-                            "status": st,
-                            "firmware": fw,
-                            "capture_defaults": defaults,
-                            "burst": burst_status(),
-                            "host_capture": host,
-                        },
+                        build_firmware_cmd_status_payload(
+                            status=st,
+                            firmware=fw,
+                            capture_defaults=defaults,
+                            burst=burst_status(),
+                            host_capture=host,
+                        ),
                     )
 
                 if u.path == "/burst/label":
@@ -14810,11 +14812,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "burst": burst_status(),
-                            "host_capture": host,
-                        },
+                        build_burst_label_payload(
+                            burst=burst_status(), host_capture=host
+                        ),
                     )
 
                 if u.path == "/arm/prepare":

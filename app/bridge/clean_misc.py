@@ -161,3 +161,28 @@ def build_saved_profiles_payload(
 
 def build_port_released_payload(*, released: bool, note: str) -> Dict[str, Any]:
     return {"ok": True, "released": released, "note": note}
+
+
+def build_firmware_cmd_status_payload(
+    *,
+    status: Dict[str, Any],
+    firmware: Dict[str, Any],
+    capture_defaults: Dict[str, Any],
+    burst: Dict[str, Any],
+    host_capture: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "queued": True,
+        "status": status,
+        "firmware": firmware,
+        "capture_defaults": capture_defaults,
+        "burst": burst,
+        "host_capture": host_capture,
+    }
+
+
+def build_burst_label_payload(
+    *, burst: Dict[str, Any], host_capture: Dict[str, Any]
+) -> Dict[str, Any]:
+    return {"ok": True, "burst": burst, "host_capture": host_capture}
