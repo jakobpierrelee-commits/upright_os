@@ -454,6 +454,22 @@ except ImportError:
         handle_status,
     )
 try:
+    from app.bridge.routes_ai import (
+        handle_ai_profile_activate,
+        handle_ai_profile_save,
+        handle_ai_profiles_get,
+        handle_ai_thread_new,
+        handle_ai_thread_select,
+    )
+except ImportError:
+    from routes_ai import (  # type: ignore
+        handle_ai_profile_activate,
+        handle_ai_profile_save,
+        handle_ai_profiles_get,
+        handle_ai_thread_new,
+        handle_ai_thread_select,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -5816,11 +5832,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(
-                        self,
-                        200,
-                        build_ai_profiles_payload(profiles=ai_profiles.list()),
-                    )
+                    code, payload = handle_ai_profiles_get(ai_profiles=ai_profiles)
+                    return _json(self, code, payload)
                 if u.path == "/ai/knowledge":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -6197,23 +6210,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    skey = f"user:{me['id']}"
-                    created = ai.create_thread(skey, title=body.get("title"))
-                    st = ai.status(
-                        configured=bool(me.get("openai_configured")),
-                        model=str(me.get("openai_model") or "gpt-5-codex"),
-                        session_key=skey,
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_ai_thread_payload(
-                            thread=created,
-                            threads=ai.list_threads(skey),
-                            ai_status=st,
-                            history=ai.history(skey, st.get("active_thread_id"))[-80:],
-                        ),
-                    )
+                    code, payload = handle_ai_thread_new(body=body, me=me, ai=ai)
+                    return _json(self, code, payload)
 
                 if u.path == "/ai/thread/select":
                     tok = _extract_auth_token(self, body)
@@ -6222,28 +6220,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    thread_id = str(body.get("thread_id", "")).strip()
-                    if not thread_id:
-                        return _json(
-                            self, 400, {"ok": False, "error": "thread_id_required"}
-                        )
-                    skey = f"user:{me['id']}"
-                    selected = ai.select_thread(skey, thread_id)
-                    st = ai.status(
-                        configured=bool(me.get("openai_configured")),
-                        model=str(me.get("openai_model") or "gpt-5-codex"),
-                        session_key=skey,
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_ai_thread_payload(
-                            thread=selected,
-                            threads=ai.list_threads(skey),
-                            ai_status=st,
-                            history=ai.history(skey, thread_id)[-80:],
-                        ),
-                    )
+                    code, payload = handle_ai_thread_select(body=body, me=me, ai=ai)
+                    return _json(self, code, payload)
 
                 if u.path == "/ai/profile/save":
                     tok = _extract_auth_token(self, body)
@@ -6252,15 +6230,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(
-                        self,
-                        403,
-                        {
-                            "ok": False,
-                            "error": "ai_profile_edit_locked",
-                            "hint": "Assistant profiles are managed via local repository edits only.",
-                        },
-                    )
+                    code, payload = handle_ai_profile_save(body=body, me=me)
+                    return _json(self, code, payload)
 
                 if u.path == "/ai/profile/activate":
                     tok = _extract_auth_token(self, body)
@@ -6269,15 +6240,8 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    return _json(
-                        self,
-                        403,
-                        {
-                            "ok": False,
-                            "error": "ai_profile_edit_locked",
-                            "hint": "Assistant profiles are managed via local repository edits only.",
-                        },
-                    )
+                    code, payload = handle_ai_profile_activate(body=body, me=me)
+                    return _json(self, code, payload)
 
                 if u.path == "/auth/openai-key":
                     tok = _extract_auth_token(self, body)
