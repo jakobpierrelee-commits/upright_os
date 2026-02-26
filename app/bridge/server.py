@@ -349,6 +349,28 @@ except ImportError:
         handle_estop_reset,
     )
 try:
+    from app.bridge.routes_calibration import (
+        handle_cal_zero,
+        handle_defaultcfg,
+        handle_imu_calibrate,
+        handle_imu_info,
+        handle_imu_load,
+        handle_imu_save,
+        handle_loadcfg,
+        handle_savecfg,
+    )
+except ImportError:
+    from routes_calibration import (  # type: ignore
+        handle_cal_zero,
+        handle_defaultcfg,
+        handle_imu_calibrate,
+        handle_imu_info,
+        handle_imu_load,
+        handle_imu_save,
+        handle_loadcfg,
+        handle_savecfg,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -14257,159 +14279,53 @@ def build_handler(
 
                 if u.path == "/cal_zero":
                     _require_action_allowed("cal_zero", gateway, control)
-                    res = gateway.command(
-                        "CAL ZERO", expect_contains="OK CAL ZERO", timeout=4.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_command_result_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_cal_zero(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/imu/calibrate":
                     _require_action_allowed("cal_zero", gateway, control)
-                    res = gateway.command("IMU CAL", expect_contains="IMU", timeout=8.0)
-                    outcome = _classify_imu_command_result(res, cmd_name="cal")
-                    if not bool(outcome.get("ok", False)):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": outcome.get("error"),
-                                "detail": outcome.get("detail"),
-                                "result": res,
-                            },
-                        )
-                    return _json(
-                        self,
-                        200,
-                        build_command_result_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
+                    code, payload = handle_imu_calibrate(
+                        gateway=gateway,
+                        control=control,
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/imu/load":
-                    res = gateway.command(
-                        "IMU LOAD", expect_contains="IMU", timeout=4.0
+                    code, payload = handle_imu_load(
+                        gateway=gateway,
+                        control=control,
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
                     )
-                    outcome = _classify_imu_command_result(res, cmd_name="load")
-                    if not bool(outcome.get("ok", False)):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": outcome.get("error"),
-                                "detail": outcome.get("detail"),
-                                "result": res,
-                            },
-                        )
-                    return _json(
-                        self,
-                        200,
-                        build_command_result_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/imu/save":
-                    res = gateway.command(
-                        "IMU SAVE", expect_contains="IMU", timeout=4.0
+                    code, payload = handle_imu_save(
+                        gateway=gateway,
+                        control=control,
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
                     )
-                    outcome = _classify_imu_command_result(res, cmd_name="save")
-                    if not bool(outcome.get("ok", False)):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": outcome.get("error"),
-                                "detail": outcome.get("detail"),
-                                "result": res,
-                            },
-                        )
-                    return _json(
-                        self,
-                        200,
-                        build_command_result_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/imu/info":
-                    res = gateway.command(
-                        "IMU INFO", expect_contains="IMU", timeout=4.0
+                    code, payload = handle_imu_info(
+                        gateway=gateway,
+                        control=control,
+                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(res, cmd_name=cmd),
                     )
-                    outcome = _classify_imu_command_result(res, cmd_name="info")
-                    if not bool(outcome.get("ok", False)):
-                        return _json(
-                            self,
-                            409,
-                            {
-                                "ok": False,
-                                "error": outcome.get("error"),
-                                "detail": outcome.get("detail"),
-                                "result": res,
-                            },
-                        )
-                    return _json(
-                        self,
-                        200,
-                        build_command_result_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/savecfg":
-                    res = gateway.command(
-                        "SAVECFG", expect_contains="OK SAVECFG", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_result_control_payload(result=res, control=control.snapshot()),
-                    )
+                    code, payload = handle_savecfg(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/loadcfg":
-                    res = gateway.command(
-                        "LOADCFG", expect_contains="OK LOADCFG", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_result_status_control_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_loadcfg(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/defaultcfg":
-                    res = gateway.command(
-                        "DEFAULTCFG", expect_contains="OK DEFAULTCFG", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_result_status_control_payload(
-                            result=res,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                        ),
-                    )
+                    code, payload = handle_defaultcfg(gateway=gateway, control=control)
+                    return _json(self, code, payload)
 
                 if u.path == "/pid":
                     kp = float(body["kp"])
