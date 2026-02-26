@@ -311,8 +311,10 @@ try:
         build_sketch_payload,
         build_sketch_write_payload,
         build_snapshots_payload,
+        build_stats_payload,
         build_sweep_payload,
         build_targets_payload,
+        build_tool_metrics_payload,
         build_unified_payload,
         build_validation_payload,
     )
@@ -341,8 +343,10 @@ except ImportError:
         build_sketch_payload,
         build_sketch_write_payload,
         build_snapshots_payload,
+        build_stats_payload,
         build_sweep_payload,
         build_targets_payload,
+        build_tool_metrics_payload,
         build_unified_payload,
         build_validation_payload,
     )
@@ -11766,13 +11770,12 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "since_hours": since_hours,
-                                "tool_metrics": tool_metrics,
-                                "db_stats": db_stats,
-                                "ts": time.time(),
-                            },
+                            build_tool_metrics_payload(
+                                since_hours=since_hours,
+                                tool_metrics=tool_metrics,
+                                db_stats=db_stats,
+                                ts=time.time(),
+                            ),
                         )
                     except Exception as exc:
                         logger.warning(f"Metrics fetch error: {exc}")
@@ -11802,11 +11805,7 @@ def build_handler(
                         return _json(
                             self,
                             200,
-                            {
-                                "ok": True,
-                                "stats": stats,
-                                "ts": time.time(),
-                            },
+                            build_stats_payload(stats=stats, ts=time.time()),
                         )
                     except Exception as exc:
                         logger.warning(f"RAG stats error: {exc}")

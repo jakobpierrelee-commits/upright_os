@@ -119,3 +119,23 @@ def build_attempt_history_payload(
     *, attempts: List[Dict[str, Any]], next_cursor: str, has_more: bool
 ) -> Dict[str, Any]:
     return {"ok": True, "attempts": attempts, "next_cursor": next_cursor, "has_more": has_more}
+
+
+def build_tool_metrics_payload(
+    *,
+    since_hours: float,
+    tool_metrics: Dict[str, Any],
+    db_stats: Dict[str, Any],
+    ts: float,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "since_hours": since_hours,
+        "tool_metrics": tool_metrics,
+        "db_stats": db_stats,
+        "ts": ts,
+    }
+
+
+def build_stats_payload(*, stats: Dict[str, Any], ts: float) -> Dict[str, Any]:
+    return {"ok": True, "stats": stats, "ts": ts}
