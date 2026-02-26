@@ -74,7 +74,14 @@ Per `docs/contracts/dependency_matrix_v1.json`:
 ```
 features/        → Domain-aligned UI modules
 components/ui/   → Shared presentational primitives
-lib/             → Shared utilities
+lib/api/         → Domain-aligned API clients (NEW)
+  ├── client.ts     → Shared fetch utilities
+  ├── health.ts     → Health/status endpoints
+  ├── control.ts    → Arm/disarm/tuning endpoints
+  ├── firmware.ts   → Firmware lifecycle endpoints
+  ├── profiles.ts   → Hardware profiles/compat
+  ├── auth.ts       → Authentication endpoints
+  └── telemetry.ts  → Serial/burst/trace endpoints
 ```
 
 | From | To | Allowed |
@@ -135,8 +142,9 @@ Per PRD §7.2, these tools enforce boundaries:
 | domains/ | 7 domains, 28 modules extracted | Domain modules | ✅ Phase B complete |
 | adapters/ | `serial_gateway.py` | Full adapter layer | 🟡 Partial |
 | UI features/ | CleanApp default, features/ partial | Domain-aligned | 🟡 Phase D in progress |
+| lib/api/ | 7 domain API clients extracted | Domain clients | ✅ Phase D.2 complete |
 | codex_tools.py | 3,485 lines | Extracted to domains | 🔴 Phase E.2 pending |
-| api.ts | 1,962 lines | Domain clients | 🔴 Phase D.2 pending |
+| api.ts | 1,962 lines (legacy) | Migrate to lib/api/ | � Gradual migration |
 
 ### Domain Module Inventory (as of 2026-02-26)
 
