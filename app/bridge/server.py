@@ -305,6 +305,7 @@ try:
         build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
+        build_snapshots_payload,
         build_sweep_payload,
         build_targets_payload,
         build_unified_payload,
@@ -333,6 +334,7 @@ except ImportError:
         build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
+        build_snapshots_payload,
         build_sweep_payload,
         build_targets_payload,
         build_unified_payload,
@@ -11812,10 +11814,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {
-                            "ok": True,
-                            "snapshots": config_history.list_snapshots(limit=limit),
-                        },
+                        build_snapshots_payload(
+                            snapshots=config_history.list_snapshots(limit=limit)
+                        ),
                     )
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except Exception as exc:

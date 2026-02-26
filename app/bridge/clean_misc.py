@@ -109,3 +109,7 @@ def build_active_profiles_payload(
     *, active: Dict[str, Any], profiles: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     return {"ok": True, "active": active, "profiles": profiles}
+
+
+def build_snapshots_payload(*, snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"ok": True, "snapshots": snapshots}
