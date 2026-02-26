@@ -296,6 +296,7 @@ try:
         build_reset_payload,
         build_result_control_payload,
         build_result_payload,
+        build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
         build_sweep_payload,
@@ -321,6 +322,7 @@ except ImportError:
         build_reset_payload,
         build_result_control_payload,
         build_result_payload,
+        build_revert_control_payload,
         build_sketch_payload,
         build_sketch_write_payload,
         build_sweep_payload,
@@ -12396,7 +12398,9 @@ def build_handler(
                     return _json(
                         self,
                         200,
-                        {"ok": True, "revert": out, "control": control.snapshot()},
+                        build_revert_control_payload(
+                            revert=out, control=control.snapshot()
+                        ),
                     )
 
                 if u.path == "/agent/file/upload":
