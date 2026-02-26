@@ -72,3 +72,29 @@ def build_agent_thread_state_payload(
         "threads": threads,
         "history": history,
     }
+
+
+def build_agent_chat_reply_payload(
+    *,
+    agent: Dict[str, Any],
+    reply: str,
+    thread_id: Optional[str],
+    history: List[Dict[str, Any]],
+    threads: List[Dict[str, Any]],
+    tool_calls: List[Dict[str, Any]],
+    iterations: int,
+    provider: str,
+    executor: str,
+) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "agent": agent,
+        "reply": reply,
+        "thread_id": thread_id,
+        "history": history,
+        "threads": threads,
+        "tool_calls": tool_calls,
+        "iterations": iterations,
+        "provider": provider,
+        "executor": executor,
+    }
