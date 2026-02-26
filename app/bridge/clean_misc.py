@@ -99,3 +99,7 @@ def build_revert_control_payload(
     *, revert: Dict[str, Any], control: Dict[str, Any]
 ) -> Dict[str, Any]:
     return {"ok": True, "revert": revert, "control": control}
+
+
+def build_control_payload(*, control: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "control": control}

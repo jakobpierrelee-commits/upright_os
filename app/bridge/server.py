@@ -285,6 +285,7 @@ try:
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
+        build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
         build_firmware_check_payload,
@@ -311,6 +312,7 @@ except ImportError:
         build_attachment_payload,
         build_boards_payload,
         build_capabilities_payload,
+        build_control_payload,
         build_design_payload,
         build_docs_pack_payload,
         build_firmware_check_payload,
@@ -14807,7 +14809,7 @@ def build_handler(
                         "arm_prepare", gateway, control, prearm_gate=prearm_safety
                     )
                     return _json(
-                        self, 200, {"ok": True, "control": control.prepare_arm()}
+                        self, 200, build_control_payload(control=control.prepare_arm())
                     )
 
                 if u.path == "/arm/precheck":
