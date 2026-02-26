@@ -111,6 +111,38 @@ BLOCKED_SKETCH_VARIABLES = frozenset(
     ]
 )
 
+# Factory default PID values
+FACTORY_DEFAULTS = {
+    "kp": 18.0,
+    "ki": 0.1,
+    "kd": 0.6,
+    "setpoint": 0.0,
+    "max_output": 255,
+    "deadband": 0,
+}
+
+# Rating hierarchy for checkpoint selection
+RATING_HIERARCHY = ["great", "good", "ok", "bad"]
+
+# Default robot physical parameters for simulation
+ROBOT_DEFAULTS = {
+    "mass_kg": 0.2,
+    "height_m": 0.15,
+    "wheel_radius_m": 0.033,
+    "loop_period_ms": 10,
+    "gravity": 9.81,
+}
+
+# PID tuning heuristics thresholds
+TUNING_THRESHOLDS = {
+    "oscillation_freq_high_hz": 3.0,
+    "oscillation_freq_low_hz": 1.0,
+    "saturation_warning_pct": 60,
+    "saturation_critical_pct": 85,
+    "angle_variance_good": 2.0,
+    "angle_variance_acceptable": 5.0,
+}
+
 
 class T1Errors:
     """T1 (observation) error codes."""
@@ -147,6 +179,8 @@ class T2Errors:
     E_COMPILE_FAILED = "E_COMPILE_FAILED"
     E_UPLOAD_NOT_CONFIRMED = "E_UPLOAD_NOT_CONFIRMED"
     E_UPLOAD_FAILED = "E_UPLOAD_FAILED"
+    E_BASELINE_FAILED = "E_BASELINE_FAILED"
+    E_REVERT_FAILED = "E_REVERT_FAILED"
 
 
 class T3Errors:
