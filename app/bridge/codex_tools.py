@@ -24,7 +24,6 @@ import logging
 import math
 import os
 import re
-import subprocess
 import statistics
 import time
 from dataclasses import dataclass, field
@@ -886,6 +885,8 @@ class CodexToolExecutor:
         self._telemetry_tools = TelemetryTools(
             gateway=gateway,
             db=db,
+            host_capture=host_capture,
+            probe_funcs=probe_funcs,
             active_robot_id=self.active_robot_id,
         )
         self._simulation_tools = SimulationTools(
@@ -983,320 +984,28 @@ class CodexToolExecutor:
     # ========================================================================
 
     def _tool_get_probe_results(self, args: Dict[str, Any]) -> ToolResult:
-        """Get probe/validation results."""
-        probe_type = args.get("probe_type", "all")
-
-        data: Dict[str, Any] = {}
-
-        if probe_type in ("compat", "all"):
-            if "run_compat_probe" in self.probe_funcs:
-                try:
-                    data["compat"] = self.probe_funcs["run_compat_probe"](self.gateway)
-                except Exception as e:
-                    data["compat_error"] = str(e)
-
-        if probe_type in ("connect", "all"):
-            if "run_connect_probe" in self.probe_funcs:
-                try:
-                    data["connect"] = self.probe_funcs["run_connect_probe"](
-                        self.gateway
-                    )
-                except Exception as e:
-                    data["connect_error"] = str(e)
-
-        # Also include current status if gateway available
-        if self.gateway:
-            try:
-                data["status"] = self.gateway.get_status()
-                data["health"] = self.gateway.health()
-            except Exception as e:
-                data["status_error"] = str(e)
-
-        return ToolResult(ok=True, tool="get_probe_results", data=data)
+        """Get probe/validation results. Delegates to TelemetryTools."""
+        return self._telemetry_tools.get_probe_results(args)
 
     def _tool_query_telemetry(self, args: Dict[str, Any]) -> ToolResult:
-        """Query telemetry from database."""
-        if not self.db:
-            return ToolResult(
-                ok=False, tool="query_telemetry", error="Database not configured"
-            )
-
-        minutes = args.get("minutes", 5)
-        robot_id = args.get("robot_id", self.active_robot_id)
-        aggregation = args.get("aggregation", "stats")
-
-        end_ts = time.time()
-        start_ts = end_ts - (minutes * 60)
-
-        snapshots = self.db.query_telemetry(
-            robot_id=robot_id,
-            start_ts=start_ts,
-            end_ts=end_ts,
-            limit=500,
-        )
-
-        if aggregation == "raw":
-            data = {
-                "count": len(snapshots),
-                "samples": [
-                    {
-                        "ts": s.ts,
-                        "ang": s.ang,
-                        "raw": s.raw,
-                        "out": s.out,
-                        "mode": s.mode,
-                    }
-                    for s in snapshots[:100]  # Limit raw output
-                ],
-            }
-        elif aggregation == "trend":
-            # Calculate trends
-            if len(snapshots) >= 2:
-                first_half = snapshots[len(snapshots) // 2 :]
-                second_half = snapshots[: len(snapshots) // 2]
-                avg_ang_first = (
-                    sum(s.ang for s in first_half) / len(first_half)
-                    if first_half
-                    else 0
-                )
-                avg_ang_second = (
-                    sum(s.ang for s in second_half) / len(second_half)
-                    if second_half
-                    else 0
-                )
-                data = {
-                    "count": len(snapshots),
-                    "angle_trend": "increasing"
-                    if avg_ang_second > avg_ang_first + 0.1
-                    else "decreasing"
-                    if avg_ang_second < avg_ang_first - 0.1
-                    else "stable",
-                    "avg_angle_early": round(avg_ang_first, 3),
-                    "avg_angle_recent": round(avg_ang_second, 3),
-                }
-            else:
-                data = {"count": len(snapshots), "angle_trend": "insufficient_data"}
-        else:  # stats
-            if snapshots:
-                angles = [s.ang for s in snapshots]
-                outputs = [s.out for s in snapshots]
-                data = {
-                    "count": len(snapshots),
-                    "time_range_minutes": minutes,
-                    "angle": {
-                        "min": round(min(angles), 3),
-                        "max": round(max(angles), 3),
-                        "avg": round(sum(angles) / len(angles), 3),
-                    },
-                    "output": {
-                        "min": round(min(outputs), 1),
-                        "max": round(max(outputs), 1),
-                        "avg": round(sum(outputs) / len(outputs), 1),
-                    },
-                    "latest_mode": snapshots[0].mode if snapshots else None,
-                }
-            else:
-                data = {"count": 0, "message": "No telemetry data in time range"}
-
-        return ToolResult(ok=True, tool="query_telemetry", data=data)
+        """Query telemetry from database. Delegates to TelemetryTools."""
+        return self._telemetry_tools.query_telemetry(args)
 
     def _tool_query_checkpoints(self, args: Dict[str, Any]) -> ToolResult:
-        """Query checkpoints from database."""
-        if not self.db:
-            return ToolResult(
-                ok=False, tool="query_checkpoints", error="Database not configured"
-            )
-
-        rating = args.get("rating")
-        limit = args.get("limit", 10)
-
-        checkpoints = self.db.query_checkpoints(
-            robot_id=self.active_robot_id,
-            rating=rating,
-            limit=limit,
-        )
-
-        data = {
-            "count": len(checkpoints),
-            "checkpoints": [
-                {
-                    "id": c.id,
-                    "ts": c.ts,
-                    "rating": c.rating,
-                    "mode": c.mode,
-                    "pid": {"kp": c.kp, "ki": c.ki, "kd": c.kd},
-                    "motion": {"kv": c.kv, "kx": c.kx},
-                    "setpoint": c.setpoint,
-                    "notes": c.notes,
-                }
-                for c in checkpoints
-            ],
-        }
-
-        return ToolResult(ok=True, tool="query_checkpoints", data=data)
+        """Query checkpoints from database. Delegates to SessionTools."""
+        return self._session_tools.query_checkpoints(args)
 
     def _tool_search_docs(self, args: Dict[str, Any]) -> ToolResult:
-        """Search documentation via RAG."""
-        if not self.rag:
-            return ToolResult(ok=False, tool="search_docs", error="RAG not configured")
-
-        query = args.get("query", "")
-        k = args.get("k", 5)
-
-        if not query:
-            return ToolResult(ok=False, tool="search_docs", error="Query is required")
-
-        results = self.rag.search_docs(query, k=k, min_score=0.4)
-
-        data = {
-            "count": len(results),
-            "results": [
-                {
-                    "source": r.source_path,
-                    "score": round(r.score, 3),
-                    "content": r.content[:500] + "..."
-                    if len(r.content) > 500
-                    else r.content,
-                }
-                for r in results
-            ],
-        }
-
-        return ToolResult(ok=True, tool="search_docs", data=data)
+        """Search documentation via RAG. Delegates to SessionTools."""
+        return self._session_tools.search_docs(args)
 
     def _tool_execute_shell(self, args: Dict[str, Any]) -> ToolResult:
-        """Execute terminal command inside repository workspace."""
-        cmd = str(args.get("cmd", "")).strip()
-        if not cmd:
-            return ToolResult(ok=False, tool="execute_shell", error="cmd is required")
-
-        cwd_raw = str(args.get("cwd", "")).strip()
-        repo_root = self.repo_root.resolve()
-        if cwd_raw:
-            target = (repo_root / cwd_raw).resolve()
-            try:
-                target.relative_to(repo_root)
-            except Exception:
-                return ToolResult(
-                    ok=False,
-                    tool="execute_shell",
-                    error="cwd must be inside repository root",
-                )
-        else:
-            target = repo_root
-
-        timeout_s = int(args.get("timeout_s", 60) or 60)
-        timeout_s = max(1, min(timeout_s, SHELL_MAX_TIMEOUT_S))
-        try:
-            proc = subprocess.run(
-                cmd,
-                shell=True,
-                cwd=str(target),
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-            )
-        except subprocess.TimeoutExpired as exc:
-            partial_out = str((exc.stdout or "") + "\n" + (exc.stderr or "")).strip()
-            return ToolResult(
-                ok=False,
-                tool="execute_shell",
-                error=f"timeout_after_{timeout_s}s",
-                data={
-                    "cmd": cmd,
-                    "cwd": str(target),
-                    "partial_output": partial_out[-4000:],
-                },
-            )
-        except Exception as exc:
-            return ToolResult(
-                ok=False,
-                tool="execute_shell",
-                error=f"shell_exec_failed:{exc}",
-                data={"cmd": cmd, "cwd": str(target)},
-            )
-
-        out = (proc.stdout or "").strip()
-        err = (proc.stderr or "").strip()
-        merged = "\n".join([x for x in [out, err] if x]).strip()
-        return ToolResult(
-            ok=(proc.returncode == 0),
-            tool="execute_shell",
-            data={
-                "cmd": cmd,
-                "cwd": str(target),
-                "exit_code": int(proc.returncode),
-                "output": merged[-12000:],
-            },
-            error=None if proc.returncode == 0 else f"exit_code:{proc.returncode}",
-        )
+        """Execute terminal command. Delegates to ControlTools."""
+        return self._control_tools.execute_shell(args, repo_root=self.repo_root)
 
     def _tool_execute_command(self, args: Dict[str, Any]) -> ToolResult:
-        """Execute a serial command with safety enforcement."""
-        if not self.gateway:
-            return ToolResult(
-                ok=False, tool="execute_command", error="Serial gateway not connected"
-            )
-
-        # Serial busy guard - check if gateway is currently busy
-        if hasattr(self.gateway, "is_busy") and self.gateway.is_busy():
-            return ToolResult(
-                ok=False,
-                tool="execute_command",
-                error="SERIAL_BUSY: Serial port is currently in use. Please wait and try again.",
-                data={"retry_after_ms": 500},
-            )
-
-        cmd = args.get("cmd", "").strip()
-        if not cmd:
-            return ToolResult(
-                ok=False, tool="execute_command", error="Command is required"
-            )
-
-        # Extract command prefix for allowlist check
-        cmd_prefix = cmd.split()[0].upper() if cmd.split() else ""
-
-        # Check if command is blocked
-        if cmd_prefix in BLOCKED_COMMANDS:
-            return ToolResult(
-                ok=False,
-                tool="execute_command",
-                error=f"Command '{cmd_prefix}' is blocked for safety. Use the UI to execute ARM/DISARM/MOTOR commands.",
-            )
-
-        # Check if command is in allowlist
-        # Handle compound commands like "CAL ZERO"
-        is_safe = False
-        for safe_cmd in SAFE_COMMANDS:
-            if cmd.upper().startswith(safe_cmd):
-                is_safe = True
-                break
-
-        if not is_safe:
-            return ToolResult(
-                ok=False,
-                tool="execute_command",
-                error=f"Command '{cmd_prefix}' is not in the safe command allowlist: {', '.join(sorted(SAFE_COMMANDS))}",
-            )
-
-        # Execute the command
-        try:
-            result = self.gateway.command(cmd, timeout=3.0)
-            status = self.gateway.get_status()
-
-            return ToolResult(
-                ok=True,
-                tool="execute_command",
-                data={
-                    "command": cmd,
-                    "result": result,
-                    "status_after": status,
-                },
-            )
-        except Exception as e:
-            return ToolResult(
-                ok=False, tool="execute_command", error=f"Command failed: {e}"
-            )
+        """Execute serial command with safety enforcement. Delegates to ControlTools."""
+        return self._control_tools.execute_command(args)
 
     def _tool_edit_sketch_value(self, args: Dict[str, Any]) -> ToolResult:
         """Edit a compile-time constant in sketch with allowlist enforcement."""

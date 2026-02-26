@@ -39,18 +39,20 @@ class ControlTools:
         self.gateway = gateway
         self.repo_root = repo_root or Path(__file__).parent.parent.parent.parent
 
-    def execute_shell(self, args: Dict[str, Any]) -> ToolResult:
+    def execute_shell(
+        self, args: Dict[str, Any], repo_root: Optional[Path] = None
+    ) -> ToolResult:
         """Execute terminal command inside repository workspace."""
         cmd = str(args.get("cmd", "")).strip()
         if not cmd:
             return ToolResult(ok=False, tool="execute_shell", error="cmd is required")
 
         cwd_raw = str(args.get("cwd", "")).strip()
-        repo_root = self.repo_root.resolve()
+        effective_root = (repo_root or self.repo_root).resolve()
         if cwd_raw:
-            target = (repo_root / cwd_raw).resolve()
+            target = (effective_root / cwd_raw).resolve()
             try:
-                target.relative_to(repo_root)
+                target.relative_to(effective_root)
             except Exception:
                 return ToolResult(
                     ok=False,
@@ -58,7 +60,7 @@ class ControlTools:
                     error="cwd must be inside repository root",
                 )
         else:
-            target = repo_root
+            target = effective_root
 
         timeout_s = int(args.get("timeout_s", 60) or 60)
         timeout_s = max(1, min(timeout_s, SHELL_MAX_TIMEOUT_S))
