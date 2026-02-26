@@ -1,0 +1,29 @@
+{
+  "version": "tuning_seed_profiles_v1",
+  "runtime_version": "balance_mvp_v1.1.0",
+  "notes": [
+    "Seeds are starting points only. Values are bot/motor/surface/calibration specific.",
+    "Use with untethered tests and always verify via GET after apply."
+  ],
+  "profiles": [
+    {
+      "id": "seed_symmetry_2026_02_25",
+      "intent": "symmetry-first baseline before large-pert authority tuning",
+      "values": {
+        "pid": {"kp": 40.0, "ki": 0.03, "kd": 0.13},
+        "setpoint_deg": -0.75,
+        "limits": {"out_max": 255.0, "tip_deg": 35.0, "i_max": 70.0, "i_term_max": 120.0},
+        "motion": {"kv": 0.0, "kx": 0.0},
+        "slew_per_s": 8000.0,
+        "ramp_ms": 120,
+        "dcfg": {"d_cutoff_hz": 20.0, "kaw": 0.25},
+        "autozero_enabled": 0,
+        "gsched": {"err_deg": 3.0, "boost": 0.40}
+      },
+      "observations": [
+        "Setpoint and symmetry improved vs earlier runs.",
+        "Slow oscillation growth remained and required further tuning."
+      ]
+    }
+  ]
+}

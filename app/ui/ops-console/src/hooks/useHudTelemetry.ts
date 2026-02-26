@@ -14,11 +14,30 @@ export type ImuSample = {
 type HudTone = 'good' | 'warn' | 'bad' | 'unknown';
 
 export type HudCard = {
-  id: 'filteredAngle' | 'rawAngle' | 'gyroRate' | 'output' | 'wheelPos' | 'setpoint' | 'loopFeed' | 'contract';
+  id:
+    | 'filteredAngle'
+    | 'rawAngle'
+    | 'gyroRate'
+    | 'output'
+    | 'wheelPos'
+    | 'setpoint'
+    | 'pidError'
+    | 'innovation'
+    | 'clampState'
+    | 'loopFeed'
+    | 'contract';
   label: string;
   value: string;
   unit: string;
   tone: HudTone;
+  detail?: string;
+};
+
+type SmoothedHud = {
+  angle: number;
+  rawAngle: number;
+  gyroRate: number;
+  output: number;
 };
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -120,11 +139,60 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
   output: string;
   wheelPos: string;
   setpoint: string;
+  pidError: string;
+  innovation: string;
+  clampState: string;
   loopFeed: string;
   contract: string;
   contractOk: string;
   contractMissing: string;
 }, healthLastStatusAgeMs?: number | null) {
+  const latestImuSample = useMemo(() => {
+    if (!imuHistory.length) return null;
+    return imuHistory[imuHistory.length - 1];
+  }, [imuHistory]);
+  const [smoothedHud, setSmoothedHud] = useState<SmoothedHud | null>(null);
+  const smoothedHudRef = useRef<SmoothedHud | null>(null);
+
+  useEffect(() => {
+    if (!latestImuSample) {
+      setSmoothedHud(null);
+      smoothedHudRef.current = null;
+      return;
+    }
+    const target: SmoothedHud = {
+      angle: latestImuSample.kf,
+      rawAngle: latestImuSample.raw,
+      gyroRate: latestImuSample.gyro,
+      output: latestImuSample.out,
+    };
+
+    const start = smoothedHudRef.current ?? target;
+    const durationMs = 220;
+    const startAt = performance.now();
+    let rafId = 0;
+
+    const tick = (now: number) => {
+      const p = clamp((now - startAt) / durationMs, 0, 1);
+      // cosine ease-in-out for a "breathing" but responsive blend
+      const eased = 0.5 - 0.5 * Math.cos(Math.PI * p);
+      const next: SmoothedHud = {
+        angle: start.angle + (target.angle - start.angle) * eased,
+        rawAngle: start.rawAngle + (target.rawAngle - start.rawAngle) * eased,
+        gyroRate: start.gyroRate + (target.gyroRate - start.gyroRate) * eased,
+        output: start.output + (target.output - start.output) * eased,
+      };
+      smoothedHudRef.current = next;
+      setSmoothedHud(next);
+      if (p < 1) {
+        rafId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [latestImuSample]);
+
   const kalmanReference = useMemo(() => calcKalmanReference(imuHistory), [imuHistory]);
 
   const chartBounds = useMemo(() => {
@@ -144,21 +212,23 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
 
   const angleDelta = useMemo(() => {
     if (imuHistory.length < 2) return 0;
-    return imuHistory[imuHistory.length - 1].kf - imuHistory[imuHistory.length - 2].kf;
-  }, [imuHistory]);
+    const current = smoothedHud?.angle ?? imuHistory[imuHistory.length - 1].kf;
+    return current - imuHistory[imuHistory.length - 2].kf;
+  }, [imuHistory, smoothedHud?.angle]);
 
   const outputDelta = useMemo(() => {
     if (imuHistory.length < 2) return 0;
-    return imuHistory[imuHistory.length - 1].out - imuHistory[imuHistory.length - 2].out;
-  }, [imuHistory]);
+    const current = smoothedHud?.output ?? imuHistory[imuHistory.length - 1].out;
+    return current - imuHistory[imuHistory.length - 2].out;
+  }, [imuHistory, smoothedHud?.output]);
 
   const hud = useMemo(() => {
-    const angle = n(status.ang, 0);
-    const rawAngle = n(status.raw, 0);
-    const output = n(status.out, 0);
+    const angle = smoothedHud?.angle ?? n(status.ang, 0);
+    const rawAngle = smoothedHud?.rawAngle ?? n(status.raw, 0);
+    const output = smoothedHud?.output ?? n(status.out, 0);
     const voltageRaw = n(status.volRaw, 0);
     return { angle, rawAngle, output, voltageRaw };
-  }, [status]);
+  }, [smoothedHud, status]);
 
   const outputLimit = useMemo(() => {
     const candidates = [status.outMax, status.out_max];
@@ -222,6 +292,35 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
       ok: hasAng && hasRaw && hasGyro,
     };
   }, [status]);
+
+  const hasSetpoint = Object.prototype.hasOwnProperty.call(status, 'set');
+  const setpointNum = hasSetpoint ? n(status.set, 0) : null;
+  const hasPidErr = Object.prototype.hasOwnProperty.call(status, 'pid_err') || Object.prototype.hasOwnProperty.call(status, 'err');
+  const pidErr = hasPidErr
+    ? n(status.pid_err ?? status.err, 0)
+    : (setpointNum != null ? setpointNum - hud.angle : null);
+
+  const hasInnovation = Object.prototype.hasOwnProperty.call(status, 'kal_innov') || Object.prototype.hasOwnProperty.call(status, 'innovation');
+  const innovation = hasInnovation
+    ? n(status.kal_innov ?? status.innovation, 0)
+    : (requiredInputState.hasRaw && requiredInputState.hasAng ? hud.rawAngle - hud.angle : null);
+
+  const hasUnsat = Object.prototype.hasOwnProperty.call(status, 'pid_u_unsat') || Object.prototype.hasOwnProperty.call(status, 'pid_u') || Object.prototype.hasOwnProperty.call(status, 'u');
+  const hasSat = Object.prototype.hasOwnProperty.call(status, 'pid_u_sat') || Object.prototype.hasOwnProperty.call(status, 'out');
+  const uUnsat = hasUnsat ? n(status.pid_u_unsat ?? status.pid_u ?? status.u, 0) : null;
+  const uSat = hasSat ? n(status.pid_u_sat ?? status.out, 0) : null;
+  const hasSatFlag = Object.prototype.hasOwnProperty.call(status, 'output_saturated');
+  const saturatedFlag = hasSatFlag ? String(status.output_saturated).toLowerCase() === '1' || String(status.output_saturated).toLowerCase() === 'true' : false;
+  const clampDelta = (uUnsat != null && uSat != null) ? Math.abs(uUnsat - uSat) : null;
+  const clampTone: HudTone = (() => {
+    if (clampDelta == null && !hasSatFlag) return 'unknown';
+    if (saturatedFlag || (clampDelta != null && clampDelta >= 6.0)) return 'bad';
+    if (clampDelta != null && clampDelta >= 1.0) return 'warn';
+    return 'good';
+  })();
+  const clampDetail = uUnsat != null && uSat != null
+    ? `u_unsat:${uUnsat.toFixed(1)} | u_sat:${uSat.toFixed(1)}`
+    : (hasSatFlag ? `output_saturated:${saturatedFlag ? '1' : '0'}` : 'n/a');
 
   const sampleRateHz = useMemo(() => {
     if (imuHistory.length < 4) return 0;
@@ -304,11 +403,12 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
   }, []);
 
   const gyroRate = useMemo(() => {
+    if (smoothedHud) return smoothedHud.gyroRate;
     const raw = status.gyro ?? status.gyr ?? status.gx;
     if (raw == null) return null;
     const parsed = Number.parseFloat(String(raw));
     return Number.isFinite(parsed) ? parsed : null;
-  }, [status.gx, status.gyro, status.gyr]);
+  }, [smoothedHud, status.gx, status.gyro, status.gyr]);
 
   const loopFeedRates5m = useMemo(() => {
     if (imuHistory.length < 3) return [] as number[];
@@ -381,9 +481,9 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
   }, [sampleRateHz]);
 
   const cards = useMemo<HudCard[]>(() => ([
-    { id: 'filteredAngle', label: labels.filteredAngle, value: status.ang ?? 'n/a', unit: 'deg', tone: requiredInputState.hasAng ? 'good' : 'bad' },
-    { id: 'rawAngle', label: labels.rawAngle, value: status.raw ?? 'n/a', unit: 'deg', tone: requiredInputState.hasRaw ? 'good' : 'bad' },
-    { id: 'gyroRate', label: labels.gyroRate, value: status.gyro ?? status.gyr ?? status.gx ?? 'n/a', unit: 'dps', tone: requiredInputState.hasGyro ? 'good' : 'bad' },
+    { id: 'filteredAngle', label: labels.filteredAngle, value: hud.angle.toFixed(3), unit: 'deg', tone: requiredInputState.hasAng ? 'good' : 'bad' },
+    { id: 'rawAngle', label: labels.rawAngle, value: hud.rawAngle.toFixed(3), unit: 'deg', tone: requiredInputState.hasRaw ? 'good' : 'bad' },
+    { id: 'gyroRate', label: labels.gyroRate, value: gyroRate != null ? gyroRate.toFixed(3) : 'n/a', unit: 'dps', tone: requiredInputState.hasGyro ? 'good' : 'bad' },
     {
       id: 'output',
       label: labels.output,
@@ -394,6 +494,28 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
     { id: 'wheelPos', label: labels.wheelPos, value: status.wpos ?? 'n/a', unit: '', tone: 'unknown' },
     { id: 'setpoint', label: labels.setpoint, value: status.set ?? 'n/a', unit: 'deg', tone: 'unknown' },
     {
+      id: 'pidError',
+      label: labels.pidError,
+      value: pidErr != null ? pidErr.toFixed(3) : 'n/a',
+      unit: 'deg',
+      tone: pidErr == null ? 'unknown' : Math.abs(pidErr) >= 12 ? 'bad' : Math.abs(pidErr) >= 4 ? 'warn' : 'good',
+    },
+    {
+      id: 'innovation',
+      label: labels.innovation,
+      value: innovation != null ? innovation.toFixed(3) : 'n/a',
+      unit: 'deg',
+      tone: innovation == null ? 'unknown' : Math.abs(innovation) >= 12 ? 'bad' : Math.abs(innovation) >= 5 ? 'warn' : 'good',
+    },
+    {
+      id: 'clampState',
+      label: labels.clampState,
+      value: clampTone === 'unknown' ? 'n/a' : clampTone === 'good' ? 'tracking' : clampTone === 'warn' ? 'partial' : 'clamped',
+      unit: '',
+      tone: clampTone,
+      detail: clampDetail,
+    },
+    {
       id: 'loopFeed',
       label: labels.loopFeed,
       value: sampleRateHz > 0 ? sampleRateHz.toFixed(1) : 'n/a',
@@ -401,7 +523,7 @@ export function useHudTelemetry(status: Status, imuHistory: ImuSample[], labels:
       tone: sampleRateHz <= 0 ? 'bad' : sampleRateHz < 20 ? 'bad' : sampleRateHz <= 44 ? 'warn' : 'good',
     },
     { id: 'contract', label: labels.contract, value: requiredInputState.ok ? labels.contractOk : labels.contractMissing, unit: '', tone: requiredInputState.ok ? 'good' : 'bad' },
-  ]), [labels, outputAlertLevel, outputPercent, requiredInputState.hasAng, requiredInputState.hasGyro, requiredInputState.hasRaw, requiredInputState.ok, sampleRateHz, status.ang, status.gx, status.gyro, status.gyr, status.raw, status.set, status.wpos]);
+  ]), [clampDetail, clampTone, gyroRate, hud.angle, hud.rawAngle, innovation, labels, outputAlertLevel, outputPercent, pidErr, requiredInputState.hasAng, requiredInputState.hasGyro, requiredInputState.hasRaw, requiredInputState.ok, sampleRateHz, status.set, status.wpos]);
 
   return {
     chartBounds,

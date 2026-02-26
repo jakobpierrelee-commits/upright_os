@@ -24,11 +24,12 @@ import logging
 import math
 import os
 import re
+import subprocess
 import statistics
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,10 @@ logger = logging.getLogger(__name__)
 # Canonical Observation Limits (from PRD)
 # ============================================================================
 
+
 class ObservationLimits:
     """Canonical limits for T1/T2 tools. Do not hardcode elsewhere."""
+
     MAX_OBSERVE_DURATION_S = 30
     MAX_BASELINE_DURATION_S = 15
     MAX_EXPERIMENT_DURATION_S = 60
@@ -53,92 +56,92 @@ class ObservationLimits:
 
 
 # Valid robot modes for safety checks
-SAFE_MODES = frozenset({'SAFE_IDLE', 'IDLE', 'ARMED', 'BALANCING'})
+SAFE_MODES = frozenset({"SAFE_IDLE", "IDLE", "ARMED", "BALANCING"})
 
 # Telemetry field mapping (runtime key -> logical name)
 TELEMETRY_FIELDS = {
-    'ang': 'angle',
-    'raw': 'raw_angle',
-    'gyro': 'gyro',
-    'gyr': 'gyro',  # fallback
-    'gx': 'gyro',   # fallback
-    'out': 'output',
-    'mode': 'mode',
-    'estop': 'estop',
-    'set': 'setpoint',
-    'kp': 'kp',
-    'ki': 'ki',
-    'kd': 'kd',
+    "ang": "angle",
+    "raw": "raw_angle",
+    "gyro": "gyro",
+    "gyr": "gyro",  # fallback
+    "gx": "gyro",  # fallback
+    "out": "output",
+    "mode": "mode",
+    "estop": "estop",
+    "set": "setpoint",
+    "kp": "kp",
+    "ki": "ki",
+    "kd": "kd",
 }
 
 
 # T1 Error Codes
 class T1Errors:
-    E_WS_CONNECT_FAILED = 'E_WS_CONNECT_FAILED'
-    E_WS_NO_DATA = 'E_WS_NO_DATA'
-    E_WS_DISCONNECT = 'E_WS_DISCONNECT'
-    E_WS_NO_SAMPLES = 'E_WS_NO_SAMPLES'
-    E_SERIAL_DISCONNECTED = 'E_SERIAL_DISCONNECTED'
-    E_TRIGGER_TIMEOUT = 'E_TRIGGER_TIMEOUT'
-    E_NO_BURST_DATA = 'E_NO_BURST_DATA'
-    E_BURST_IN_PROGRESS = 'E_BURST_IN_PROGRESS'
-    E_CSV_NOT_FOUND = 'E_CSV_NOT_FOUND'
-    E_NO_BURST_SAMPLES = 'E_NO_BURST_SAMPLES'
+    E_WS_CONNECT_FAILED = "E_WS_CONNECT_FAILED"
+    E_WS_NO_DATA = "E_WS_NO_DATA"
+    E_WS_DISCONNECT = "E_WS_DISCONNECT"
+    E_WS_NO_SAMPLES = "E_WS_NO_SAMPLES"
+    E_SERIAL_DISCONNECTED = "E_SERIAL_DISCONNECTED"
+    E_TRIGGER_TIMEOUT = "E_TRIGGER_TIMEOUT"
+    E_NO_BURST_DATA = "E_NO_BURST_DATA"
+    E_BURST_IN_PROGRESS = "E_BURST_IN_PROGRESS"
+    E_CSV_NOT_FOUND = "E_CSV_NOT_FOUND"
+    E_NO_BURST_SAMPLES = "E_NO_BURST_SAMPLES"
 
 
 # T2 Error Codes
 class T2Errors:
-    E_NO_CHECKPOINT = 'E_NO_CHECKPOINT'
-    E_CHECKPOINT_NOT_FOUND = 'E_CHECKPOINT_NOT_FOUND'
-    E_NO_DB = 'E_NO_DB'
-    E_SERIAL_BUSY = 'E_SERIAL_BUSY'
-    E_COMMAND_FAILED = 'E_COMMAND_FAILED'
-    E_INVALID_CHANGE = 'E_INVALID_CHANGE'
-    E_BLOCKED_COMMAND = 'E_BLOCKED_COMMAND'
-    E_EXPERIMENT_FAILED = 'E_EXPERIMENT_FAILED'
-    E_BASELINE_FAILED = 'E_BASELINE_FAILED'
-    E_REVERT_FAILED = 'E_REVERT_FAILED'
+    E_NO_CHECKPOINT = "E_NO_CHECKPOINT"
+    E_CHECKPOINT_NOT_FOUND = "E_CHECKPOINT_NOT_FOUND"
+    E_NO_DB = "E_NO_DB"
+    E_SERIAL_BUSY = "E_SERIAL_BUSY"
+    E_COMMAND_FAILED = "E_COMMAND_FAILED"
+    E_INVALID_CHANGE = "E_INVALID_CHANGE"
+    E_BLOCKED_COMMAND = "E_BLOCKED_COMMAND"
+    E_EXPERIMENT_FAILED = "E_EXPERIMENT_FAILED"
+    E_BASELINE_FAILED = "E_BASELINE_FAILED"
+    E_REVERT_FAILED = "E_REVERT_FAILED"
 
 
 # Factory default PID values (from firmware constants)
 FACTORY_DEFAULTS = {
-    'kp': 18.0,
-    'ki': 0.1,
-    'kd': 0.6,
-    'setpoint': 0.0,
-    'max_output': 255,
-    'deadband': 0,
+    "kp": 18.0,
+    "ki": 0.1,
+    "kd": 0.6,
+    "setpoint": 0.0,
+    "max_output": 255,
+    "deadband": 0,
 }
 
 # Rating hierarchy for checkpoint selection
-RATING_HIERARCHY = ['great', 'good', 'ok', 'bad']
+RATING_HIERARCHY = ["great", "good", "ok", "bad"]
 
 
 # T3 Error Codes
 class T3Errors:
-    E_INVALID_PID = 'E_INVALID_PID'
-    E_SIMULATION_FAILED = 'E_SIMULATION_FAILED'
-    E_NO_TELEMETRY = 'E_NO_TELEMETRY'
-    E_SUGGESTION_FAILED = 'E_SUGGESTION_FAILED'
+    E_INVALID_PID = "E_INVALID_PID"
+    E_SIMULATION_FAILED = "E_SIMULATION_FAILED"
+    E_NO_TELEMETRY = "E_NO_TELEMETRY"
+    E_SUGGESTION_FAILED = "E_SUGGESTION_FAILED"
 
 
 # Default robot physical parameters for simulation
 ROBOT_DEFAULTS = {
-    'mass_kg': 0.2,           # 200g typical balance bot
-    'height_m': 0.15,         # 15cm pendulum height
-    'wheel_radius_m': 0.033,  # 33mm wheel radius
-    'loop_period_ms': 10,     # 10ms control loop
-    'gravity': 9.81,
+    "mass_kg": 0.2,  # 200g typical balance bot
+    "height_m": 0.15,  # 15cm pendulum height
+    "wheel_radius_m": 0.033,  # 33mm wheel radius
+    "loop_period_ms": 10,  # 10ms control loop
+    "gravity": 9.81,
 }
 
 # PID tuning heuristics thresholds
 TUNING_THRESHOLDS = {
-    'oscillation_freq_high_hz': 3.0,      # >3Hz suggests derivative issues
-    'oscillation_freq_low_hz': 1.0,       # <1Hz suggests integral issues
-    'saturation_warning_pct': 60,         # Output saturation warning
-    'saturation_critical_pct': 85,        # Output saturation critical
-    'angle_variance_good': 2.0,           # Good variance threshold
-    'angle_variance_acceptable': 5.0,     # Acceptable variance threshold
+    "oscillation_freq_high_hz": 3.0,  # >3Hz suggests derivative issues
+    "oscillation_freq_low_hz": 1.0,  # <1Hz suggests integral issues
+    "saturation_warning_pct": 60,  # Output saturation warning
+    "saturation_critical_pct": 85,  # Output saturation critical
+    "angle_variance_good": 2.0,  # Good variance threshold
+    "angle_variance_acceptable": 5.0,  # Acceptable variance threshold
 }
 
 # ============================================================================
@@ -146,77 +149,89 @@ TUNING_THRESHOLDS = {
 # ============================================================================
 
 # Commands that are SAFE for the agent to execute without confirmation
-SAFE_COMMANDS = frozenset([
-    "PID",
-    "SETPOINT",
-    "MOTION",
-    "LIMITS",
-    "CAL ZERO",
-    "ZERO",
-    "ENCMODE",
-    "SAVECFG",
-    "LOADCFG",
-    "GET",
-    "HELP",
-    "LOGT",
-    "LOGCSV",
-])
+SAFE_COMMANDS = frozenset(
+    [
+        "PID",
+        "SETPOINT",
+        "MOTION",
+        "LIMITS",
+        "CAL ZERO",
+        "ZERO",
+        "ENCMODE",
+        "SAVECFG",
+        "LOADCFG",
+        "GET",
+        "HELP",
+        "LOGT",
+        "LOGCSV",
+    ]
+)
+
+SHELL_MAX_TIMEOUT_S = int(os.environ.get("CODEX_SHELL_MAX_TIMEOUT_S", "120"))
 
 # Commands that are BLOCKED - require human action through UI
-BLOCKED_COMMANDS = frozenset([
-    "ARM",
-    "DISARM",
-    "STATE",
-    "MOTOR",
-    "MOTOROFF",
-    "DEFAULTCFG",
-    "BURSTCSV",
-])
+BLOCKED_COMMANDS = frozenset(
+    [
+        "ARM",
+        "DISARM",
+        "STATE",
+        "MOTOR",
+        "MOTOROFF",
+        "DEFAULTCFG",
+        "BURSTCSV",
+    ]
+)
 
 # Sketch variables that are SAFE to edit
-SAFE_SKETCH_VARIABLES = frozenset([
-    # Kalman filter params
-    "qAngle",
-    "qBias",
-    "rMeasure",
-    # Timing constants
-    "LOOP_US",
-    "TEL_MS",
-    "STATUS_MS",
-    "ARM_HOLD_MS",
-    # Burst logger
-    "burstTarget",
-    "burstDelayMs",
-    "BURST_BAL_ERR_DEG",
-    "BURST_STABLE_HOLD_MS",
-    # Limits
-    "deadbandPwm",
-])
+SAFE_SKETCH_VARIABLES = frozenset(
+    [
+        # Kalman filter params
+        "qAngle",
+        "qBias",
+        "rMeasure",
+        # Timing constants
+        "LOOP_US",
+        "TEL_MS",
+        "STATUS_MS",
+        "ARM_HOLD_MS",
+        # Burst logger
+        "burstTarget",
+        "burstDelayMs",
+        "BURST_BAL_ERR_DEG",
+        "BURST_STABLE_HOLD_MS",
+        # Limits
+        "deadbandPwm",
+    ]
+)
 
 # Sketch variables that are BLOCKED
-BLOCKED_SKETCH_VARIABLES = frozenset([
-    # Pin assignments
-    "PIN_",
-    "MOTOR_L_PWM",
-    "MOTOR_R_PWM",
-    "IMU_SDA",
-    "IMU_SCL",
-    # Mode enums
-    "MODE_",
-    "STATE_",
-    # Magic constants
-    "CONFIG_MAGIC",
-    "CONFIG_VERSION",
-])
+BLOCKED_SKETCH_VARIABLES = frozenset(
+    [
+        # Pin assignments
+        "PIN_",
+        "MOTOR_L_PWM",
+        "MOTOR_R_PWM",
+        "IMU_SDA",
+        "IMU_SCL",
+        # Mode enums
+        "MODE_",
+        "STATE_",
+        # Magic constants
+        "CONFIG_MAGIC",
+        "CONFIG_VERSION",
+    ]
+)
 
 
 # ============================================================================
 # Tool Result Types
 # ============================================================================
 
+
 @dataclass
 class ToolResult:
     """Standard result from tool execution."""
+
     ok: bool
     tool: str
     data: Dict[str, Any] = field(default_factory=dict)
@@ -328,6 +343,31 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "execute_shell",
+            "description": "Execute a terminal command in the project workspace and return stdout/stderr. Use for build/test/lint/git/file-inspection workflows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cmd": {
+                        "type": "string",
+                        "description": "Shell command to run, e.g. 'npm run -s build' or 'rg -n \"TODO\" app/'.",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional working directory relative to repo root.",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "description": "Optional timeout in seconds (max 120 by default).",
+                    },
+                },
+                "required": ["cmd"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "execute_command",
             "description": "Execute a safe tuning command on the robot via serial. Only allowed commands: PID, SETPOINT, MOTION, LIMITS, CAL ZERO, ENCMODE, SAVECFG. Blocked: ARM, DISARM, STATE, MOTOR.",
             "parameters": {
@@ -392,7 +432,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "generate_sketch",
-            "description": "Generate a new firmware sketch based on detected hardware and requirements. Creates a new sketch directory, does not overwrite existing.",
+            "description": "Generate a new firmware sketch from requirements for the detected hardware. Existing/example sketches are references only; do not preserve template logic unless explicitly requested. Creates a new sketch directory and does not overwrite existing.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -486,7 +526,11 @@ TOOL_DEFINITIONS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Metrics to compute: angle_variance, angle_mean, angle_peak, output_mean, output_saturation_pct, oscillation_detected, settling_time_ms",
-                        "default": ["angle_variance", "output_saturation_pct", "oscillation_detected"],
+                        "default": [
+                            "angle_variance",
+                            "output_saturation_pct",
+                            "oscillation_detected",
+                        ],
                     },
                     "trigger": {
                         "type": "string",
@@ -514,7 +558,17 @@ TOOL_DEFINITIONS = [
                     },
                     "analysis": {
                         "type": "array",
-                        "items": {"type": "string", "enum": ["fft", "peak_detect", "phase_lag", "envelope", "stats", "raw"]},
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "fft",
+                                "peak_detect",
+                                "phase_lag",
+                                "envelope",
+                                "stats",
+                                "raw",
+                            ],
+                        },
                         "description": "Analysis types to perform.",
                         "default": ["stats", "peak_detect"],
                     },
@@ -542,7 +596,12 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "compare_to": {
                         "type": "string",
-                        "enum": ["checkpoint", "factory", "session_start", "snapshot_id"],
+                        "enum": [
+                            "checkpoint",
+                            "factory",
+                            "session_start",
+                            "snapshot_id",
+                        ],
                         "description": "What to compare against. Default 'checkpoint' uses best-rated checkpoint.",
                         "default": "checkpoint",
                     },
@@ -729,10 +788,11 @@ TOOL_DEFINITIONS = [
 # Tool Executor Class
 # ============================================================================
 
+
 class CodexToolExecutor:
     """
     Executes tools with safety enforcement and logging.
-    
+
     Requires injection of dependencies:
     - gateway: Serial gateway for commands
     - db: CodexDB for telemetry/checkpoints
@@ -761,7 +821,11 @@ class CodexToolExecutor:
         self.rag = rag
         self.firmware = firmware_module
         self.probe_funcs = probe_funcs or {}
-        self.repo_root = Path(repo_root) if repo_root is not None else Path(__file__).parent.parent.parent
+        self.repo_root = (
+            Path(repo_root)
+            if repo_root is not None
+            else Path(__file__).parent.parent.parent
+        )
         self.active_sketch_path = active_sketch_path
         self.active_robot_id = active_robot_id or "default"
         self.board_fqbn = board_fqbn or "arduino:avr:nano"
@@ -770,6 +834,37 @@ class CodexToolExecutor:
 
         # Pending upload confirmations: token -> request_data
         self._pending_uploads: Dict[str, Dict[str, Any]] = {}
+        # Trusted upload window: one explicit approval can authorize repeated
+        # uploads for the same sketch/board/port for a short period.
+        self._upload_trust_window_s = int(
+            os.environ.get("CODEX_UPLOAD_TRUST_WINDOW_S", "900")
+        )
+        self._upload_trust: Optional[Dict[str, Any]] = None
+
+    def _build_upload_signature(
+        self, sketch_path: str, board: str, port: Optional[str]
+    ) -> str:
+        sketch_norm = str(Path(sketch_path).resolve()) if sketch_path else ""
+        board_norm = (board or "").strip()
+        port_norm = (port or "").strip()
+        return f"{sketch_norm}|{board_norm}|{port_norm}"
+
+    def _is_upload_trusted(self, signature: str) -> bool:
+        if not self._upload_trust:
+            return False
+        if self._upload_trust.get("signature") != signature:
+            return False
+        return time.time() < float(self._upload_trust.get("expires_at", 0))
+
+    def _grant_upload_trust(
+        self, sketch_path: str, board: str, port: Optional[str]
+    ) -> None:
+        now = time.time()
+        self._upload_trust = {
+            "signature": self._build_upload_signature(sketch_path, board, port),
+            "granted_at": now,
+            "expires_at": now + max(0, self._upload_trust_window_s),
+        }
 
     def execute(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """
@@ -792,7 +887,9 @@ class CodexToolExecutor:
             result = handler(arguments)
             result.execution_time_ms = (time.time() - start_time) * 1000
 
-            logger.info(f"Tool result: {tool_name} ok={result.ok} time={result.execution_time_ms:.1f}ms")
+            logger.info(
+                f"Tool result: {tool_name} ok={result.ok} time={result.execution_time_ms:.1f}ms"
+            )
             return result
 
         except Exception as e:
@@ -824,7 +921,9 @@ class CodexToolExecutor:
         if probe_type in ("connect", "all"):
             if "run_connect_probe" in self.probe_funcs:
                 try:
-                    data["connect"] = self.probe_funcs["run_connect_probe"](self.gateway)
+                    data["connect"] = self.probe_funcs["run_connect_probe"](
+                        self.gateway
+                    )
                 except Exception as e:
                     data["connect_error"] = str(e)
 
@@ -841,7 +940,9 @@ class CodexToolExecutor:
     def _tool_query_telemetry(self, args: Dict[str, Any]) -> ToolResult:
         """Query telemetry from database."""
         if not self.db:
-            return ToolResult(ok=False, tool="query_telemetry", error="Database not configured")
+            return ToolResult(
+                ok=False, tool="query_telemetry", error="Database not configured"
+            )
 
         minutes = args.get("minutes", 5)
         robot_id = args.get("robot_id", self.active_robot_id)
@@ -874,14 +975,25 @@ class CodexToolExecutor:
         elif aggregation == "trend":
             # Calculate trends
             if len(snapshots) >= 2:
-                first_half = snapshots[len(snapshots)//2:]
-                second_half = snapshots[:len(snapshots)//2]
-                avg_ang_first = sum(s.ang for s in first_half) / len(first_half) if first_half else 0
-                avg_ang_second = sum(s.ang for s in second_half) / len(second_half) if second_half else 0
+                first_half = snapshots[len(snapshots) // 2 :]
+                second_half = snapshots[: len(snapshots) // 2]
+                avg_ang_first = (
+                    sum(s.ang for s in first_half) / len(first_half)
+                    if first_half
+                    else 0
+                )
+                avg_ang_second = (
+                    sum(s.ang for s in second_half) / len(second_half)
+                    if second_half
+                    else 0
+                )
                 data = {
                     "count": len(snapshots),
-                    "angle_trend": "increasing" if avg_ang_second > avg_ang_first + 0.1 else
-                                   "decreasing" if avg_ang_second < avg_ang_first - 0.1 else "stable",
+                    "angle_trend": "increasing"
+                    if avg_ang_second > avg_ang_first + 0.1
+                    else "decreasing"
+                    if avg_ang_second < avg_ang_first - 0.1
+                    else "stable",
                     "avg_angle_early": round(avg_ang_first, 3),
                     "avg_angle_recent": round(avg_ang_second, 3),
                 }
@@ -914,7 +1026,9 @@ class CodexToolExecutor:
     def _tool_query_checkpoints(self, args: Dict[str, Any]) -> ToolResult:
         """Query checkpoints from database."""
         if not self.db:
-            return ToolResult(ok=False, tool="query_checkpoints", error="Database not configured")
+            return ToolResult(
+                ok=False, tool="query_checkpoints", error="Database not configured"
+            )
 
         rating = args.get("rating")
         limit = args.get("limit", 10)
@@ -963,7 +1077,9 @@ class CodexToolExecutor:
                 {
                     "source": r.source_path,
                     "score": round(r.score, 3),
-                    "content": r.content[:500] + "..." if len(r.content) > 500 else r.content,
+                    "content": r.content[:500] + "..."
+                    if len(r.content) > 500
+                    else r.content,
                 }
                 for r in results
             ],
@@ -971,10 +1087,79 @@ class CodexToolExecutor:
 
         return ToolResult(ok=True, tool="search_docs", data=data)
 
+    def _tool_execute_shell(self, args: Dict[str, Any]) -> ToolResult:
+        """Execute terminal command inside repository workspace."""
+        cmd = str(args.get("cmd", "")).strip()
+        if not cmd:
+            return ToolResult(ok=False, tool="execute_shell", error="cmd is required")
+
+        cwd_raw = str(args.get("cwd", "")).strip()
+        repo_root = self.repo_root.resolve()
+        if cwd_raw:
+            target = (repo_root / cwd_raw).resolve()
+            try:
+                target.relative_to(repo_root)
+            except Exception:
+                return ToolResult(
+                    ok=False,
+                    tool="execute_shell",
+                    error="cwd must be inside repository root",
+                )
+        else:
+            target = repo_root
+
+        timeout_s = int(args.get("timeout_s", 60) or 60)
+        timeout_s = max(1, min(timeout_s, SHELL_MAX_TIMEOUT_S))
+        try:
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=str(target),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            partial_out = str((exc.stdout or "") + "\n" + (exc.stderr or "")).strip()
+            return ToolResult(
+                ok=False,
+                tool="execute_shell",
+                error=f"timeout_after_{timeout_s}s",
+                data={
+                    "cmd": cmd,
+                    "cwd": str(target),
+                    "partial_output": partial_out[-4000:],
+                },
+            )
+        except Exception as exc:
+            return ToolResult(
+                ok=False,
+                tool="execute_shell",
+                error=f"shell_exec_failed:{exc}",
+                data={"cmd": cmd, "cwd": str(target)},
+            )
+
+        out = (proc.stdout or "").strip()
+        err = (proc.stderr or "").strip()
+        merged = "\n".join([x for x in [out, err] if x]).strip()
+        return ToolResult(
+            ok=(proc.returncode == 0),
+            tool="execute_shell",
+            data={
+                "cmd": cmd,
+                "cwd": str(target),
+                "exit_code": int(proc.returncode),
+                "output": merged[-12000:],
+            },
+            error=None if proc.returncode == 0 else f"exit_code:{proc.returncode}",
+        )
+
     def _tool_execute_command(self, args: Dict[str, Any]) -> ToolResult:
         """Execute a serial command with safety enforcement."""
         if not self.gateway:
-            return ToolResult(ok=False, tool="execute_command", error="Serial gateway not connected")
+            return ToolResult(
+                ok=False, tool="execute_command", error="Serial gateway not connected"
+            )
 
         # Serial busy guard - check if gateway is currently busy
         if hasattr(self.gateway, "is_busy") and self.gateway.is_busy():
@@ -987,7 +1172,9 @@ class CodexToolExecutor:
 
         cmd = args.get("cmd", "").strip()
         if not cmd:
-            return ToolResult(ok=False, tool="execute_command", error="Command is required")
+            return ToolResult(
+                ok=False, tool="execute_command", error="Command is required"
+            )
 
         # Extract command prefix for allowlist check
         cmd_prefix = cmd.split()[0].upper() if cmd.split() else ""
@@ -1030,7 +1217,9 @@ class CodexToolExecutor:
                 },
             )
         except Exception as e:
-            return ToolResult(ok=False, tool="execute_command", error=f"Command failed: {e}")
+            return ToolResult(
+                ok=False, tool="execute_command", error=f"Command failed: {e}"
+            )
 
     def _tool_edit_sketch_value(self, args: Dict[str, Any]) -> ToolResult:
         """Edit a compile-time constant in sketch with allowlist enforcement."""
@@ -1039,7 +1228,11 @@ class CodexToolExecutor:
         sketch_path = args.get("sketch_path", self.active_sketch_path)
 
         if not variable or not value:
-            return ToolResult(ok=False, tool="edit_sketch_value", error="variable and value are required")
+            return ToolResult(
+                ok=False,
+                tool="edit_sketch_value",
+                error="variable and value are required",
+            )
 
         # Check allowlist
         if variable not in SAFE_SKETCH_VARIABLES:
@@ -1059,7 +1252,9 @@ class CodexToolExecutor:
             )
 
         if not sketch_path:
-            return ToolResult(ok=False, tool="edit_sketch_value", error="No sketch path configured")
+            return ToolResult(
+                ok=False, tool="edit_sketch_value", error="No sketch path configured"
+            )
 
         # Find the .ino file
         sketch_dir = Path(sketch_path)
@@ -1068,12 +1263,22 @@ class CodexToolExecutor:
 
         ino_files = list(sketch_dir.glob("*.ino"))
         if not ino_files:
-            return ToolResult(ok=False, tool="edit_sketch_value", error=f"No .ino file found in {sketch_path}")
+            return ToolResult(
+                ok=False,
+                tool="edit_sketch_value",
+                error=f"No .ino file found in {sketch_path}",
+            )
 
         ino_path = ino_files[0]
 
         try:
             content = ino_path.read_text(encoding="utf-8")
+            if not content.strip():
+                return ToolResult(
+                    ok=False,
+                    tool="edit_sketch_value",
+                    error=f"Sketch file is empty: {ino_path}",
+                )
             original_content = content
 
             # Pattern for struct member assignment: .variable = value
@@ -1129,7 +1334,9 @@ class CodexToolExecutor:
             )
 
         except Exception as e:
-            return ToolResult(ok=False, tool="edit_sketch_value", error=f"Edit failed: {e}")
+            return ToolResult(
+                ok=False, tool="edit_sketch_value", error=f"Edit failed: {e}"
+            )
 
     def _tool_read_sketch(self, args: Dict[str, Any]) -> ToolResult:
         """Read current sketch source for inspection/debugging."""
@@ -1138,27 +1345,47 @@ class CodexToolExecutor:
         max_chars = max(500, min(max_chars, 50000))
 
         if not sketch_path:
-            return ToolResult(ok=False, tool="read_sketch", error="No sketch path configured")
+            return ToolResult(
+                ok=False, tool="read_sketch", error="No sketch path configured"
+            )
 
         try:
             path = Path(sketch_path)
             if not path.exists():
                 path = self.repo_root / str(sketch_path)
             if not path.exists():
-                return ToolResult(ok=False, tool="read_sketch", error=f"Sketch path not found: {sketch_path}")
+                return ToolResult(
+                    ok=False,
+                    tool="read_sketch",
+                    error=f"Sketch path not found: {sketch_path}",
+                )
 
             ino_path: Optional[Path] = None
             if path.is_file():
                 if path.suffix.lower() != ".ino":
-                    return ToolResult(ok=False, tool="read_sketch", error=f"Expected .ino file, got: {path.name}")
+                    return ToolResult(
+                        ok=False,
+                        tool="read_sketch",
+                        error=f"Expected .ino file, got: {path.name}",
+                    )
                 ino_path = path
             else:
                 ino_files = sorted(path.glob("*.ino"))
                 if not ino_files:
-                    return ToolResult(ok=False, tool="read_sketch", error=f"No .ino file found in {path}")
+                    return ToolResult(
+                        ok=False,
+                        tool="read_sketch",
+                        error=f"No .ino file found in {path}",
+                    )
                 ino_path = ino_files[0]
 
             content = ino_path.read_text(encoding="utf-8")
+            if not content.strip():
+                return ToolResult(
+                    ok=False,
+                    tool="read_sketch",
+                    error=f"Sketch file is empty: {ino_path}",
+                )
             truncated = False
             if len(content) > max_chars:
                 content = content[:max_chars]
@@ -1183,9 +1410,12 @@ class CodexToolExecutor:
         base_template = args.get("base_template", "balance_v2")
         features = args.get("features", [])
         custom_instructions = args.get("custom_instructions", "")
+        unified_error: Optional[str] = None
 
         if not name:
-            return ToolResult(ok=False, tool="generate_sketch", error="Sketch name is required")
+            return ToolResult(
+                ok=False, tool="generate_sketch", error="Sketch name is required"
+            )
 
         # Sanitize name
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
@@ -1195,6 +1425,17 @@ class CodexToolExecutor:
         # Check if directory already exists
         output_dir = self.repo_root / "generated_firmware" / safe_name
         if output_dir.exists():
+            existing_main = output_dir / f"{safe_name}.ino"
+            if existing_main.exists() and existing_main.is_file():
+                try:
+                    if existing_main.stat().st_size <= 0:
+                        return ToolResult(
+                            ok=False,
+                            tool="generate_sketch",
+                            error=f"Directory already exists and main sketch is empty: {existing_main}. Delete the folder, then regenerate.",
+                        )
+                except OSError:
+                    pass
             return ToolResult(
                 ok=False,
                 tool="generate_sketch",
@@ -1204,13 +1445,49 @@ class CodexToolExecutor:
         # For now, delegate to existing firmware generation if available
         if self.firmware and hasattr(self.firmware, "generate_unified"):
             try:
-                # Build profile from probe results if available
+                # Build a complete default profile so unified generation can succeed
+                # even when probe metadata is sparse.
                 profile: Dict[str, Any] = {
                     "label": name,
-                    "board": {"fqbn": self.board_fqbn, "port": self.port or ""},
+                    "board": {
+                        "fqbn": self.board_fqbn or "arduino:avr:nano",
+                        "port": self.port or "",
+                        "mcu_family": "avr",
+                    },
+                    "hardware": {
+                        "imu_type": "mpu6050",
+                        "motor_driver": "tb6612",
+                    },
+                    "pins": {
+                        "motor_l_pwm": 5,
+                        "motor_l_dir": 4,
+                        "motor_r_pwm": 6,
+                        "motor_r_dir": 7,
+                        "imu_sda": 18,
+                        "imu_scl": 19,
+                        "gate_enable": 8,
+                        "led": 13,
+                        "enc_l_a": -1,
+                        "enc_l_b": -1,
+                        "enc_r_a": -1,
+                        "enc_r_b": -1,
+                    },
                 }
 
-                result = self.firmware.generate_unified(profile=profile, sketch_name=safe_name)
+                result = self.firmware.generate_unified(
+                    profile=profile, sketch_name=safe_name
+                )
+                main_file = result.get("main_file")
+                main_path = Path(str(main_file)) if isinstance(main_file, str) else None
+                main_bytes: Optional[int] = None
+                if main_path and main_path.exists() and main_path.is_file():
+                    main_bytes = int(main_path.stat().st_size)
+                    if main_bytes <= 0:
+                        return ToolResult(
+                            ok=False,
+                            tool="generate_sketch",
+                            error=f"Generated sketch is empty: {main_path}",
+                        )
 
                 return ToolResult(
                     ok=True,
@@ -1218,31 +1495,70 @@ class CodexToolExecutor:
                     data={
                         "name": safe_name,
                         "sketch_folder": result.get("sketch_folder"),
-                        "main_file": result.get("main_file"),
+                        "main_file": str(main_path) if main_path else "",
+                        "main_file_bytes": main_bytes,
                         "features": features,
                         "message": "Sketch generated. Use compile_firmware to verify, then upload_firmware to flash.",
                     },
                 )
             except Exception as e:
-                return ToolResult(ok=False, tool="generate_sketch", error=f"Generation failed: {e}")
+                # If unified generation fails (often due missing full hardware profile),
+                # fall back to deterministic template copy rather than hard-failing.
+                unified_error = str(e)
+                logger.warning(
+                    f"Unified sketch generation failed; falling back to template copy: {unified_error}"
+                )
 
         # Fallback: copy template manually
         template_dir = self.repo_root / "tumbller_v06_nano_balance_v2"
         if not template_dir.exists():
-            return ToolResult(ok=False, tool="generate_sketch", error="Template directory not found")
+            return ToolResult(
+                ok=False, tool="generate_sketch", error="Template directory not found"
+            )
 
         try:
             import shutil
+
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Copy template files
+            source_ino_nonempty = False
             for src_file in template_dir.glob("*"):
                 if src_file.is_file():
                     dst_file = output_dir / src_file.name
                     # Rename .ino file to match directory
                     if src_file.suffix == ".ino":
+                        try:
+                            if src_file.stat().st_size > 0:
+                                source_ino_nonempty = True
+                        except OSError:
+                            pass
                         dst_file = output_dir / f"{safe_name}.ino"
                     shutil.copy2(src_file, dst_file)
+
+            main_file = output_dir / f"{safe_name}.ino"
+            if not main_file.exists() or not main_file.is_file():
+                return ToolResult(
+                    ok=False,
+                    tool="generate_sketch",
+                    error=f"Generated sketch missing main file: {main_file}",
+                )
+            main_bytes = main_file.stat().st_size
+            if main_bytes <= 0:
+                if not source_ino_nonempty:
+                    return ToolResult(
+                        ok=False,
+                        tool="generate_sketch",
+                        error=(
+                            "Fallback template .ino is empty. Regenerate with unified template "
+                            "or restore tumbller_v06_nano_balance_v2/tumbller_v06_nano_balance_v2.ino."
+                        ),
+                    )
+                return ToolResult(
+                    ok=False,
+                    tool="generate_sketch",
+                    error=f"Generated sketch is empty: {main_file}",
+                )
 
             return ToolResult(
                 ok=True,
@@ -1250,13 +1566,19 @@ class CodexToolExecutor:
                 data={
                     "name": safe_name,
                     "sketch_folder": str(output_dir),
-                    "main_file": str(output_dir / f"{safe_name}.ino"),
-                    "template_used": "balance_v2",
+                    "main_file": str(main_file),
+                    "main_file_bytes": int(main_bytes),
+                    "template_used": str(base_template or "balance_v2"),
+                    "features": features,
+                    "custom_instructions_used": bool(str(custom_instructions).strip()),
+                    "unified_generation_error": unified_error,
                     "message": "Sketch created from template. Edit as needed, then compile and upload.",
                 },
             )
         except Exception as e:
-            return ToolResult(ok=False, tool="generate_sketch", error=f"Copy failed: {e}")
+            return ToolResult(
+                ok=False, tool="generate_sketch", error=f"Copy failed: {e}"
+            )
 
     def _tool_compile_firmware(self, args: Dict[str, Any]) -> ToolResult:
         """Compile firmware sketch."""
@@ -1264,13 +1586,19 @@ class CodexToolExecutor:
         board = args.get("board", self.board_fqbn)
 
         if not sketch_path:
-            return ToolResult(ok=False, tool="compile_firmware", error="No sketch path specified")
+            return ToolResult(
+                ok=False, tool="compile_firmware", error="No sketch path specified"
+            )
 
         if not self.firmware:
-            return ToolResult(ok=False, tool="compile_firmware", error="Firmware module not configured")
+            return ToolResult(
+                ok=False,
+                tool="compile_firmware",
+                error="Firmware module not configured",
+            )
 
         try:
-            result = self.firmware.compile(sketch_path, board)
+            result = self.firmware.compile(sketch=sketch_path, fqbn=board)
 
             if result.get("ok"):
                 return ToolResult(
@@ -1292,24 +1620,72 @@ class CodexToolExecutor:
                     data={"output": result.get("output", "")},
                 )
         except Exception as e:
-            return ToolResult(ok=False, tool="compile_firmware", error=f"Compile error: {e}")
+            return ToolResult(
+                ok=False, tool="compile_firmware", error=f"Compile error: {e}"
+            )
 
     def _tool_upload_firmware(self, args: Dict[str, Any]) -> ToolResult:
         """Upload firmware with confirmation gate."""
         sketch_path = args.get("sketch_path", self.active_sketch_path)
         confirmation_token = args.get("confirmation_token")
+        board = args.get("board", self.board_fqbn)
+        port = args.get("port", self.port)
 
         if not sketch_path:
-            return ToolResult(ok=False, tool="upload_firmware", error="No sketch path specified")
+            return ToolResult(
+                ok=False, tool="upload_firmware", error="No sketch path specified"
+            )
+
+        signature = self._build_upload_signature(sketch_path, board, port)
 
         # If no confirmation token, generate one and request confirmation
         if not confirmation_token:
+            if self._is_upload_trusted(signature):
+                if not self.firmware:
+                    return ToolResult(
+                        ok=False,
+                        tool="upload_firmware",
+                        error="Firmware module not configured",
+                    )
+                try:
+                    result = self.firmware.upload(
+                        sketch=sketch_path,
+                        fqbn=board,
+                        port=port,
+                    )
+
+                    if result.get("ok"):
+                        return ToolResult(
+                            ok=True,
+                            tool="upload_firmware",
+                            data={
+                                "sketch": sketch_path,
+                                "board": board,
+                                "port": port,
+                                "output": result.get("output", ""),
+                                "message": "Upload successful (trusted explicit approval window).",
+                            },
+                        )
+                    else:
+                        return ToolResult(
+                            ok=False,
+                            tool="upload_firmware",
+                            error=f"Upload failed: {result.get('error', 'Unknown error')}",
+                            data={"output": result.get("output", "")},
+                        )
+                except Exception as e:
+                    return ToolResult(
+                        ok=False, tool="upload_firmware", error=f"Upload error: {e}"
+                    )
+
             import secrets
+
             token = secrets.token_hex(16)
             self._pending_uploads[token] = {
                 "sketch_path": sketch_path,
-                "board": self.board_fqbn,
-                "port": self.port,
+                "board": board,
+                "port": port,
+                "signature": signature,
                 "created_at": time.time(),
             }
 
@@ -1320,10 +1696,11 @@ class CodexToolExecutor:
                 data={
                     "confirmation_token": token,
                     "sketch_path": sketch_path,
-                    "board": self.board_fqbn,
-                    "port": self.port,
+                    "board": board,
+                    "port": port,
                     "message": "Upload requires user confirmation. Approve in UI to proceed.",
                     "action_required": "User must click 'Confirm Upload' in the UI.",
+                    "expires_in_s": 300,
                 },
             )
 
@@ -1346,13 +1723,20 @@ class CodexToolExecutor:
             )
 
         if not self.firmware:
-            return ToolResult(ok=False, tool="upload_firmware", error="Firmware module not configured")
+            return ToolResult(
+                ok=False, tool="upload_firmware", error="Firmware module not configured"
+            )
 
         try:
+            # A validated confirmation token is explicit operator permission.
+            # Grant a brief trust window for this exact upload context.
+            self._grant_upload_trust(
+                pending["sketch_path"], pending["board"], pending["port"]
+            )
             result = self.firmware.upload(
-                pending["sketch_path"],
-                pending["board"],
-                pending["port"],
+                sketch=pending["sketch_path"],
+                fqbn=pending["board"],
+                port=pending["port"],
             )
 
             if result.get("ok"):
@@ -1375,7 +1759,9 @@ class CodexToolExecutor:
                     data={"output": result.get("output", "")},
                 )
         except Exception as e:
-            return ToolResult(ok=False, tool="upload_firmware", error=f"Upload error: {e}")
+            return ToolResult(
+                ok=False, tool="upload_firmware", error=f"Upload error: {e}"
+            )
 
     # ========================================================================
     # T1: Feedback Loop Tool Implementations
@@ -1414,11 +1800,15 @@ class CodexToolExecutor:
 
         # Parse and validate arguments
         duration_s = min(
-            float(args.get("duration_s", 5)),
-            ObservationLimits.MAX_OBSERVE_DURATION_S
+            float(args.get("duration_s", 5)), ObservationLimits.MAX_OBSERVE_DURATION_S
         )
-        sample_rate_hz = float(args.get("sample_rate_hz", ObservationLimits.DEFAULT_SAMPLE_RATE_HZ))
-        requested_metrics = args.get("metrics", ["angle_variance", "output_saturation_pct", "oscillation_detected"])
+        sample_rate_hz = float(
+            args.get("sample_rate_hz", ObservationLimits.DEFAULT_SAMPLE_RATE_HZ)
+        )
+        requested_metrics = args.get(
+            "metrics",
+            ["angle_variance", "output_saturation_pct", "oscillation_detected"],
+        )
         trigger = args.get("trigger", "immediate")
 
         # Handle trigger modes
@@ -1429,7 +1819,9 @@ class CodexToolExecutor:
                 try:
                     status = self.gateway.get_status()
                     current_mode = str(status.get("mode", ""))
-                    if current_mode == target_mode or (trigger == "on_balance" and current_mode == "BALANCING"):
+                    if current_mode == target_mode or (
+                        trigger == "on_balance" and current_mode == "BALANCING"
+                    ):
                         break
                 except Exception:
                     pass
@@ -1439,7 +1831,10 @@ class CodexToolExecutor:
                     ok=False,
                     tool="observe_telemetry",
                     error=T1Errors.E_TRIGGER_TIMEOUT,
-                    data={"message": f"Timeout waiting for {target_mode} mode", "waited_s": ObservationLimits.TRIGGER_TIMEOUT_S},
+                    data={
+                        "message": f"Timeout waiting for {target_mode} mode",
+                        "waited_s": ObservationLimits.TRIGGER_TIMEOUT_S,
+                    },
                 )
 
         # Collect samples
@@ -1455,14 +1850,20 @@ class CodexToolExecutor:
                 try:
                     status = self.gateway.get_status()
                     if status:
-                        samples.append({
-                            "ts": now,
-                            "ang": float(status.get("ang", 0)),
-                            "raw": float(status.get("raw", 0)),
-                            "out": float(status.get("out", 0)),
-                            "mode": str(status.get("mode", "")),
-                            "gyro": float(status.get("gyro", status.get("gyr", status.get("gx", 0)))),
-                        })
+                        samples.append(
+                            {
+                                "ts": now,
+                                "ang": float(status.get("ang", 0)),
+                                "raw": float(status.get("raw", 0)),
+                                "out": float(status.get("out", 0)),
+                                "mode": str(status.get("mode", "")),
+                                "gyro": float(
+                                    status.get(
+                                        "gyro", status.get("gyr", status.get("gx", 0))
+                                    )
+                                ),
+                            }
+                        )
                         last_sample_time = now
                 except Exception:
                     pass  # Skip failed samples
@@ -1479,7 +1880,7 @@ class CodexToolExecutor:
 
         # Compute metrics
         metrics = self._compute_observation_metrics(samples, requested_metrics)
-        
+
         # Determine if partial
         partial = len(samples) < expected_samples * 0.8  # Less than 80% of expected
 
@@ -1488,7 +1889,9 @@ class CodexToolExecutor:
             "samples_expected": expected_samples,
             "duration_actual_s": round(time.time() - start_time, 2),
             "duration_requested_s": duration_s,
-            "sample_rate_actual_hz": round(len(samples) / (time.time() - start_time), 1) if samples else 0,
+            "sample_rate_actual_hz": round(len(samples) / (time.time() - start_time), 1)
+            if samples
+            else 0,
             "metrics": metrics,
         }
 
@@ -1503,18 +1906,20 @@ class CodexToolExecutor:
     ) -> Dict[str, Any]:
         """Compute requested metrics from collected samples."""
         metrics: Dict[str, Any] = {}
-        
+
         if not samples:
             return metrics
 
         angles = [s["ang"] for s in samples]
         outputs = [s["out"] for s in samples]
-        
+
         # Always compute sample_count
         metrics["sample_count"] = len(samples)
 
         if "angle_variance" in requested or "all" in requested:
-            metrics["angle_variance"] = round(statistics.variance(angles), 4) if len(angles) > 1 else 0.0
+            metrics["angle_variance"] = (
+                round(statistics.variance(angles), 4) if len(angles) > 1 else 0.0
+            )
 
         if "angle_mean" in requested or "all" in requested:
             metrics["angle_mean"] = round(statistics.mean(angles), 4)
@@ -1523,7 +1928,9 @@ class CodexToolExecutor:
             metrics["angle_peak"] = round(max(abs(a) for a in angles), 4)
 
         if "angle_std" in requested or "all" in requested:
-            metrics["angle_std"] = round(statistics.stdev(angles), 4) if len(angles) > 1 else 0.0
+            metrics["angle_std"] = (
+                round(statistics.stdev(angles), 4) if len(angles) > 1 else 0.0
+            )
 
         if "output_mean" in requested or "all" in requested:
             metrics["output_mean"] = round(statistics.mean(outputs), 2)
@@ -1546,33 +1953,35 @@ class CodexToolExecutor:
         """Detect oscillation via zero-crossing analysis."""
         if len(angles) < 10:
             return False
-        
+
         # Compute deviations from mean
         mean_ang = statistics.mean(angles)
         deviations = [a - mean_ang for a in angles]
-        
+
         # Count sign changes
         sign_changes = 0
         for i in range(1, len(deviations)):
-            if deviations[i] * deviations[i-1] < 0:
+            if deviations[i] * deviations[i - 1] < 0:
                 sign_changes += 1
-        
+
         # If more than 20% of samples have sign changes, likely oscillating
         return sign_changes > len(angles) * 0.2
 
-    def _compute_settling_time(self, samples: List[Dict[str, Any]], threshold: float = 1.0) -> Optional[int]:
+    def _compute_settling_time(
+        self, samples: List[Dict[str, Any]], threshold: float = 1.0
+    ) -> Optional[int]:
         """Compute time until angle variance drops below threshold."""
         if len(samples) < 10:
             return None
-        
+
         window_size = 5
         for i in range(window_size, len(samples)):
-            window = [s["ang"] for s in samples[i-window_size:i]]
+            window = [s["ang"] for s in samples[i - window_size : i]]
             if statistics.variance(window) < threshold:
                 # Found settling point
                 elapsed_ms = int((samples[i]["ts"] - samples[0]["ts"]) * 1000)
                 return elapsed_ms
-        
+
         return None  # Did not settle
 
     def _tool_read_burst_capture(self, args: Dict[str, Any]) -> ToolResult:
@@ -1610,7 +2019,10 @@ class CodexToolExecutor:
                 ok=False,
                 tool="read_burst_capture",
                 error=T1Errors.E_BURST_IN_PROGRESS,
-                data={"message": "Burst capture in progress, cannot read incomplete data", "state": state},
+                data={
+                    "message": "Burst capture in progress, cannot read incomplete data",
+                    "state": state,
+                },
             )
 
         # Get CSV path
@@ -1687,7 +2099,10 @@ class CodexToolExecutor:
                 ok=False,
                 tool="read_burst_capture",
                 error=T1Errors.E_NO_BURST_SAMPLES,
-                data={"message": "CSV contains no valid data rows", "csv_path": str(csv_path)},
+                data={
+                    "message": "CSV contains no valid data rows",
+                    "csv_path": str(csv_path),
+                },
             )
 
         # Compute sample rate from timestamps
@@ -1702,7 +2117,9 @@ class CodexToolExecutor:
             "capture_id": csv_path.stem,
             "csv_path": str(csv_path),
             "sample_count": len(rows),
-            "duration_s": round(rows[-1]["ts"] - rows[0]["ts"], 3) if len(rows) > 1 else 0,
+            "duration_s": round(rows[-1]["ts"] - rows[0]["ts"], 3)
+            if len(rows) > 1
+            else 0,
             "sample_rate_hz": round(sample_rate_hz, 1),
         }
 
@@ -1718,10 +2135,14 @@ class CodexToolExecutor:
         if "stats" in analysis_types:
             result_data["stats"] = {
                 "angle_mean": round(statistics.mean(angles), 4),
-                "angle_std": round(statistics.stdev(angles), 4) if len(angles) > 1 else 0,
+                "angle_std": round(statistics.stdev(angles), 4)
+                if len(angles) > 1
+                else 0,
                 "angle_peak": round(max(abs(a) for a in angles), 4),
                 "output_mean": round(statistics.mean(outputs), 2),
-                "output_std": round(statistics.stdev(outputs), 2) if len(outputs) > 1 else 0,
+                "output_std": round(statistics.stdev(outputs), 2)
+                if len(outputs) > 1
+                else 0,
             }
 
         if "peak_detect" in analysis_types:
@@ -1731,7 +2152,9 @@ class CodexToolExecutor:
             result_data["fft"] = self._compute_fft(angles, sample_rate_hz, freq_range)
 
         if "phase_lag" in analysis_types:
-            result_data["phase_lag"] = self._compute_phase_lag(angles, outputs, sample_rate_hz)
+            result_data["phase_lag"] = self._compute_phase_lag(
+                angles, outputs, sample_rate_hz
+            )
 
         if "raw" in analysis_types:
             # Return first 100 rows as raw data
@@ -1740,22 +2163,26 @@ class CodexToolExecutor:
         # Generate diagnosis if oscillation detected
         if result_data.get("peak_detect", {}).get("oscillation_detected"):
             freq = result_data.get("peak_detect", {}).get("oscillation_freq_hz", 0)
-            result_data["diagnosis"] = f"{freq:.1f}Hz oscillation detected. Consider reducing Kd or checking loop delay."
+            result_data["diagnosis"] = (
+                f"{freq:.1f}Hz oscillation detected. Consider reducing Kd or checking loop delay."
+            )
 
         return ToolResult(ok=True, tool="read_burst_capture", data=result_data)
 
-    def _detect_peaks(self, angles: List[float], sample_rate_hz: float) -> Dict[str, Any]:
+    def _detect_peaks(
+        self, angles: List[float], sample_rate_hz: float
+    ) -> Dict[str, Any]:
         """Detect oscillation peaks in angle data."""
         if len(angles) < 10 or sample_rate_hz <= 0:
             return {"oscillation_detected": False}
 
         mean_ang = statistics.mean(angles)
         deviations = [a - mean_ang for a in angles]
-        
+
         # Find peaks (local maxima)
         peaks = []
         for i in range(1, len(deviations) - 1):
-            if deviations[i] > deviations[i-1] and deviations[i] > deviations[i+1]:
+            if deviations[i] > deviations[i - 1] and deviations[i] > deviations[i + 1]:
                 if abs(deviations[i]) > 0.5:  # Minimum peak height
                     peaks.append(i)
 
@@ -1763,7 +2190,7 @@ class CodexToolExecutor:
             return {"oscillation_detected": False}
 
         # Calculate frequency from peak spacing
-        peak_intervals = [peaks[i+1] - peaks[i] for i in range(len(peaks)-1)]
+        peak_intervals = [peaks[i + 1] - peaks[i] for i in range(len(peaks) - 1)]
         avg_interval = statistics.mean(peak_intervals)
         freq_hz = sample_rate_hz / avg_interval if avg_interval > 0 else 0
 
@@ -1773,8 +2200,8 @@ class CodexToolExecutor:
 
         # Estimate damping ratio (simplified)
         if len(peak_values) >= 4:
-            early_peaks = statistics.mean(peak_values[:len(peak_values)//2])
-            late_peaks = statistics.mean(peak_values[len(peak_values)//2:])
+            early_peaks = statistics.mean(peak_values[: len(peak_values) // 2])
+            late_peaks = statistics.mean(peak_values[len(peak_values) // 2 :])
             damping_ratio = 1 - (late_peaks / early_peaks) if early_peaks > 0 else 0
         else:
             damping_ratio = None
@@ -1784,7 +2211,9 @@ class CodexToolExecutor:
             "oscillation_freq_hz": round(freq_hz, 2),
             "peak_to_peak_deg": round(peak_to_peak, 2),
             "peak_count": len(peaks),
-            "damping_ratio": round(damping_ratio, 3) if damping_ratio is not None else None,
+            "damping_ratio": round(damping_ratio, 3)
+            if damping_ratio is not None
+            else None,
         }
 
     def _compute_fft(
@@ -1801,7 +2230,7 @@ class CodexToolExecutor:
         # Simple DFT for dominant frequency detection
         # Only compute for frequencies in range
         min_freq, max_freq = freq_range if len(freq_range) == 2 else (0.5, 25)
-        
+
         freq_step = sample_rate_hz / n
         start_k = max(1, int(min_freq / freq_step))
         end_k = min(n // 2, int(max_freq / freq_step) + 1)
@@ -1819,7 +2248,7 @@ class CodexToolExecutor:
                 angle = 2 * math.pi * k * i / n
                 real_sum += x * math.cos(angle)
                 imag_sum -= x * math.sin(angle)
-            
+
             amplitude = math.sqrt(real_sum**2 + imag_sum**2) / n
             freq = k * freq_step
 
@@ -1835,7 +2264,9 @@ class CodexToolExecutor:
         return {
             "dominant_freq_hz": round(dominant_freq, 2),
             "dominant_amplitude": round(max_amplitude * 2, 4),  # Scale for peak-to-peak
-            "secondary_freq_hz": round(secondary_freq, 2) if secondary_freq > 0 else None,
+            "secondary_freq_hz": round(secondary_freq, 2)
+            if secondary_freq > 0
+            else None,
             "noise_floor_db": -45,  # Placeholder
         }
 
@@ -1854,7 +2285,7 @@ class CodexToolExecutor:
 
         # Simple cross-correlation to find lag
         max_lag = min(len(angles) // 4, 50)
-        best_corr = -float('inf')
+        best_corr = -float("inf")
         best_lag = 0
 
         for lag in range(-max_lag, max_lag + 1):
@@ -1872,7 +2303,7 @@ class CodexToolExecutor:
                     best_lag = lag
 
         lag_ms = int(best_lag * 1000 / sample_rate_hz) if sample_rate_hz > 0 else 0
-        
+
         # Convert to degrees (assuming dominant frequency)
         # This is approximate without actual FFT
         lag_deg = None
@@ -1926,7 +2357,9 @@ class CodexToolExecutor:
             "kp": float(current_status.get("kp", 0)),
             "ki": float(current_status.get("ki", 0)),
             "kd": float(current_status.get("kd", 0)),
-            "setpoint": float(current_status.get("set", current_status.get("setpoint", 0))),
+            "setpoint": float(
+                current_status.get("set", current_status.get("setpoint", 0))
+            ),
         }
 
         # Get reference config based on compare_to
@@ -1948,8 +2381,12 @@ class CodexToolExecutor:
 
             try:
                 if checkpoint_id:
-                    checkpoints = self.db.query_checkpoints(robot_id=self.active_robot_id, limit=100)
-                    checkpoint = next((c for c in checkpoints if c.id == checkpoint_id), None)
+                    checkpoints = self.db.query_checkpoints(
+                        robot_id=self.active_robot_id, limit=100
+                    )
+                    checkpoint = next(
+                        (c for c in checkpoints if c.id == checkpoint_id), None
+                    )
                 else:
                     # Get best-rated checkpoint
                     for rating in RATING_HIERARCHY:
@@ -1976,7 +2413,7 @@ class CodexToolExecutor:
                     "kp": checkpoint.kp,
                     "ki": checkpoint.ki,
                     "kd": checkpoint.kd,
-                    "setpoint": getattr(checkpoint, 'setpoint', 0.0),
+                    "setpoint": getattr(checkpoint, "setpoint", 0.0),
                 }
                 reference_meta = {
                     "source": "checkpoint",
@@ -1996,7 +2433,10 @@ class CodexToolExecutor:
             # Session start would require storing initial config at startup
             # For now, fall back to factory defaults
             reference_config = FACTORY_DEFAULTS.copy()
-            reference_meta = {"source": "session_start", "note": "Using factory defaults as session_start fallback"}
+            reference_meta = {
+                "source": "session_start",
+                "note": "Using factory defaults as session_start fallback",
+            }
 
         else:
             return ToolResult(
@@ -2018,13 +2458,19 @@ class CodexToolExecutor:
                 identical.append(param)
             else:
                 delta_abs = current_val - ref_val
-                delta_pct = f"{delta_abs / ref_val * 100:+.0f}%" if ref_val != 0 else f"+{delta_abs}"
-                diffs.append({
-                    "param": param,
-                    "current": current_val,
-                    "reference": ref_val,
-                    "delta": delta_pct,
-                })
+                delta_pct = (
+                    f"{delta_abs / ref_val * 100:+.0f}%"
+                    if ref_val != 0
+                    else f"+{delta_abs}"
+                )
+                diffs.append(
+                    {
+                        "param": param,
+                        "current": current_val,
+                        "reference": ref_val,
+                        "delta": delta_pct,
+                    }
+                )
 
         # Generate summary
         if not diffs:
@@ -2084,12 +2530,20 @@ class CodexToolExecutor:
         # Find matching checkpoint
         try:
             if checkpoint_id:
-                checkpoints = self.db.query_checkpoints(robot_id=self.active_robot_id, limit=100)
-                checkpoint = next((c for c in checkpoints if c.id == checkpoint_id), None)
+                checkpoints = self.db.query_checkpoints(
+                    robot_id=self.active_robot_id, limit=100
+                )
+                checkpoint = next(
+                    (c for c in checkpoints if c.id == checkpoint_id), None
+                )
             else:
                 # Find best checkpoint meeting min_rating
-                rating_idx = RATING_HIERARCHY.index(min_rating) if min_rating in RATING_HIERARCHY else 1
-                for rating in RATING_HIERARCHY[:rating_idx + 1]:
+                rating_idx = (
+                    RATING_HIERARCHY.index(min_rating)
+                    if min_rating in RATING_HIERARCHY
+                    else 1
+                )
+                for rating in RATING_HIERARCHY[: rating_idx + 1]:
                     checkpoints = self.db.query_checkpoints(
                         robot_id=self.active_robot_id,
                         min_rating=rating,
@@ -2106,7 +2560,9 @@ class CodexToolExecutor:
                     ok=False,
                     tool="safe_rollback",
                     error=T2Errors.E_NO_CHECKPOINT,
-                    data={"message": f"No checkpoint found with rating >= {min_rating}"},
+                    data={
+                        "message": f"No checkpoint found with rating >= {min_rating}"
+                    },
                 )
 
         except Exception as e:
@@ -2135,7 +2591,11 @@ class CodexToolExecutor:
             target_ki = checkpoint.ki
             target_kd = checkpoint.kd
 
-            if abs(current_kp - target_kp) > 0.001 or abs(current_ki - target_ki) > 0.001 or abs(current_kd - target_kd) > 0.001:
+            if (
+                abs(current_kp - target_kp) > 0.001
+                or abs(current_ki - target_ki) > 0.001
+                or abs(current_kd - target_kd) > 0.001
+            ):
                 commands.append(f"PID {target_kp} {target_ki} {target_kd}")
                 if current_kp != target_kp:
                     changes.append({"param": "Kp", "from": current_kp, "to": target_kp})
@@ -2214,14 +2674,21 @@ class CodexToolExecutor:
         Uses observe_telemetry internally for measurements.
         """
         change = args.get("change", {})
-        baseline_s = min(float(args.get("baseline_s", 5)), ObservationLimits.MAX_BASELINE_DURATION_S)
-        observe_s = min(float(args.get("observe_s", 10)), ObservationLimits.MAX_OBSERVE_DURATION_S)
+        baseline_s = min(
+            float(args.get("baseline_s", 5)), ObservationLimits.MAX_BASELINE_DURATION_S
+        )
+        observe_s = min(
+            float(args.get("observe_s", 10)), ObservationLimits.MAX_OBSERVE_DURATION_S
+        )
         auto_revert = args.get("auto_revert", True)
-        success_criteria = args.get("success_criteria", {
-            "max_angle_variance": 5.0,
-            "max_output_saturation_pct": 80,
-            "no_oscillation": True,
-        })
+        success_criteria = args.get(
+            "success_criteria",
+            {
+                "max_angle_variance": 5.0,
+                "max_output_saturation_pct": 80,
+                "no_oscillation": True,
+            },
+        )
         description = args.get("description", "")
 
         # Validate change
@@ -2249,7 +2716,9 @@ class CodexToolExecutor:
                 ok=False,
                 tool="run_experiment",
                 error=T2Errors.E_BLOCKED_COMMAND,
-                data={"message": f"Command '{cmd_prefix}' not in safe command allowlist"},
+                data={
+                    "message": f"Command '{cmd_prefix}' not in safe command allowlist"
+                },
             )
 
         # Validate dependencies
@@ -2267,7 +2736,10 @@ class CodexToolExecutor:
                 ok=False,
                 tool="run_experiment",
                 error=T2Errors.E_SERIAL_BUSY,
-                data={"message": "Serial port busy, cannot start experiment", "retry_after_ms": 500},
+                data={
+                    "message": "Serial port busy, cannot start experiment",
+                    "retry_after_ms": 500,
+                },
             )
 
         # Generate experiment ID
@@ -2290,17 +2762,26 @@ class CodexToolExecutor:
             )
 
         # Capture baseline
-        baseline_result = self._tool_observe_telemetry({
-            "duration_s": baseline_s,
-            "metrics": ["angle_variance", "output_saturation_pct", "oscillation_detected"],
-        })
+        baseline_result = self._tool_observe_telemetry(
+            {
+                "duration_s": baseline_s,
+                "metrics": [
+                    "angle_variance",
+                    "output_saturation_pct",
+                    "oscillation_detected",
+                ],
+            }
+        )
 
         if not baseline_result.ok:
             return ToolResult(
                 ok=False,
                 tool="run_experiment",
                 error=T2Errors.E_BASELINE_FAILED,
-                data={"message": "Baseline capture failed", "baseline_error": baseline_result.error},
+                data={
+                    "message": "Baseline capture failed",
+                    "baseline_error": baseline_result.error,
+                },
             )
 
         baseline_metrics = baseline_result.data.get("metrics", {})
@@ -2313,7 +2794,10 @@ class CodexToolExecutor:
                     ok=False,
                     tool="run_experiment",
                     error=T2Errors.E_COMMAND_FAILED,
-                    data={"message": f"Failed to apply change: {cmd}", "result": cmd_result},
+                    data={
+                        "message": f"Failed to apply change: {cmd}",
+                        "result": cmd_result,
+                    },
                 )
         except Exception as e:
             return ToolResult(
@@ -2327,10 +2811,16 @@ class CodexToolExecutor:
         time.sleep(ObservationLimits.EXPERIMENT_COOLDOWN_S)
 
         # Observe result
-        result_obs = self._tool_observe_telemetry({
-            "duration_s": observe_s,
-            "metrics": ["angle_variance", "output_saturation_pct", "oscillation_detected"],
-        })
+        result_obs = self._tool_observe_telemetry(
+            {
+                "duration_s": observe_s,
+                "metrics": [
+                    "angle_variance",
+                    "output_saturation_pct",
+                    "oscillation_detected",
+                ],
+            }
+        )
 
         if not result_obs.ok:
             # Still continue - we have partial results
@@ -2366,12 +2856,16 @@ class CodexToolExecutor:
         max_var = success_criteria.get("max_angle_variance")
         if max_var is not None and result_variance > max_var:
             criteria_met = False
-            criteria_failures.append(f"angle_variance {result_variance:.2f} > {max_var}")
+            criteria_failures.append(
+                f"angle_variance {result_variance:.2f} > {max_var}"
+            )
 
         max_sat = success_criteria.get("max_output_saturation_pct")
         if max_sat is not None and result_sat > max_sat:
             criteria_met = False
-            criteria_failures.append(f"output_saturation {result_sat:.1f}% > {max_sat}%")
+            criteria_failures.append(
+                f"output_saturation {result_sat:.1f}% > {max_sat}%"
+            )
 
         no_osc = success_criteria.get("no_oscillation")
         if no_osc and result_metrics.get("oscillation_detected"):
@@ -2391,7 +2885,9 @@ class CodexToolExecutor:
 
         # Generate summary
         if criteria_met:
-            summary = f"Experiment succeeded. {comparison['verdict'].title()} performance."
+            summary = (
+                f"Experiment succeeded. {comparison['verdict'].title()} performance."
+            )
         else:
             fail_reasons = "; ".join(criteria_failures)
             if auto_reverted:
@@ -2452,7 +2948,9 @@ class CodexToolExecutor:
             )
 
         # Simulate proposed PID
-        proposed_result = self._simulate_step_response(kp, ki, kd, step_size_deg, duration_s)
+        proposed_result = self._simulate_step_response(
+            kp, ki, kd, step_size_deg, duration_s
+        )
 
         # Optionally simulate current PID for comparison
         current_result = None
@@ -2467,10 +2965,16 @@ class CodexToolExecutor:
                 current_result = self._simulate_step_response(
                     current_kp, current_ki, current_kd, step_size_deg, duration_s
                 )
-                current_result["pid"] = {"Kp": current_kp, "Ki": current_ki, "Kd": current_kd}
+                current_result["pid"] = {
+                    "Kp": current_kp,
+                    "Ki": current_ki,
+                    "Kd": current_kd,
+                }
 
                 # Generate comparison
-                comparison = self._compare_pid_simulations(proposed_result, current_result)
+                comparison = self._compare_pid_simulations(
+                    proposed_result, current_result
+                )
             except Exception:
                 pass  # Comparison optional
 
@@ -2568,7 +3072,9 @@ class CodexToolExecutor:
         curr_settling = current.get("settling_time_ms", 0)
 
         if curr_settling > 0:
-            settling_delta = f"{(prop_settling - curr_settling) / curr_settling * 100:+.0f}%"
+            settling_delta = (
+                f"{(prop_settling - curr_settling) / curr_settling * 100:+.0f}%"
+            )
         else:
             settling_delta = "N/A"
 
@@ -2589,10 +3095,17 @@ class CodexToolExecutor:
         elif prop_overshoot < curr_overshoot - 5:
             recommendations.append("Less overshoot")
 
-        if proposed.get("oscillation_risk") == "high" and current.get("oscillation_risk") != "high":
+        if (
+            proposed.get("oscillation_risk") == "high"
+            and current.get("oscillation_risk") != "high"
+        ):
             recommendations.append("Higher oscillation risk—increase Kd")
 
-        recommendation = "; ".join(recommendations) if recommendations else "Similar performance to current PID"
+        recommendation = (
+            "; ".join(recommendations)
+            if recommendations
+            else "Similar performance to current PID"
+        )
 
         return {
             "settling_time_delta": settling_delta,
@@ -2623,15 +3136,23 @@ class CodexToolExecutor:
                 }
 
                 # Get recent telemetry metrics
-                obs_result = self._tool_observe_telemetry({"duration_s": 2, "metrics": ["all"]})
+                obs_result = self._tool_observe_telemetry(
+                    {"duration_s": 2, "metrics": ["all"]}
+                )
                 if obs_result.ok:
                     metrics = obs_result.data.get("metrics", {})
                     current_state = {
                         "angle_variance": metrics.get("angle_variance", 0),
-                        "oscillation_detected": metrics.get("oscillation_detected", False),
+                        "oscillation_detected": metrics.get(
+                            "oscillation_detected", False
+                        ),
                         "oscillation_freq_hz": metrics.get("oscillation_freq_hz"),
-                        "output_saturation_pct": metrics.get("output_saturation_pct", 0),
-                        "mode": obs_result.data.get("latest_sample", {}).get("mode", "UNKNOWN"),
+                        "output_saturation_pct": metrics.get(
+                            "output_saturation_pct", 0
+                        ),
+                        "mode": obs_result.data.get("latest_sample", {}).get(
+                            "mode", "UNKNOWN"
+                        ),
                     }
             except Exception as e:
                 logger.warning(f"Could not gather telemetry for suggestions: {e}")
@@ -2692,87 +3213,130 @@ class CodexToolExecutor:
         saturation = state.get("output_saturation_pct", 0)
 
         # Rule 1: High-frequency oscillation → reduce Kd
-        if osc_detected and osc_freq and osc_freq > TUNING_THRESHOLDS["oscillation_freq_high_hz"]:
+        if (
+            osc_detected
+            and osc_freq
+            and osc_freq > TUNING_THRESHOLDS["oscillation_freq_high_hz"]
+        ):
             new_kd = round(kd * 0.8, 2)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": f"Reduce Kd by 20% (high-freq oscillation at {osc_freq:.1f}Hz)",
-                "command": f"PID {kp} {ki} {new_kd}",
-                "confidence": 0.85,
-                "rationale": f"Oscillation at {osc_freq:.1f}Hz is characteristic of derivative kick. Reducing Kd dampens high-frequency response." if include_rationale else None,
-                "expected_outcome": "Oscillation should decrease within 2-3 seconds",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": f"Reduce Kd by 20% (high-freq oscillation at {osc_freq:.1f}Hz)",
+                    "command": f"PID {kp} {ki} {new_kd}",
+                    "confidence": 0.85,
+                    "rationale": f"Oscillation at {osc_freq:.1f}Hz is characteristic of derivative kick. Reducing Kd dampens high-frequency response."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Oscillation should decrease within 2-3 seconds",
+                }
+            )
 
         # Rule 2: Low-frequency oscillation → reduce Ki or increase Kd
-        if osc_detected and osc_freq and osc_freq < TUNING_THRESHOLDS["oscillation_freq_low_hz"]:
+        if (
+            osc_detected
+            and osc_freq
+            and osc_freq < TUNING_THRESHOLDS["oscillation_freq_low_hz"]
+        ):
             new_ki = round(ki * 0.5, 3)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": f"Reduce Ki by 50% (low-freq oscillation at {osc_freq:.1f}Hz)",
-                "command": f"PID {kp} {new_ki} {kd}",
-                "confidence": 0.75,
-                "rationale": f"Low-frequency oscillation at {osc_freq:.1f}Hz suggests integral windup. Reducing Ki will improve stability." if include_rationale else None,
-                "expected_outcome": "Slower but more stable recovery",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": f"Reduce Ki by 50% (low-freq oscillation at {osc_freq:.1f}Hz)",
+                    "command": f"PID {kp} {new_ki} {kd}",
+                    "confidence": 0.75,
+                    "rationale": f"Low-frequency oscillation at {osc_freq:.1f}Hz suggests integral windup. Reducing Ki will improve stability."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Slower but more stable recovery",
+                }
+            )
 
         # Rule 3: High output saturation → reduce Kp
         if saturation > TUNING_THRESHOLDS["saturation_critical_pct"]:
             new_kp = round(kp * 0.85, 1)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": f"Reduce Kp by 15% (output saturation at {saturation:.0f}%)",
-                "command": f"PID {new_kp} {ki} {kd}",
-                "confidence": 0.80,
-                "rationale": f"Output saturation at {saturation:.0f}% indicates gain is too high. Motors are limiting response." if include_rationale else None,
-                "expected_outcome": "Reduced saturation, more control headroom",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": f"Reduce Kp by 15% (output saturation at {saturation:.0f}%)",
+                    "command": f"PID {new_kp} {ki} {kd}",
+                    "confidence": 0.80,
+                    "rationale": f"Output saturation at {saturation:.0f}% indicates gain is too high. Motors are limiting response."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Reduced saturation, more control headroom",
+                }
+            )
 
         # Rule 4: High variance without oscillation → increase Kp
-        if variance > TUNING_THRESHOLDS["angle_variance_acceptable"] and not osc_detected:
+        if (
+            variance > TUNING_THRESHOLDS["angle_variance_acceptable"]
+            and not osc_detected
+        ):
             new_kp = round(kp * 1.15, 1)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": f"Increase Kp by 15% (high variance {variance:.1f}°)",
-                "command": f"PID {new_kp} {ki} {kd}",
-                "confidence": 0.70,
-                "rationale": f"Angle variance of {variance:.1f}° without oscillation suggests insufficient proportional gain." if include_rationale else None,
-                "expected_outcome": "Tighter angle control, faster correction",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": f"Increase Kp by 15% (high variance {variance:.1f}°)",
+                    "command": f"PID {new_kp} {ki} {kd}",
+                    "confidence": 0.70,
+                    "rationale": f"Angle variance of {variance:.1f}° without oscillation suggests insufficient proportional gain."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Tighter angle control, faster correction",
+                }
+            )
 
         # Rule 5: Oscillation detected but no freq data → increase Kd
         if osc_detected and not osc_freq:
             new_kd = round(kd * 1.2, 2)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": "Increase Kd by 20% (dampen oscillation)",
-                "command": f"PID {kp} {ki} {new_kd}",
-                "confidence": 0.60,
-                "rationale": "Oscillation detected. Increasing derivative gain adds damping." if include_rationale else None,
-                "expected_outcome": "Reduced oscillation amplitude",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": "Increase Kd by 20% (dampen oscillation)",
+                    "command": f"PID {kp} {ki} {new_kd}",
+                    "confidence": 0.60,
+                    "rationale": "Oscillation detected. Increasing derivative gain adds damping."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Reduced oscillation amplitude",
+                }
+            )
 
         # Rule 6: Good state → suggest checkpoint
-        if variance < TUNING_THRESHOLDS["angle_variance_good"] and not osc_detected and saturation < TUNING_THRESHOLDS["saturation_warning_pct"]:
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": "Save checkpoint (current tuning looks good)",
-                "command": None,
-                "confidence": 0.90,
-                "rationale": f"Variance {variance:.1f}°, no oscillation, {saturation:.0f}% saturation—this is a good tuning point." if include_rationale else None,
-                "expected_outcome": "Preserve this configuration for future reference",
-            })
+        if (
+            variance < TUNING_THRESHOLDS["angle_variance_good"]
+            and not osc_detected
+            and saturation < TUNING_THRESHOLDS["saturation_warning_pct"]
+        ):
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": "Save checkpoint (current tuning looks good)",
+                    "command": None,
+                    "confidence": 0.90,
+                    "rationale": f"Variance {variance:.1f}°, no oscillation, {saturation:.0f}% saturation—this is a good tuning point."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Preserve this configuration for future reference",
+                }
+            )
 
         # Rule 7: Fallback—try small Kp adjustment
         if len(suggestions) < 2:
             new_kp = round(kp * 1.1, 1)
-            suggestions.append({
-                "rank": len(suggestions) + 1,
-                "action": "Try 10% Kp increase (exploratory)",
-                "command": f"PID {new_kp} {ki} {kd}",
-                "confidence": 0.50,
-                "rationale": "No clear issue detected. Small Kp increase may improve responsiveness." if include_rationale else None,
-                "expected_outcome": "Slightly faster response",
-            })
+            suggestions.append(
+                {
+                    "rank": len(suggestions) + 1,
+                    "action": "Try 10% Kp increase (exploratory)",
+                    "command": f"PID {new_kp} {ki} {kd}",
+                    "confidence": 0.50,
+                    "rationale": "No clear issue detected. Small Kp increase may improve responsiveness."
+                    if include_rationale
+                    else None,
+                    "expected_outcome": "Slightly faster response",
+                }
+            )
 
         # Re-rank by confidence
         suggestions.sort(key=lambda x: x.get("confidence", 0), reverse=True)

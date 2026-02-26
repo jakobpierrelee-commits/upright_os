@@ -1,0 +1,112 @@
+{
+  "version": "runtime_manifest_v1",
+  "board": {
+    "id": "nano",
+    "family": "arduino_avr",
+    "fqbn": "arduino:avr:nano:cpu=atmega328old",
+    "bootloader": "old"
+  },
+  "release": {
+    "runtime_version": "balance_mvp_v1.0.0",
+    "tune_version": "tune_v1",
+    "version_policy": "Bump runtime_version for firmware logic/command contract changes; bump tune_version for tuning-only changes."
+  },
+  "interfaces": {
+    "imu": {
+      "type": "mpu6050",
+      "protocol": "i2c",
+      "pins": {
+        "sda": 18,
+        "scl": 19
+      }
+    },
+    "encoders": {
+      "type": "quadrature",
+      "protocol": "quadrature",
+      "pins": {
+        "left_a": 2,
+        "left_b": 4,
+        "right_a": 3,
+        "right_b": 5
+      }
+    },
+    "actuator": {
+      "type": "dual_dc_hbridge_dir_pwm",
+      "protocol": "gpio_pwm",
+      "pins": {
+        "left_pwm": 9,
+        "left_dir": 7,
+        "right_pwm": 10,
+        "right_dir": 8
+      }
+    }
+  },
+  "telemetry_fields": [
+    "mode",
+    "ident",
+    "hash",
+    "runtime",
+    "tune",
+    "estop",
+    "fault",
+    "fault_count",
+    "fault_last_note_code",
+    "ang",
+    "raw",
+    "gyro",
+    "set",
+    "set_eff",
+    "az",
+    "ztrim",
+    "out",
+    "kp",
+    "ki",
+    "kd",
+    "wposRaw",
+    "wdelta",
+    "runaway",
+    "encL",
+    "encR",
+    "loop_us",
+    "loop_max_us",
+    "missed",
+    "overrun",
+    "volRaw"
+  ],
+  "commands": [
+    "GET",
+    "HELP",
+    "IDENT",
+    "ARM",
+    "DISARM",
+    "ESTOP",
+    "PID",
+    "SETPOINT",
+    "LIMITS",
+    "CAL ZERO",
+    "IMU CAL",
+    "IMU LOAD",
+    "IMU SAVE",
+    "IMU INFO",
+    "AUTOZERO",
+    "AUTOZERO STATUS",
+    "AUTOZERO CLR",
+    "AUTOZERO SAVE",
+    "PREARM_CHECK",
+    "SAVECFG",
+    "LOADCFG",
+    "DEFAULTCFG",
+    "FAULTCLR",
+    "LOGT",
+    "LOGCSV",
+    "BURSTCSV",
+    "CSVHDR"
+  ],
+  "telemetry": {
+    "mode": "ascii_lowrate",
+    "transport": "serial_ascii",
+    "status_hz": 10
+  },
+  "generated_by": "balance_mvp_v1",
+  "generated_at": 1771977000
+}

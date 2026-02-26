@@ -1,6 +1,6 @@
 import type { ControlState, Health, Status } from './types';
 
-const BASE = (import.meta.env.VITE_BRIDGE_BASE as string | undefined) ?? 'http://127.0.0.1:8787';
+const BASE = (import.meta.env.VITE_BRIDGE_BASE as string | undefined) ?? 'http://127.0.0.1:8797';
 let SESSION_TOKEN = '';
 
 export function setSessionToken(token: string | null): void {
@@ -70,6 +70,18 @@ export type FirmwareBoards = {
   }>;
   raw?: unknown;
   error?: string;
+};
+
+export type FirmwareSketchFolders = {
+  ok: boolean;
+  folders: string[];
+  default_folder?: string;
+};
+
+export type FirmwarePickedSketchFolder = {
+  ok: boolean;
+  path: string;
+  has_ino: boolean;
 };
 
 export type UnifiedFirmwareSchema = {
@@ -238,6 +250,7 @@ export type ActionGate = {
 };
 
 export type ActionGates = {
+  prearm_safety?: ActionGate;
   arm_prepare?: ActionGate;
   arm_confirm?: ActionGate;
   arm?: ActionGate;
@@ -322,6 +335,59 @@ export type AiStatus = {
   thread_count?: number;
 };
 
+export type AgentMode = 'app_dev' | 'robot_dev' | 'ops_debug';
+
+export type AgentStatus = {
+  mode: AgentMode;
+  allowed_modes: AgentMode[];
+  updated_at?: number;
+  openai_configured: boolean;
+  openai_model?: string;
+  openai_model_allowed?: boolean;
+  provider?: string;
+  api_key_source?: string;
+  model_source?: string;
+  codex_login?: {
+    available?: boolean;
+    logged_in?: boolean;
+    detail?: string;
+  };
+};
+
+const CLEAN_AGENT_ALLOWED_MODES: AgentMode[] = ['app_dev', 'robot_dev', 'ops_debug'];
+
+function resolveAgentMode(mode?: AgentMode): AgentMode {
+  const raw = String(mode ?? '').trim() as AgentMode;
+  return CLEAN_AGENT_ALLOWED_MODES.includes(raw) ? raw : 'app_dev';
+}
+
+function buildCleanAgentStatus(
+  mode: AgentMode,
+  provider = 'codex_cli',
+  model = 'gpt-5-codex',
+  canChat = true,
+): AgentStatus {
+  return {
+    mode,
+    allowed_modes: CLEAN_AGENT_ALLOWED_MODES,
+    openai_configured: canChat,
+    openai_model: model,
+    openai_model_allowed: canChat,
+    provider,
+    codex_login: { logged_in: canChat, available: true, detail: canChat ? 'Logged in' : 'Not logged in' },
+  };
+}
+
+export type AgentAttachment = {
+  id?: string;
+  name: string;
+  mime: string;
+  kind: 'text' | 'csv' | 'image' | 'binary' | string;
+  size: number;
+  path?: string;
+  text_excerpt?: string;
+};
+
 export type AiThreadSummary = {
   id: string;
   title: string;
@@ -362,15 +428,65 @@ export type ReadinessCheck = {
   detail: string;
 };
 
+export type SetupValidationStatus = 'pass' | 'warn' | 'fail' | 'error' | 'timeout' | 'unavailable';
+
+export type SetupCompatTestResult = {
+  status: SetupValidationStatus;
+  blocking_issues: string[];
+  warnings: string[];
+  recommended_fix_prompts: string[];
+  compat: CompatReport;
+  tested_at: number;
+};
+
+export type SetupSmokeCheckResult = {
+  status: SetupValidationStatus;
+  checks: Array<{
+    id: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  failure_summary: string;
+  tested_at: number;
+};
+
+export type SetupOverwatchCheckResult = {
+  status: SetupValidationStatus;
+  overwatch: OverwatchReport;
+  tested_at: number;
+};
+
+export type SetupValidationAttempt = {
+  attempt_id: string;
+  test_type: 'compat' | 'smoke' | string;
+  status: SetupValidationStatus | string;
+  created_at: number;
+  sketch_revision: string;
+  sketch_hash: string;
+  action_source: string;
+  profile_id: string;
+  profile_label: string;
+  result: Record<string, unknown>;
+};
+
 export type V2Readiness = {
   contract_version_detected: 'v1' | 'v2' | 'unknown';
   v1_ok: boolean;
   v2_ready: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
   v2_present_fields: string[];
   readiness_checks: ReadinessCheck[];
+  phase2_recommended_action?: string | null;
+  // Deprecated alias retained while migration is active.
   v2_recommended_action?: string | null;
 };
 
@@ -388,6 +504,13 @@ export type CompatReport = {
   contract_version_detected?: 'v1' | 'v2' | 'unknown';
   v1_ok?: boolean;
   v2_ready?: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields?: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
@@ -432,11 +555,20 @@ export type ConnectProbeReport = {
   contract_version_detected?: 'v1' | 'v2' | 'unknown';
   v1_ok?: boolean;
   v2_ready?: boolean;
+  phase1_ready?: boolean;
+  phase2_ready?: boolean;
+  calibration_flow?: 'phase1_phase2' | string;
+  phase1_missing_fields?: string[];
+  phase1_present_fields?: string[];
+  phase2_missing_fields?: string[];
+  phase2_present_fields?: string[];
   v2_missing_fields?: string[];
   v2_factory_ready?: boolean;
   v2_factory_missing_fields?: string[];
   v2_present_fields?: string[];
   readiness_checks?: ReadinessCheck[];
+  phase2_recommended_action?: string | null;
+  // Deprecated alias retained while migration is active.
   v2_recommended_action?: string | null;
 };
 
@@ -572,14 +704,77 @@ export async function getLines(n = 120): Promise<string[]> {
 }
 
 
-export async function probeCompat(): Promise<CompatReport> {
-  const d = await req<{ ok: true; compat: CompatReport }>('/probe/compat');
+export async function probeCompat(profile?: string): Promise<CompatReport> {
+  const params = new URLSearchParams();
+  if (profile && profile.trim()) params.set('profile', profile.trim());
+  const qs = params.toString();
+  const d = await req<{ ok: true; compat: CompatReport }>(`/probe/compat${qs ? `?${qs}` : ''}`);
   return d.compat;
 }
 
 export async function probeConnect(): Promise<ConnectProbeReport> {
   const d = await req<{ ok: true; probe: ConnectProbeReport }>('/probe/connect');
   return d.probe;
+}
+
+type SetupAttemptContext = { sketchRevision?: string; profileId?: string; profileLabel?: string };
+
+export async function setupCompatTest(ctx: SetupAttemptContext = {}): Promise<{ compat: SetupCompatTestResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; compat_test: SetupCompatTestResult; attempt?: SetupValidationAttempt }>('/v1/setup/compat-test', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { compat: d.compat_test, attempt: d.attempt };
+}
+
+export async function setupSmokeCheck(ctx: SetupAttemptContext = {}): Promise<{ smoke: SetupSmokeCheckResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; smoke_check: SetupSmokeCheckResult; attempt?: SetupValidationAttempt }>('/v1/setup/smoke-check', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { smoke: d.smoke_check, attempt: d.attempt };
+}
+
+export async function setupAttemptHistory(
+  limit = 40,
+  cursor = '',
+  kind: 'all' | 'compat' | 'smoke' | 'overwatch' = 'all',
+): Promise<{ attempts: SetupValidationAttempt[]; nextCursor: string; hasMore: boolean }> {
+  const params = new URLSearchParams();
+  params.set('limit', String(Math.max(1, limit)));
+  if (cursor) params.set('cursor', cursor);
+  params.set('kind', kind);
+  const d = await req<{ ok: true; attempts: SetupValidationAttempt[]; next_cursor?: string; has_more?: boolean }>(
+    `/v1/setup/attempt-history?${params.toString()}`,
+  );
+  return {
+    attempts: Array.isArray(d.attempts) ? d.attempts : [],
+    nextCursor: String(d.next_cursor ?? ''),
+    hasMore: Boolean(d.has_more),
+  };
+}
+
+export async function setupOverwatchCheck(ctx: SetupAttemptContext = {}): Promise<{ overwatch: SetupOverwatchCheckResult; attempt?: SetupValidationAttempt }> {
+  const d = await req<{ ok: true; overwatch_check: SetupOverwatchCheckResult; attempt?: SetupValidationAttempt }>('/v1/setup/overwatch-check', {
+    method: 'POST',
+    body: JSON.stringify({
+      sketch_revision: ctx.sketchRevision ?? '',
+      profile_id: ctx.profileId ?? '',
+      profile_label: ctx.profileLabel ?? '',
+      action_source: 'setup_page',
+    }),
+  });
+  return { overwatch: d.overwatch_check, attempt: d.attempt };
 }
 
 export async function profilesList(): Promise<RobotProfilesState> {
@@ -710,6 +905,19 @@ export async function firmwareWriteSketch(content: string, path?: string): Promi
 export async function firmwareBoards(): Promise<FirmwareBoards> {
   const d = await req<{ ok: true; boards: FirmwareBoards }>('/firmware/boards');
   return d.boards;
+}
+
+export async function firmwareSketchFolders(): Promise<FirmwareSketchFolders> {
+  const d = await req<{ ok: true; sketch_folders: FirmwareSketchFolders }>('/firmware/sketch-folders');
+  return d.sketch_folders;
+}
+
+export async function firmwarePickSketchFolder(): Promise<FirmwarePickedSketchFolder> {
+  const d = await req<{ ok: true; picked: FirmwarePickedSketchFolder }>('/firmware/sketch-folder/pick', {
+    method: 'POST',
+    body: '{}',
+  });
+  return d.picked;
 }
 
 export async function firmwareUnifiedSchema(): Promise<UnifiedFirmwareSchema> {
@@ -898,10 +1106,319 @@ export async function aiStatus(): Promise<{ ai: AiStatus; history: AiHistoryItem
   return { ai: d.ai, history: d.history, threads: d.threads ?? [] };
 }
 
-export async function aiChat(message: string, threadId?: string): Promise<{ reply: string; ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }> {
+export async function agentStatus(): Promise<{
+  agent: AgentStatus;
+  knowledge: Record<string, unknown>;
+  health: Health;
+  control: ControlState;
+  status: Status;
+  lines: string[];
+}> {
+  const d = await req<{
+    ok: true;
+    agent: AgentStatus;
+    knowledge: Record<string, unknown>;
+    health: Health;
+    control: ControlState;
+    status: Status;
+    lines: string[];
+  }>('/agent/status');
+  return {
+    agent: d.agent,
+    knowledge: d.knowledge,
+    health: d.health,
+    control: d.control,
+    status: d.status,
+    lines: d.lines,
+  };
+}
+
+export async function agentSetMode(mode: AgentMode): Promise<AgentStatus> {
+  const d = await req<{ ok: true; agent: AgentStatus }>('/agent/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+  return d.agent;
+}
+
+export async function agentChat(
+  message: string,
+  mode?: AgentMode,
+  threadId?: string,
+  attachments?: AgentAttachment[],
+): Promise<{
+  agent: AgentStatus;
+  reply: string;
+  thread_id?: string;
+  history: AiHistoryItem[];
+  threads?: AiThreadSummary[];
+  tool_calls?: ToolCallResult[];
+  iterations?: number;
+}> {
+  const resolvedMode = resolveAgentMode(mode);
+  const d = await req<{
+    ok: true;
+    reply: string;
+    thread_id?: string;
+    history: AiHistoryItem[];
+    threads?: AiThreadSummary[];
+    provider?: string;
+    executor?: string;
+    tool_calls?: ToolCallResult[];
+    iterations?: number;
+  }>('/agent/clean/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, mode: resolvedMode, thread_id: threadId, attachments: attachments ?? [], auto_tools: false }),
+  }, 120000);
+  return {
+    agent: buildCleanAgentStatus(
+      resolvedMode,
+      String(d.provider ?? 'codex_cli'),
+      'gpt-5-codex',
+      String(d.executor ?? 'blocked') !== 'blocked',
+    ),
+    reply: d.reply,
+    thread_id: d.thread_id,
+    history: d.history,
+    threads: d.threads ?? [],
+    tool_calls: d.tool_calls ?? [],
+    iterations: d.iterations ?? 1,
+  };
+}
+
+export async function agentChatStream(
+  message: string,
+  mode: AgentMode | undefined,
+  threadId: string | undefined,
+  attachments: AgentAttachment[] | undefined,
+  handlers: {
+    onStart?: () => void;
+    onDelta?: (text: string) => void;
+    onDone?: (payload: {
+      agent: AgentStatus;
+      reply: string;
+      thread_id?: string;
+      history: AiHistoryItem[];
+      threads?: AiThreadSummary[];
+      tool_calls?: ToolCallResult[];
+      iterations?: number;
+      provider?: string;
+    }) => void;
+  },
+  signal?: AbortSignal,
+): Promise<{
+  agent: AgentStatus;
+  reply: string;
+  thread_id?: string;
+  history: AiHistoryItem[];
+  threads?: AiThreadSummary[];
+  tool_calls?: ToolCallResult[];
+  iterations?: number;
+  provider?: string;
+}> {
+  const resolvedMode = resolveAgentMode(mode);
+  const streamController = new AbortController();
+  let timedOut = false;
+  const timeoutMs = 90000;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    streamController.abort();
+  }, timeoutMs);
+  const forwardAbort = () => streamController.abort();
+  if (signal) {
+    if (signal.aborted) forwardAbort();
+    else signal.addEventListener('abort', forwardAbort, { once: true });
+  }
+
+  let donePayload: {
+    agent: AgentStatus;
+    reply: string;
+    thread_id?: string;
+    history: AiHistoryItem[];
+    threads?: AiThreadSummary[];
+    tool_calls?: ToolCallResult[];
+    iterations?: number;
+    provider?: string;
+  } | null = null;
+  try {
+    const res = await fetch(`${BASE}/agent/clean/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
+    },
+    body: JSON.stringify({ message, mode: resolvedMode, thread_id: threadId, attachments: attachments ?? [] }),
+    signal: streamController.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      let body = '';
+      try {
+        body = await res.text();
+      } catch {
+        body = '';
+      }
+      throw new Error(body || `${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    const handleFrame = (frame: string): void => {
+      const lines = frame.split('\n');
+      let evt = 'message';
+      const dataLines: string[] = [];
+      for (const ln of lines) {
+        if (ln.startsWith('event:')) evt = ln.slice(6).trim();
+        else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim());
+      }
+      if (dataLines.length === 0) return;
+      const dataTxt = dataLines.join('\n');
+      const obj = JSON.parse(dataTxt) as Record<string, unknown>;
+      if (evt === 'start') {
+        handlers.onStart?.();
+        return;
+      }
+      if (evt === 'delta') {
+        handlers.onDelta?.(String(obj.text ?? ''));
+        return;
+      }
+      if (evt === 'done') {
+        donePayload = {
+          agent: buildCleanAgentStatus(
+            resolvedMode,
+            String(obj.provider ?? 'codex_cli'),
+            'gpt-5-codex',
+            String(obj.executor ?? 'blocked') !== 'blocked',
+          ),
+          reply: String(obj.reply ?? ''),
+          thread_id: obj.thread_id as string | undefined,
+          history: (obj.history as AiHistoryItem[]) ?? [],
+          threads: (obj.threads as AiThreadSummary[]) ?? [],
+          tool_calls: (obj.tool_calls as ToolCallResult[]) ?? [],
+          iterations: Number(obj.iterations ?? 1),
+          provider: String(obj.provider ?? ''),
+        };
+        handlers.onDone?.(donePayload);
+        return;
+      }
+      if (evt === 'error') {
+        throw new Error(String(obj.error ?? 'stream_error'));
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      while (true) {
+        const idx = buf.indexOf('\n\n');
+        if (idx < 0) break;
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (frame.trim()) handleFrame(frame);
+      }
+    }
+    if (buf.trim()) handleFrame(buf);
+    if (!donePayload) throw new Error('stream_incomplete');
+    return donePayload;
+  } catch (err) {
+    const abortErr = (err as Error).name === 'AbortError';
+    if (abortErr && timedOut) {
+      throw new Error(`request_timeout_${timeoutMs}ms:/agent/clean/chat/stream`);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', forwardAbort);
+  }
+}
+
+export async function agentUploadFile(file: File): Promise<AgentAttachment> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  const b64 = btoa(binary);
+  const d = await req<{ ok: true; attachment: AgentAttachment }>('/agent/clean/file/upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: file.name,
+      mime: file.type || 'application/octet-stream',
+      content_base64: b64,
+    }),
+  }, 60000);
+  return d.attachment;
+}
+
+export async function agentThreads(mode?: AgentMode): Promise<{ agent: AgentStatus; ai: AiStatus; threads: AiThreadSummary[] }> {
+  const resolvedMode = resolveAgentMode(mode);
+  const qs = `?mode=${encodeURIComponent(resolvedMode)}`;
+  const d = await req<{ ok: true; threads: AiThreadSummary[] }>(`/agent/clean/threads${qs}`);
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    ai: { configured: true, model: 'gpt-5-codex', history_len: 0 },
+    threads: d.threads ?? [],
+  };
+}
+
+export async function agentNewThread(mode?: AgentMode, title?: string): Promise<{
+  agent: AgentStatus;
+  thread: { id: string; title: string };
+  threads: AiThreadSummary[];
+  history: AiHistoryItem[];
+}> {
+  const resolvedMode = resolveAgentMode(mode);
+  const d = await req<{
+    ok: true;
+    thread: { id: string; title: string };
+    threads: AiThreadSummary[];
+    history: AiHistoryItem[];
+  }>('/agent/clean/thread/new', {
+    method: 'POST',
+    body: JSON.stringify({ mode: resolvedMode, title }),
+  });
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    thread: d.thread,
+    threads: d.threads ?? [],
+    history: d.history ?? [],
+  };
+}
+
+export async function agentSelectThread(mode: AgentMode | undefined, threadId: string): Promise<{
+  agent: AgentStatus;
+  thread: { id: string; title: string };
+  threads: AiThreadSummary[];
+  history: AiHistoryItem[];
+}> {
+  const resolvedMode = resolveAgentMode(mode);
+  const d = await req<{
+    ok: true;
+    thread: { id: string; title: string };
+    threads: AiThreadSummary[];
+    history: AiHistoryItem[];
+  }>('/agent/clean/thread/select', {
+    method: 'POST',
+    body: JSON.stringify({ mode: resolvedMode, thread_id: threadId }),
+  });
+  return {
+    agent: buildCleanAgentStatus(resolvedMode),
+    thread: d.thread,
+    threads: d.threads ?? [],
+    history: d.history ?? [],
+  };
+}
+
+export async function aiChat(
+  message: string,
+  threadId?: string,
+  hardwareContext?: Record<string, unknown>,
+): Promise<{ reply: string; ai: AiStatus; history: AiHistoryItem[]; threads: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }> {
   const d = await req<{ ok: true; reply: string; ai: AiStatus; history: AiHistoryItem[]; threads?: AiThreadSummary[]; thread_id?: string; apply?: { ok: boolean; snapshot_id?: string; applied?: string[]; status?: Status; error?: string; artifacts?: { unified_folder?: string; unified_archive?: string; unified_main_file?: string; sketch_path?: string; sketch_backup?: string; sketch_bytes?: number } } }>('/ai/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, thread_id: threadId }),
+    body: JSON.stringify({ message, thread_id: threadId, hardware_context: hardwareContext }),
   }, 45000);
   return { reply: d.reply, ai: d.ai, history: d.history, threads: d.threads ?? [], thread_id: d.thread_id, apply: d.apply };
 }
@@ -937,6 +1454,7 @@ export async function aiChatWithTools(
     robotId?: string;
     board?: string;
     port?: string;
+    hardwareContext?: Record<string, unknown>;
   },
 ): Promise<AiChatToolsResponse> {
   const d = await req<{
@@ -958,6 +1476,7 @@ export async function aiChatWithTools(
       robot_id: options?.robotId,
       board: options?.board,
       port: options?.port,
+      hardware_context: options?.hardwareContext,
     }),
   }, 330000);
   return {
@@ -1011,6 +1530,7 @@ export async function aiConfirmUpload(
 export async function aiChatStream(
   message: string,
   threadId: string | undefined,
+  hardwareContext: Record<string, unknown> | undefined,
   handlers: {
     onStart?: () => void;
     onDelta?: (text: string) => void;
@@ -1027,7 +1547,7 @@ export async function aiChatStream(
           'Content-Type': 'application/json',
           ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
         },
-        body: JSON.stringify({ message, thread_id: threadId }),
+        body: JSON.stringify({ message, thread_id: threadId, hardware_context: hardwareContext }),
       });
       break;
     } catch (e) {
@@ -1176,7 +1696,7 @@ export async function authMe(): Promise<AuthUser> {
   return d.user;
 }
 
-export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-mini'): Promise<{ configured: boolean; model: string }> {
+export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-codex'): Promise<{ configured: boolean; model: string }> {
   const d = await req<{ ok: true; openai: { configured: boolean; model: string } }>('/auth/openai-key', {
     method: 'POST',
     body: JSON.stringify({ api_key: apiKey, model }),
@@ -1184,8 +1704,21 @@ export async function authSetOpenAiKey(apiKey: string, model = 'gpt-5-mini'): Pr
   return d.openai;
 }
 
-export async function authOpenAiStatus(): Promise<{ configured: boolean; model: string | null }> {
-  const d = await req<{ ok: true; openai: { configured: boolean; model: string | null } }>('/auth/openai-key/status');
+export async function authOpenAiStatus(): Promise<{
+  configured: boolean;
+  model: string | null;
+  runtime_has_key?: boolean;
+  runtime_key_source?: 'user' | 'env' | null;
+}> {
+  const d = await req<{
+    ok: true;
+    openai: {
+      configured: boolean;
+      model: string | null;
+      runtime_has_key?: boolean;
+      runtime_key_source?: 'user' | 'env' | null;
+    };
+  }>('/auth/openai-key/status');
   return d.openai;
 }
 
@@ -1227,6 +1760,43 @@ export async function armPrepare(): Promise<ControlState> {
   return d.control;
 }
 
+export async function armPrecheck(payload: {
+  bot_on_stand_ok?: boolean;
+  left_wheel_pulse_ok?: boolean;
+  right_wheel_pulse_ok?: boolean;
+  auto_wheel_probe?: boolean;
+  estop_latch_ok?: boolean;
+  estop_unlatch_ok?: boolean;
+  auto_estop_probe?: boolean;
+}): Promise<{ ok: boolean; prearm_check: Record<string, unknown>; prearm_safety: Record<string, unknown>; action_gates?: ActionGates }> {
+  const res = await fetch(`${BASE}/arm/precheck`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SESSION_TOKEN ? { 'X-Session-Token': SESSION_TOKEN } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  const d = (await res.json()) as {
+    ok?: boolean;
+    error?: string;
+    prearm_check?: Record<string, unknown>;
+    prearm_safety?: Record<string, unknown>;
+    action_gates?: ActionGates;
+  };
+  // /arm/precheck intentionally uses 409 when checks fail. Return structured
+  // payload so UI can show exact failed checks instead of generic "409".
+  if (!res.ok && res.status !== 409) {
+    throw new Error(String(d?.error ?? res.status));
+  }
+  return {
+    ok: Boolean(d.ok),
+    prearm_check: (d.prearm_check ?? {}) as Record<string, unknown>,
+    prearm_safety: (d.prearm_safety ?? {}) as Record<string, unknown>,
+    action_gates: d.action_gates,
+  };
+}
+
 export async function armConfirm(): Promise<{ status: Status; control: ControlState }> {
   const d = await req<{ ok: true; status: Status; control: ControlState }>('/arm/confirm', {
     method: 'POST',
@@ -1266,8 +1836,38 @@ export async function calZero(): Promise<{ status: Status; control?: ControlStat
   return { status: d.status, control: d.control };
 }
 
+export async function imuCalibrate(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/calibrate', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuLoad(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/load', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuSave(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/save', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function imuInfo(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/imu/info', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
 export async function saveCfg(): Promise<void> {
   await req('/savecfg', { method: 'POST', body: '{}' });
+}
+
+export async function loadCfg(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/loadcfg', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
+}
+
+export async function defaultCfg(): Promise<{ status: Status; control?: ControlState }> {
+  const d = await req<{ ok: true; status: Status; control?: ControlState }>('/defaultcfg', { method: 'POST', body: '{}' });
+  return { status: d.status, control: d.control };
 }
 
 export type ConfigRevertResult = {

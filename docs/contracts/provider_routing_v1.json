@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "default_provider": "openai",
+  "allowed_model_substrings": [
+    "codex"
+  ],
+  "mission_mode_defaults": {
+    "app_dev": "gpt-5-codex",
+    "robot_dev": "gpt-5-codex",
+    "ops_debug": "gpt-5-codex"
+  },
+  "fallback_order": [
+    "request",
+    "user_saved",
+    "env",
+    "mode_default"
+  ]
+}

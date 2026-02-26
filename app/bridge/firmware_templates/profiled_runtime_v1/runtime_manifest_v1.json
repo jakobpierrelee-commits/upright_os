@@ -1,0 +1,97 @@
+{
+  "version": "runtime_manifest_v1",
+  "board": {
+    "id": "nano",
+    "family": "arduino_avr",
+    "fqbn": "arduino:avr:nano:cpu=atmega328old",
+    "bootloader": "old"
+  },
+  "release": {
+    "runtime_version": "profiled_runtime_v1.3.0",
+    "tune_version": "tune_v1",
+    "version_policy": "Bump runtime_version only for structural/scaffold code changes; bump tune_version for variable/tuning-only changes."
+  },
+  "interfaces": {
+    "imu": {
+      "type": "mpu6050",
+      "protocol": "i2c",
+      "pins": {
+        "sda": 18,
+        "scl": 19
+      }
+    },
+    "encoders": {
+      "type": "quadrature",
+      "protocol": "quadrature",
+      "pins": {
+        "left_a": 2,
+        "left_b": 4,
+        "right_a": 3,
+        "right_b": 5
+      }
+    },
+    "actuator": {
+      "type": "dual_dc_hbridge_dir_pwm",
+      "protocol": "gpio_pwm",
+      "pins": {
+        "left_pwm": 9,
+        "left_dir": 7,
+        "right_pwm": 10,
+        "right_dir": 8
+      }
+    }
+  },
+  "telemetry_fields": [
+    "mode",
+    "ident",
+    "hash",
+    "runtime",
+    "tune",
+    "ang",
+    "raw",
+    "gyro",
+    "out",
+    "mot",
+    "wspd",
+    "wpos",
+    "wposRaw",
+    "wdelta",
+    "runaway",
+    "fault_count",
+    "fault_first_ms",
+    "fault_last_ms",
+    "fault_last_code",
+    "fault_last_note_code",
+    "fault",
+    "estop",
+    "kp",
+    "ki",
+    "kd",
+    "kv",
+    "kx",
+    "set",
+    "encL",
+    "encR"
+  ],
+  "commands": [
+    "GET",
+    "IDENT",
+    "ARM",
+    "DISARM",
+    "PID",
+    "MOTION",
+    "SETPOINT",
+    "LIMITS",
+    "CAL ZERO",
+    "SAVECFG",
+    "MOTOR_TEST",
+    "FAULTINFO"
+  ],
+  "telemetry": {
+    "mode": "ascii_lowrate",
+    "transport": "serial_ascii",
+    "status_hz": 10
+  },
+  "generated_by": "profiled_runtime_v1",
+  "generated_at": 1771749000
+}

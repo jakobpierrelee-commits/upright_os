@@ -1,0 +1,24 @@
+graph TB
+  MCU["MCU pin map"]
+
+  subgraph MTR["Motor group"]
+    PM["L_PWM=5\nL_DIR=4\nR_PWM=6\nR_DIR=7"]
+    MD["Motor driver pins"]
+    PM --> MD
+  end
+
+  subgraph IMUG["IMU group"]
+    PI["SDA=18\nSCL=19"]
+    ISIG["IMU bus pins"]
+    PI --> ISIG
+  end
+
+  subgraph AUX["Aux group"]
+    PG["GATE=8\nLED=13"]
+    PE["L_A=-1\nL_B=-1\nR_A=-1\nR_B=-1"]
+  end
+
+  MCU --> PM
+  MCU --> PI
+  MCU --> PG
+  MCU --> PE

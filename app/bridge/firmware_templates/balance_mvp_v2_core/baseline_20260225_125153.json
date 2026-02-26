@@ -1,0 +1,93 @@
+{
+  "baseline_version": "v1",
+  "captured_at_utc": "2026-02-25T18:51:53.673329Z",
+  "source": "bridge_command",
+  "ident": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "IDENT",
+      "cmd_id": 61,
+      "matched": "OK IDENT build=bmv2c hash=na runtime=balance_mvp_v2_core.1.1 tune=tune_v1",
+      "lines": [
+        "OK IDENT build=bmv2c hash=na runtime=balance_mvp_v2_core.1.1 tune=tune_v1"
+      ],
+      "latency_ms": 213.81124993786216
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 0.8594675830099732,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  },
+  "get_before_savecfg": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "GET",
+      "cmd_id": 62,
+      "matched": "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=0.000 raw=0.028 gyro=-0.159 set=0.000 set_eff=0.000 out=0.00 kp=30.00 ki=0.00 kd=0.80 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=6000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=230.0 tipDeg=35.0 loop_us=3360 missed=31 overrun=2569 imu_zero=0.000 ar_delay=2000 at=1 tr=0.000",
+      "lines": [
+        "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=0.000 raw=0.028 gyro=-0.159 set=0.000 set_eff=0.000 out=0.00 kp=30.00 ki=0.00 kd=0.80 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=6000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=230.0 tipDeg=35.0 loop_us=3360 missed=31 overrun=2569 imu_zero=0.000 ar_delay=2000 at=1 tr=0.000"
+      ],
+      "latency_ms": 248.8900409080088
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 1.124538708012551,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  },
+  "savecfg": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "SAVECFG",
+      "cmd_id": 63,
+      "matched": "OK SAVECFG",
+      "lines": [
+        "OK SAVECFG"
+      ],
+      "latency_ms": 217.11979201063514
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 0.16765687498264015,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  },
+  "get_after_savecfg": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "GET",
+      "cmd_id": 64,
+      "matched": "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=0.003 raw=-0.018 gyro=-0.082 set=0.000 set_eff=0.000 out=0.00 kp=30.00 ki=0.00 kd=0.80 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=6000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=230.0 tipDeg=35.0 loop_us=3348 missed=36 overrun=2570 imu_zero=0.000 ar_delay=2000 at=1 tr=0.000",
+      "lines": [
+        "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=0.003 raw=-0.018 gyro=-0.082 set=0.000 set_eff=0.000 out=0.00 kp=30.00 ki=0.00 kd=0.80 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=6000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=230.0 tipDeg=35.0 loop_us=3348 missed=36 overrun=2570 imu_zero=0.000 ar_delay=2000 at=1 tr=0.000"
+      ],
+      "latency_ms": 247.37845920026302
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 0.4263825409580022,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  }
+}

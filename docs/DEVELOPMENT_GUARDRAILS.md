@@ -6,6 +6,12 @@
 tools/bootstrap_dev_guardrails.sh
 ```
 
+## Quick environment check
+
+```bash
+tools/check_env.sh
+```
+
 ## Daily commands
 
 ### 1) Fast Python test loop
@@ -64,6 +70,8 @@ Behavior constraints
 - <e.g., UI-only, no API changes>
 - <e.g., no inline styles, tokenized CSS only>
 - <e.g., preserve behavior unless explicitly requested>
+- Agent autonomy default: do quick research with available tools, then implement directly for non-destructive requests.
+- Ask before action only for destructive/high-risk operations (flash, power-state changes, irreversible data changes).
 
 Verification (required)
 - Run:

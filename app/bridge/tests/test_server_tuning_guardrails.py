@@ -10,6 +10,7 @@ from server import (  # noqa: E402
     _build_tuning_apply_signature,
     _compute_action_gates,
     _detect_tuning_capabilities,
+    _evaluate_tuning_recommendation_quality,
     _enforce_preflight_if_needed,
     _guard_limits_apply,
     _guard_pid_apply,
@@ -42,7 +43,9 @@ def test_guard_pid_apply_blocks_large_balancing_delta() -> None:
 
 def test_guard_limits_apply_rejects_invalid_range() -> None:
     with pytest.raises(RuntimeError, match="invalid_tuning_value:tip_deg"):
-        _guard_limits_apply({"mode": "SAFE_IDLE"}, out_max=180.0, tip_deg=120.0, i_max=70.0)
+        _guard_limits_apply(
+            {"mode": "SAFE_IDLE"}, out_max=180.0, tip_deg=120.0, i_max=70.0
+        )
 
 
 def test_validate_recommendation_contract_flags_missing_fields() -> None:
@@ -64,6 +67,69 @@ def test_validate_recommendation_contract_accepts_expected_shape() -> None:
     assert errs == []
 
 
+def test_tuning_recommendation_quality_gate_flags_missing_evidence() -> None:
+    out = _evaluate_tuning_recommendation_quality(
+        recommendation={
+            "ok": True,
+            "score_pct": 52,
+            "readiness": "risky",
+            "recommendations": [],
+            "procedure": [],
+            "variables_available": {},
+        },
+        telemetry={},
+        trace_paths=[],
+        replay_reports=[],
+        surrogate_report=None,
+    )
+    assert out["gate_ok"] is False
+    reasons = list(out["reasons"])
+    assert "evidence_missing_trace_paths" in reasons
+    assert "recommendation_score_low" in reasons
+    assert "recommendations_missing" in reasons
+    assert "procedure_incomplete" in reasons
+    assert "variables_available_missing" in reasons
+
+
+def test_tuning_recommendation_quality_gate_passes_with_complete_inputs(
+    tmp_path: Path,
+) -> None:
+    trace = tmp_path / "trace.csv"
+    trace.write_text("t,ang\n0,0.0\n", encoding="utf-8")
+    out = _evaluate_tuning_recommendation_quality(
+        recommendation={
+            "ok": True,
+            "score_pct": 84,
+            "readiness": "good",
+            "recommendations": [
+                {
+                    "priority": "medium",
+                    "action": "Reduce Kp by 5%",
+                    "rationale": "Saturation elevated",
+                    "confidence": 0.8,
+                }
+            ],
+            "procedure": ["capture baseline", "apply one bounded change", "retest"],
+            "variables_available": {"pid": {"runtime_apply_supported": True}},
+        },
+        telemetry={
+            "angle_variance": 1.2,
+            "output_saturation_pct": 25.0,
+            "oscillation_detected": False,
+            "oscillation_freq_hz": 0.0,
+        },
+        trace_paths=[trace],
+        replay_reports=[{"result": {"pass": True}}],
+        surrogate_report={
+            "ok": True,
+            "model": {"confidence": 0.9},
+            "simulation": {"metrics": {"faceplant": False}},
+        },
+    )
+    assert out["gate_ok"] is True
+    assert out["reasons"] == []
+
+
 def test_requires_preflight_for_high_impact_pid_change() -> None:
     assert _requires_preflight(
         family="pid",
@@ -80,7 +146,10 @@ def test_preflight_store_validates_signature_and_mismatch() -> None:
     assert "preflight_id" in node
     store.validate(node["preflight_id"], sig)
     with pytest.raises(RuntimeError, match="preflight_mismatch"):
-        store.validate(node["preflight_id"], _build_tuning_apply_signature("pid", {"kp": 35.0, "ki": 0.05, "kd": 1.05}))
+        store.validate(
+            node["preflight_id"],
+            _build_tuning_apply_signature("pid", {"kp": 35.0, "ki": 0.05, "kd": 1.05}),
+        )
 
 
 def test_enforce_preflight_requires_id_when_high_impact() -> None:
@@ -134,9 +203,65 @@ def test_compute_action_gates_allows_nominal_arm_prepare() -> None:
 def test_compute_action_gates_block_arm_confirm_until_prepared() -> None:
     gates = _compute_action_gates(
         connected=True,
-        status={"mode": "SAFE_IDLE", "ang": "0.0", "raw": "0.0", "gyro": "0.0", "out": "0.0", "kp": "31.0", "ki": "0.05", "kd": "1.05", "set": "0.0"},
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
         control_snapshot={"arm_prepared": False, "estop_latched": False},
         session_fresh=True,
     )
     assert gates["arm_confirm"]["ok"] is False
     assert "arm_not_prepared" in gates["arm_confirm"]["reasons"]
+
+
+def test_compute_action_gates_block_arm_when_prearm_safety_required() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+        prearm_safety={"required": True, "passed": False},
+    )
+    assert gates["arm_prepare"]["ok"] is False
+    assert "prearm_safety_check_required" in gates["arm_prepare"]["reasons"]
+    assert gates["arm"]["ok"] is False
+    assert "prearm_safety_check_required" in gates["arm"]["reasons"]
+
+
+def test_compute_action_gates_allow_arm_when_prearm_safety_passed() -> None:
+    gates = _compute_action_gates(
+        connected=True,
+        status={
+            "mode": "SAFE_IDLE",
+            "ang": "0.0",
+            "raw": "0.0",
+            "gyro": "0.0",
+            "out": "0.0",
+            "kp": "31.0",
+            "ki": "0.05",
+            "kd": "1.05",
+            "set": "0.0",
+        },
+        control_snapshot={"arm_prepared": False, "estop_latched": False},
+        session_fresh=True,
+        prearm_safety={"required": False, "passed": True},
+    )
+    assert gates["arm_prepare"]["ok"] is True
+    assert gates["arm"]["ok"] is True

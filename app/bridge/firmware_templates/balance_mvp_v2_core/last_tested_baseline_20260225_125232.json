@@ -1,0 +1,93 @@
+{
+  "baseline_version": "v1",
+  "kind": "last_tested_config_restored",
+  "captured_at_utc": "2026-02-25T18:52:32.927672+00:00",
+  "ident": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "IDENT",
+      "cmd_id": 80,
+      "matched": "OK IDENT build=bmv2c hash=na runtime=balance_mvp_v2_core.1.1 tune=tune_v1",
+      "lines": [
+        "OK IDENT build=bmv2c hash=na runtime=balance_mvp_v2_core.1.1 tune=tune_v1"
+      ],
+      "latency_ms": 220.74700007215142
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 1.0348539159167558,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  },
+  "get": {
+    "ok": true,
+    "result": {
+      "ok": true,
+      "cmd": "GET",
+      "cmd_id": 81,
+      "matched": "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=-0.022 raw=-0.032 gyro=0.040 set=1.500 set_eff=1.500 out=0.00 kp=36.00 ki=0.00 kd=1.00 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=9000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=245.0 tipDeg=35.0 loop_us=3348 missed=54 overrun=2574 imu_zero=0.000 ar_delay=2000 at=0 tr=0.000",
+      "lines": [
+        "S mode=FAULT estop=1 armed=0 fault=20 fault_count=1 ang=-0.022 raw=-0.032 gyro=0.040 set=1.500 set_eff=1.500 out=0.00 kp=36.00 ki=0.00 kd=1.00 kv=0.0080 kx=0.0015 gse=3.00 gsb=0.40 gss=1.40 sl=9000 rp=350 mg=12.0 mm=5.0 dcf=18.0 kaw=0.25 wspd=0.00 wpos=0.00 wdelta=0.00 outL=0 outR=0 runaway=0.000 outMax=245.0 tipDeg=35.0 loop_us=3348 missed=54 overrun=2574 imu_zero=0.000 ar_delay=2000 at=0 tr=0.000"
+      ],
+      "latency_ms": 245.2978331129998
+    },
+    "control": {
+      "arm_prepared": false,
+      "estop_latched": false,
+      "heartbeat_age_s": 0.09061933401972055,
+      "watchdog_timeout_s": 2.0,
+      "watchdog_tripped": false,
+      "watchdog_disarm_count": 0,
+      "watchdog_last_reason": ""
+    }
+  },
+  "intended_bundle": {
+    "PID": [
+      36.0,
+      0.0,
+      1.0
+    ],
+    "SETPOINT": 1.5,
+    "LIMITS": [
+      245.0,
+      35.0,
+      90.0,
+      120.0
+    ],
+    "MOTION": [
+      0.008,
+      0.0015
+    ],
+    "SLEW": 9000.0,
+    "RAMP": 350,
+    "MOTIONCFG": [
+      12.0,
+      5.0
+    ],
+    "GSCHED": [
+      3.0,
+      0.4
+    ],
+    "DCFG": [
+      18.0,
+      0.25
+    ],
+    "AUTOTRIM": 0,
+    "TRIMCFG": [
+      0.15,
+      6.0,
+      25.0,
+      100.0,
+      0.6
+    ],
+    "TRIMLIMS": [
+      3.0,
+      0.05
+    ]
+  }
+}

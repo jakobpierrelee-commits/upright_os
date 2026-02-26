@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "zones": {
+    "routes": [
+      "app/bridge/routes"
+    ],
+    "domains": [
+      "app/bridge/domains"
+    ],
+    "adapters": [
+      "app/bridge/adapters"
+    ],
+    "contracts": [
+      "app/bridge/contracts",
+      "docs/contracts"
+    ],
+    "policies": [
+      "app/bridge/policies"
+    ],
+    "ui_features": [
+      "app/ui/ops-console/src/features"
+    ],
+    "ui_components": [
+      "app/ui/ops-console/src/components/ui"
+    ],
+    "ui_lib": [
+      "app/ui/ops-console/src/lib"
+    ]
+  },
+  "allowed_import_edges": [
+    ["routes", "domains"],
+    ["domains", "adapters"],
+    ["domains", "contracts"],
+    ["domains", "policies"],
+    ["ui_features", "ui_components"],
+    ["ui_features", "ui_lib"],
+    ["ui_components", "ui_lib"]
+  ]
+}

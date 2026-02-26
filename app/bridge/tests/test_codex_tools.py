@@ -4,13 +4,11 @@ Validation tests for codex_tools.py - Phase C Tool Layer
 Run with: python3 app/bridge/tests/test_codex_tools.py
 """
 
-import json
-import os
 import sys
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -151,8 +149,12 @@ def test_execute_command_allowlist_enforcement():
     # Blocked command should fail
     result = executor.execute("execute_command", {"cmd": "ARM"})
     assert not result.ok, "Blocked command should fail"
-    assert "blocked" in result.error.lower(), f"Error should mention blocked: {result.error}"
-    assert not mock_gateway.command.called, "Gateway should NOT be called for blocked command"
+    assert (
+        "blocked" in result.error.lower()
+    ), f"Error should mention blocked: {result.error}"
+    assert (
+        not mock_gateway.command.called
+    ), "Gateway should NOT be called for blocked command"
 
     # Reset mock
     mock_gateway.reset_mock()
@@ -160,7 +162,9 @@ def test_execute_command_allowlist_enforcement():
     # Unknown command should fail
     result = executor.execute("execute_command", {"cmd": "UNKNOWN_CMD"})
     assert not result.ok, "Unknown command should fail"
-    assert "allowlist" in result.error.lower(), f"Error should mention allowlist: {result.error}"
+    assert (
+        "allowlist" in result.error.lower()
+    ), f"Error should mention allowlist: {result.error}"
 
     print("✓ Execute command allowlist enforcement passed")
 
@@ -204,11 +208,14 @@ const int PIN_MOTOR = 5;
         )
 
         # Safe variable should work
-        result = executor.execute("edit_sketch_value", {
-            "variable": "LOOP_US",
-            "value": "5000",
-            "sketch_path": str(sketch_dir),
-        })
+        result = executor.execute(
+            "edit_sketch_value",
+            {
+                "variable": "LOOP_US",
+                "value": "5000",
+                "sketch_path": str(sketch_dir),
+            },
+        )
         assert result.ok, f"Safe variable edit should succeed: {result.error}"
         assert result.data.get("old_value") == "4000", f"Old value wrong: {result.data}"
         assert result.data.get("new_value") == "5000", f"New value wrong: {result.data}"
@@ -218,11 +225,14 @@ const int PIN_MOTOR = 5;
         assert "#define LOOP_US 5000" in content, "File should be updated"
 
         # Blocked variable should fail
-        result = executor.execute("edit_sketch_value", {
-            "variable": "PIN_MOTOR",
-            "value": "6",
-            "sketch_path": str(sketch_dir),
-        })
+        result = executor.execute(
+            "edit_sketch_value",
+            {
+                "variable": "PIN_MOTOR",
+                "value": "6",
+                "sketch_path": str(sketch_dir),
+            },
+        )
         assert not result.ok, "Blocked variable should fail"
         assert "blocked" in result.error.lower() or "allowlist" in result.error.lower()
 
@@ -303,22 +313,61 @@ def test_upload_confirmation_flow():
     token = result.data["confirmation_token"]
 
     # Invalid token should fail
-    result = executor.execute("upload_firmware", {
-        "sketch_path": "/some/sketch",
-        "confirmation_token": "invalid_token",
-    })
+    result = executor.execute(
+        "upload_firmware",
+        {
+            "sketch_path": "/some/sketch",
+            "confirmation_token": "invalid_token",
+        },
+    )
     assert not result.ok
     assert "invalid" in result.error.lower() or "expired" in result.error.lower()
 
     # Valid token without firmware module should fail gracefully
-    result = executor.execute("upload_firmware", {
-        "sketch_path": "/some/sketch",
-        "confirmation_token": token,
-    })
+    result = executor.execute(
+        "upload_firmware",
+        {
+            "sketch_path": "/some/sketch",
+            "confirmation_token": token,
+        },
+    )
     assert not result.ok
     assert "not configured" in result.error.lower()
 
     print("✓ Upload confirmation flow passed")
+
+
+def test_upload_trust_window_skips_repeat_confirmation():
+    """After explicit approval, repeat upload in same context should not re-prompt."""
+    mock_firmware = MagicMock()
+    mock_firmware.upload.return_value = {"ok": True, "output": "uploaded"}
+    executor = CodexToolExecutor(
+        firmware_module=mock_firmware,
+        active_sketch_path="/some/sketch",
+        board_fqbn="arduino:avr:nano",
+        port="/dev/ttyUSB0",
+    )
+
+    # First attempt requests confirmation
+    result = executor.execute("upload_firmware", {"sketch_path": "/some/sketch"})
+    assert not result.ok
+    assert result.error == "CONFIRMATION_REQUIRED"
+    token = result.data["confirmation_token"]
+
+    # Explicit approval executes upload and grants trust window
+    approved = executor.execute("upload_firmware", {"confirmation_token": token})
+    assert approved.ok
+    assert "upload successful" in str(approved.data.get("message", "")).lower()
+
+    # Second attempt in same context should upload directly
+    repeat = executor.execute("upload_firmware", {"sketch_path": "/some/sketch"})
+    assert repeat.ok, f"Repeat upload should bypass confirmation: {repeat.error}"
+    assert (
+        "trusted explicit approval window"
+        in str(repeat.data.get("message", "")).lower()
+    )
+
+    print("✓ Upload trust window bypass passed")
 
 
 def test_generate_sketch_name_sanitization():
@@ -407,7 +456,9 @@ def test_read_sketch_reads_active_sketch_source():
         ino = sketch_dir / "demo_sketch.ino"
         ino.write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
 
-        executor = CodexToolExecutor(repo_root=Path(tmpdir), active_sketch_path=str(sketch_dir))
+        executor = CodexToolExecutor(
+            repo_root=Path(tmpdir), active_sketch_path=str(sketch_dir)
+        )
         result = executor.execute("read_sketch", {})
         assert result.ok, f"Expected read success, got: {result.error}"
         assert "void setup()" in result.data.get("content", "")
@@ -487,6 +538,7 @@ def run_all_tests():
             failed += 1
             print(f"✗ {name} failed with exception: {e}")
             import traceback
+
             traceback.print_exc()
 
     print("\n" + "=" * 60)

@@ -1,0 +1,9 @@
+{
+  "allowed_modes": [
+    "app_dev",
+    "robot_dev",
+    "ops_debug"
+  ],
+  "mode": "app_dev",
+  "updated_at": 1771716865.055937
+}

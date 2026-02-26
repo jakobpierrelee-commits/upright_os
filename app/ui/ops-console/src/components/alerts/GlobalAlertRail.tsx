@@ -50,7 +50,7 @@ export function GlobalAlertRail({
         </button>
       </div>
       {!expanded ? null : (
-        <div className="global-alert-popout" role="dialog" aria-label="Alert details">
+        <div className="global-alert-popout glass-surface glass-surface-strong" role="dialog" aria-label="Alert details">
           <div className="global-alert-header">
             <span className="global-alert-title">Alerts</span>
             <div className="global-alert-header-right">

@@ -42,6 +42,31 @@ export function useBridgePolling(params: Params) {
   } = params;
   const draftsInitedRef = useRef(false);
   const compatRequestedRef = useRef(false);
+  const initDraftsFromStatusRef = useRef(initDraftsFromStatus);
+  const runCompatProbeRef = useRef(runCompatProbe);
+  const setMsgRef = useRef(setMsg);
+  const nRef = useRef(n);
+  const historyMaxRef = useRef(historyMax);
+
+  useEffect(() => {
+    initDraftsFromStatusRef.current = initDraftsFromStatus;
+  }, [initDraftsFromStatus]);
+
+  useEffect(() => {
+    runCompatProbeRef.current = runCompatProbe;
+  }, [runCompatProbe]);
+
+  useEffect(() => {
+    setMsgRef.current = setMsg;
+  }, [setMsg]);
+
+  useEffect(() => {
+    nRef.current = n;
+  }, [n]);
+
+  useEffect(() => {
+    historyMaxRef.current = historyMax;
+  }, [historyMax]);
 
   useEffect(() => {
     let mounted = true;
@@ -54,6 +79,17 @@ export function useBridgePolling(params: Params) {
     let healthFailures = 0;
     let lastHealthOkAt = 0;
     let lastMode = '';
+    let wsRetryCount = 0;
+    let wsRetryNotBefore = 0;
+    const wsRetryBaseMs = 1000;
+    const wsRetryMaxMs = 30_000;
+
+    const scheduleWsReconnect = () => {
+      wsRetryCount += 1;
+      const expDelay = Math.min(wsRetryMaxMs, wsRetryBaseMs * (2 ** Math.min(wsRetryCount, 6)));
+      const jitter = Math.floor(Math.random() * 250);
+      wsRetryNotBefore = Date.now() + expDelay + jitter;
+    };
 
     const healthIntervalMs = () => (document.hidden ? 10_000 : 3_000);
     const heartbeatIntervalMs = () => {
@@ -76,18 +112,18 @@ export function useBridgePolling(params: Params) {
         const next = [...prev, {
           t: Date.now(),
           mode: String(status.mode ?? ''),
-          kf: n(status.ang, 0),
-          raw: n(status.raw, 0),
-          gyro: n(status.gyro ?? status.gyr ?? status.gx, 0),
-          out: n(status.out, 0),
+          kf: nRef.current(status.ang, 0),
+          raw: nRef.current(status.raw, 0),
+          gyro: nRef.current(status.gyro ?? status.gyr ?? status.gx, 0),
+          out: nRef.current(status.out, 0),
           bridgeTxMs,
         }];
-        if (next.length > historyMax) next.splice(0, next.length - historyMax);
+        if (next.length > historyMaxRef.current) next.splice(0, next.length - historyMaxRef.current);
         return next;
       });
       if (control) setControl(control);
       if (!draftsInitedRef.current) {
-        initDraftsFromStatus(status);
+        initDraftsFromStatusRef.current(status);
         draftsInitedRef.current = true;
       }
       const hasCompatSignal =
@@ -99,7 +135,7 @@ export function useBridgePolling(params: Params) {
         typeof status.gx === 'string';
       if (!compatRequestedRef.current && hasCompatSignal) {
         compatRequestedRef.current = true;
-        runCompatProbe();
+        runCompatProbeRef.current();
       }
     };
 
@@ -108,7 +144,7 @@ export function useBridgePolling(params: Params) {
       // Avoid flooding alert rail with identical bridge errors.
       if (now - lastErrorAt < 1200) return;
       lastErrorAt = now;
-      setMsg(`bridge error: ${(err as Error).message}`, source);
+      setMsgRef.current(`bridge error: ${(err as Error).message}`, source);
     };
 
     const tickStatusFallback = async () => {
@@ -142,9 +178,8 @@ export function useBridgePolling(params: Params) {
     const scheduleFallbackTick = () => {
       if (!mounted) return;
       fallbackId = setTimeout(async () => {
-        if (!wsActive) {
-          await tickStatusFallback();
-        }
+        // Keep action gates/control fresh even when telemetry websocket is active.
+        await tickStatusFallback();
         scheduleFallbackTick();
       }, fallbackIntervalMs());
     };
@@ -159,10 +194,12 @@ export function useBridgePolling(params: Params) {
         setHealth(h.health);
         if (h.control) setControl(h.control);
 
-        if (h.telemetry_enabled && h.telemetry_ws && !wsActive && !ws) {
+        if (h.telemetry_enabled && h.telemetry_ws && !wsActive && !ws && Date.now() >= wsRetryNotBefore) {
           ws = new WebSocket(h.telemetry_ws);
           ws.onopen = () => {
             wsActive = true;
+            wsRetryCount = 0;
+            wsRetryNotBefore = 0;
           };
           ws.onmessage = (ev) => {
             if (!mounted) return;
@@ -177,9 +214,19 @@ export function useBridgePolling(params: Params) {
           ws.onclose = () => {
             wsActive = false;
             ws = null;
+            scheduleWsReconnect();
           };
           ws.onerror = () => {
             wsActive = false;
+            if (ws) {
+              try {
+                ws.close();
+              } catch {
+                // ignore close errors
+              }
+            }
+            ws = null;
+            scheduleWsReconnect();
           };
         }
       } catch (e) {
@@ -235,16 +282,5 @@ export function useBridgePolling(params: Params) {
         }
       }
     };
-  }, [
-    historyMax,
-    initDraftsFromStatus,
-    n,
-    runCompatProbe,
-    setControl,
-    setHealth,
-    setImuHistory,
-    setBridgeOnline,
-    setMsg,
-    setStatus,
-  ]);
+  }, [setActionGates, setBridgeOnline, setControl, setHealth, setImuHistory, setStatus]);
 }

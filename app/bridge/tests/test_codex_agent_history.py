@@ -11,7 +11,7 @@ def test_chat_with_tools_includes_prior_history():
     agent = CodexAgent()
     captured = {}
 
-    def fake_call_openai(*, messages, api_key, model, tools):
+    def fake_call_openai(*, messages, api_key, model, tools, timeout_s=60):
         captured["messages"] = messages
         return {"choices": [{"message": {"content": "ok", "tool_calls": None}}]}
 
@@ -44,7 +44,7 @@ def test_chat_with_tools_ignores_invalid_history_entries():
     agent = CodexAgent()
     captured = {}
 
-    def fake_call_openai(*, messages, api_key, model, tools):
+    def fake_call_openai(*, messages, api_key, model, tools, timeout_s=60):
         captured["messages"] = messages
         return {"choices": [{"message": {"content": "ok", "tool_calls": None}}]}
 
@@ -76,7 +76,7 @@ def test_chat_with_tools_injects_mission_facts_system_message():
     agent = CodexAgent()
     captured = {}
 
-    def fake_call_openai(*, messages, api_key, model, tools):
+    def fake_call_openai(*, messages, api_key, model, tools, timeout_s=60):
         captured["messages"] = messages
         return {"choices": [{"message": {"content": "ok", "tool_calls": None}}]}
 

@@ -1,0 +1,28 @@
+{
+  "board": {
+    "fqbn": "arduino:avr:nano",
+    "mcu_family": "avr",
+    "port": "/dev/cu.usbserial-2210"
+  },
+  "generated_at": 1771670588,
+  "hardware": {
+    "imu_type": "mpu6050",
+    "motor_driver": "tb6612"
+  },
+  "label": "analog_pin_scanner_v1",
+  "pins": {
+    "enc_l_a": -1,
+    "enc_l_b": -1,
+    "enc_r_a": -1,
+    "enc_r_b": -1,
+    "gate_enable": 8,
+    "imu_scl": 19,
+    "imu_sda": 18,
+    "led": 13,
+    "motor_l_dir": 4,
+    "motor_l_pwm": 5,
+    "motor_r_dir": 7,
+    "motor_r_pwm": 6
+  },
+  "schema_version": "unified.v1"
+}

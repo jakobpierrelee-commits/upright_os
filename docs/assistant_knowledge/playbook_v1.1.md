@@ -5,7 +5,7 @@ Minimize tilt error and recovery oscillation while preserving actuator smoothnes
 
 ## Source basis
 - MIT Underactuated Robotics (feedback, stability intuition): https://underactuated.mit.edu/
-- UMich CTMS Inverted Pendulum modeling + PID design: 
+- UMich CTMS Inverted Pendulum modeling + PID design:
   - https://ctms.engin.umich.edu/CTMS/index.php?example=InvertedPendulum&section=SystemModeling
   - https://ctms.engin.umich.edu/CTMS/index.php?example=InvertedPendulum&section=ControlPID
 - MathWorks anti-windup practice for saturated actuators:
@@ -16,13 +16,17 @@ Minimize tilt error and recovery oscillation while preserving actuator smoothnes
 - `raw` (accelerometer angle, deg)
 - `gyro|gyr|gx` (rate, dps)
 - `out` (controller output)
+- `set` (angle setpoint)
+- `pid_err` or computed error (`set - ang`)
+- `kal_innov` or computed innovation (`raw - ang`)
 - `kp,ki,kd,kv,kx,set`
 - `mode,estop`
 
 ## Fast tuning loop
 1. Safety gate: only tune in safe controlled conditions.
 2. Run a short test window (15-30 s).
-3. Classify behavior: overshoot, jitter, drift, sluggishness.
+3. Check estimator sanity first: innovation trend (`raw-ang`) and gyro noise floor.
+4. Classify behavior: overshoot, jitter, drift, sluggishness.
 4. Apply one bounded parameter change.
 5. Re-test and compare metrics.
 
@@ -45,6 +49,14 @@ Minimize tilt error and recovery oscillation while preserving actuator smoothnes
 ## Motion term ordering
 - Tune base stabilization (`kp,ki,kd`) before motion terms (`kv,kx`).
 - Excessive `kv/kx` can inject unnecessary acceleration and noise.
+
+## Signal/Error/Output interpretation (operator-facing)
+- Signal: filtered estimate (`ang`) used by control.
+- Error: `set - ang`; this is what PID should reduce.
+- Output: `out`; watch for clamp/saturation and clipping behavior.
+- Innovation: `raw - ang`; this should settle around zero mean in stable operation.
+
+If innovation grows while output also saturates, fix sensing/calibration before increasing gains.
 
 ## Apply discipline
 - One family per step (`pid` OR `motion` OR `setpoint`).

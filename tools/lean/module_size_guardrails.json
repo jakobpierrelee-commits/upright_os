@@ -1,0 +1,67 @@
+{
+  "tracked_files": [
+    "app/bridge/server.py",
+    "app/bridge/codex_agent.py",
+    "app/bridge/codex_tools.py",
+    "app/bridge/serial_gateway.py",
+    "app/ui/ops-console/src/CleanApp.tsx",
+    "app/ui/ops-console/src/styles.css",
+    "app/ui/ops-console/src/styles/themes.css"
+  ],
+  "defaults": {
+    "max_lines_by_ext": {
+      ".py": 900,
+      ".tsx": 350,
+      ".css": 1800
+    },
+    "max_functions_by_ext": {
+      ".py": 45
+    },
+    "max_function_lines_by_ext": {
+      ".py": 250
+    },
+    "max_selectors_by_ext": {
+      ".css": 650
+    }
+  },
+  "exceptions": [
+    {
+      "path": "app/bridge/server.py",
+      "owner": "Codex",
+      "reason": "Legacy monolith under staged extraction (items 27/29/30). Temporary exception approved under MC-2026-0226-006; reduce below 4500 max_function_lines by 2026-03-15.",
+      "allow": {
+        "max_lines": 16000,
+        "max_functions": 340,
+        "max_function_lines": 4800
+      }
+    },
+    {
+      "path": "app/bridge/codex_tools.py",
+      "owner": "Codex",
+      "reason": "Tool-domain split planned; guard against further growth in current slice.",
+      "allow": {
+        "max_lines": 3800,
+        "max_functions": 50,
+        "max_function_lines": 300
+      }
+    },
+    {
+      "path": "app/ui/ops-console/src/styles.css",
+      "owner": "Codex + JVKE",
+      "reason": "Theme consolidation in progress; temporary exception approved under MC-2026-0226-006. Reduce below 9000 lines by 2026-03-08.",
+      "allow": {
+        "max_lines": 9100,
+        "max_selectors": 1400
+      }
+    },
+    {
+      "path": "app/ui/ops-console/src/styles/themes.css",
+      "owner": "Codex + JVKE",
+      "reason": "Theme token cleanup in progress; cap before composition split.",
+      "allow": {
+        "max_lines": 3800,
+        "max_selectors": 600
+      }
+    }
+  ]
+}

@@ -39,6 +39,17 @@ The system already captures CSV telemetry bursts and scores metrics. We want to 
 - **Learning tool** — helps operators build intuition before touching real hardware
 - Could live in ops-console as a "Sandbox" tab or standalone HTML file
 
+### 5. Voice Input for Codex Agent
+**Concept:** Add a mic button to the CodexPanel so users can speak commands instead of typing.
+- **Web Speech API** — uses built-in browser `SpeechRecognition` (Chrome/Edge/Safari), no external dependencies
+- **Integration point:** `CodexPanel.tsx` already has `aiInput`/`setAiInput`/`sendAi` — voice just populates the input field
+- **UX flow:**
+  1. User clicks mic button → starts listening
+  2. Speech transcribed → fills `aiInput` textarea
+  3. User reviews transcript → clicks send (or auto-send option)
+- **Bonus:** Add text-to-speech for assistant responses (optional)
+- **Reference:** `app/ui/ops-console/src/features/codex/CodexPanel.tsx` lines 480-495 (send row)
+
 ## Your Task
 
 1. **Investigate the codebase:**

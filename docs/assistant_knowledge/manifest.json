@@ -1,6 +1,23 @@
 {
-  "active_version": "v1.1",
+  "active_version": "v1.2",
   "versions": [
+    {
+      "version": "v1.2",
+      "label": "Balancer Tuning Pack (Event-Valid First)",
+      "created_at": "2026-02-24",
+      "playbook_file": "playbook_v1.2.md",
+      "theory_file": "theory_pid_kalman_v1.2.md",
+      "rules_file": "rules_and_constraints_v1.2.md",
+      "governance_file": "knowledge_governance_v1.0.md",
+      "supersedes": "v1.1",
+      "changelog": [
+        "Added event-valid-first tuning doctrine tied to scorecard Gate A/Gate B",
+        "Added explicit supersession governance and evidence requirements for memory updates",
+        "Added forward/backward operator outcome taxonomy as required run context",
+        "Added trigger-first capture defaults and invalid-window rejection rules",
+        "Captured Nano compatibility constraints and non-permanent policy rule"
+      ]
+    },
     {
       "version": "v1.1",
       "label": "Balancer Tuning Pack (Trusted Sources)",
@@ -12,7 +29,8 @@
         "Rebased playbook on trusted references (MIT, UMich CTMS, MathWorks, UNC Kalman tutorial)",
         "Added explicit source-linked tuning guidance for inverted pendulum behaviors",
         "Refined anti-windup and saturation handling rules for real actuators",
-        "Kept telemetry field mapping and bounded-delta policy aligned with UpRight firmware schema"
+        "Kept telemetry field mapping and bounded-delta policy aligned with UpRight firmware schema",
+        "Added explicit signal->error->output and Kalman innovation guidance for UI/Overwatch/scaffold alignment"
       ]
     },
     {

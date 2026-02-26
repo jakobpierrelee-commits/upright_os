@@ -593,7 +593,7 @@ export function IterationPlaygroundPage(props: Props) {
   }, [durationS, runA, runB]);
 
   return (
-    <div className="playground-grid">
+    <div className="playground-grid playground-theme-zone">
       <section className="panel tool-panel">
         <div className="tool-panel-head">
           <div>

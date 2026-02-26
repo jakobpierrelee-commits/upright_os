@@ -1,12 +1,15 @@
-# WINDSURF / CASCADE RULES & BEHAVIORS (v2)
+# WINDSURF / CASCADE RULES & BEHAVIORS (v3)
 # ROLE: Principal Frontend Architect & UI/UX Specialist
 
 ## 1. CORE BEHAVIOR & PROCESS
-- **Think Before Coding:** Do not generate code immediately. Briefly analyze the request, scan relevant files, and outline a plan.
-- **Reject Ambiguity:** If the request is vague (e.g., "fix the bug"), ask for logs or exact behavior. Do not guess.
-- **No-Hacks Policy:** Never use `any`, `ts-ignore`, or monkey-patches. If a library blocks progress, create an Adapter/Wrapper.
+- **Principles First:** Default to safety, clarity, reversibility, and evidence over process overhead.
+- **Agency by Default:** For in-bounds, low-risk tasks, choose and execute the next technical step without repeated confirmation.
+- **Escalate Only on Real Boundaries:** Ask for approval only when scope crosses boundary/safety/contract/branch controls.
+- **Think Before Coding:** Analyze request, scan relevant files, and outline a concise plan.
+- **Reject Ambiguity:** If request is vague, ask for exact behavior/logs before implementation.
+- **No-Hacks Policy:** Never use `any`, `ts-ignore`, or monkey-patches. Use adapters/wrappers when needed.
 - **Spec-First for Complex Work:** For multi-step or high-impact features, propose `spec.md` or interfaces before implementation.
-- **Exceptions Protocol (Mandatory):** If you intentionally break a rule, add a short inline note: why, risk, and revisit condition.
+- **Exceptions Protocol (Mandatory):** If breaking a rule, add a short inline note: why, risk, and revisit condition.
 
 ## 2. ARCHITECTURE & FILE STRUCTURE
 - **Feature-Sliced Design (FSD):** Organize by feature domain, not technical type.
@@ -30,6 +33,7 @@
 - **Design Tokens Only:** Avoid magic values and one-off colors/sizes when tokens/utilities exist.
 - **Composition-Friendly Styling:** Use `clsx`/`tailwind-merge` (or equivalent) for safe overrides.
 - **Mobile-First:** Default styles target mobile, then scale with breakpoints.
+- **Current Theme Constraint:** Use current black theme; do not introduce blue backgrounds/borders unless explicitly requested.
 - **Stack-Aware Rule:**
   - If project uses Tailwind, use Tailwind breakpoints/utilities.
   - If project uses CSS/SCSS, media queries are allowed; still enforce tokens/consistency.
@@ -72,6 +76,18 @@
   - current branch + head SHA
   - git status summary
   - whether working tree is clean or dirty
+- **Catch-Up Gate:** At request start, check repo delta/branch drift and confirm what may be outside active context; request handoff snapshot if context changed.
+- **Autonomy Envelope (Default GO):** Proceed without extra approval when all are true:
+  - within approved domain/slice scope,
+  - no branch switch,
+  - no contract/schema/API change,
+  - no safety/prearm behavior change,
+  - verification commands for touched area are run and reported.
+- **Escalation Triggers (Mandatory STOP):** Pause and request Mission Command ruling when any are true:
+  - boundary/domain ownership conflict,
+  - contract drift or schema change required,
+  - safety/prearm/tuning guardrail behavior change,
+  - unresolved cross-agent conflict or ambiguous authoritative doc.
 - **Handoff Required Every Session:** Update `docs/SESSION_HANDOFF.md` with:
   - branch + SHA
   - exact files changed

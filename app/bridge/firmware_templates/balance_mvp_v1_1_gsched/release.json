@@ -1,0 +1,5 @@
+{
+  "runtime_version": "balance_mvp_v1_1_gsched.1.0",
+  "tune_version": "tune_v1",
+  "version_policy": "Bump runtime_version for firmware logic/command contract changes; bump tune_version for tuning-only changes."
+}

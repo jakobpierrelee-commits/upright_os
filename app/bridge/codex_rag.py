@@ -27,7 +27,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from codex_db import CodexDB, DocChunk, EmbeddingMeta, get_codex_db
+try:
+    from app.bridge.codex_db import CodexDB, DocChunk, EmbeddingMeta, get_codex_db
+except ImportError:
+    from codex_db import CodexDB, DocChunk, EmbeddingMeta, get_codex_db
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,9 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> List[str]:
+def chunk_text(
+    text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHUNK_OVERLAP_CHARS
+) -> List[str]:
     """
     Split text into overlapping chunks.
     Tries to break at paragraph/sentence boundaries when possible.
@@ -116,7 +121,11 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHU
                 chunk_text_raw.rfind("? "),
                 chunk_text_raw.rfind("! "),
             ]
-            best_break = max(b for b in sentence_breaks if b > chunk_size // 2) if any(b > chunk_size // 2 for b in sentence_breaks) else -1
+            best_break = (
+                max(b for b in sentence_breaks if b > chunk_size // 2)
+                if any(b > chunk_size // 2 for b in sentence_breaks)
+                else -1
+            )
             if best_break > 0:
                 end = start + best_break + 2
             else:
@@ -265,7 +274,11 @@ class CodexRAG:
                 current_hash = compute_file_hash(file_path)
                 existing_meta = self.db.get_embedding_meta(rel_path)
 
-                if existing_meta and existing_meta.file_hash == current_hash and not force_reindex:
+                if (
+                    existing_meta
+                    and existing_meta.file_hash == current_hash
+                    and not force_reindex
+                ):
                     logger.debug(f"Skipping unchanged file: {rel_path}")
                     stats["files_skipped"] += 1
                     continue
@@ -300,13 +313,15 @@ class CodexRAG:
                 self.db.save_doc_chunks(doc_chunks)
 
                 # Update metadata
-                self.db.save_embedding_meta(EmbeddingMeta(
-                    source_path=rel_path,
-                    file_hash=current_hash,
-                    chunk_count=len(chunks),
-                    embedded_at=time.time(),
-                    model=EMBEDDING_MODEL,
-                ))
+                self.db.save_embedding_meta(
+                    EmbeddingMeta(
+                        source_path=rel_path,
+                        file_hash=current_hash,
+                        chunk_count=len(chunks),
+                        embedded_at=time.time(),
+                        model=EMBEDDING_MODEL,
+                    )
+                )
 
                 stats["files_processed"] += 1
                 stats["chunks_created"] += len(chunks)
@@ -345,7 +360,11 @@ class CodexRAG:
                 current_hash = compute_file_hash(file_path)
                 existing_meta = self.db.get_embedding_meta(rel_path)
 
-                if existing_meta and existing_meta.file_hash == current_hash and not force_reindex:
+                if (
+                    existing_meta
+                    and existing_meta.file_hash == current_hash
+                    and not force_reindex
+                ):
                     stats["files_skipped"] += 1
                     continue
 
@@ -376,13 +395,15 @@ class CodexRAG:
                 ]
                 self.db.save_doc_chunks(doc_chunks)
 
-                self.db.save_embedding_meta(EmbeddingMeta(
-                    source_path=rel_path,
-                    file_hash=current_hash,
-                    chunk_count=len(chunks),
-                    embedded_at=time.time(),
-                    model=EMBEDDING_MODEL,
-                ))
+                self.db.save_embedding_meta(
+                    EmbeddingMeta(
+                        source_path=rel_path,
+                        file_hash=current_hash,
+                        chunk_count=len(chunks),
+                        embedded_at=time.time(),
+                        model=EMBEDDING_MODEL,
+                    )
+                )
 
                 stats["files_processed"] += 1
                 stats["chunks_created"] += len(chunks)
@@ -442,7 +463,9 @@ class CodexRAG:
             try:
                 semantic_score = 0.0
                 chunk_embedding = json.loads(chunk.embedding_json)
-                has_chunk_embedding = bool(chunk_embedding) and any(v != 0.0 for v in chunk_embedding)
+                has_chunk_embedding = bool(chunk_embedding) and any(
+                    v != 0.0 for v in chunk_embedding
+                )
                 if has_query_embedding and has_chunk_embedding:
                     semantic_score = cosine_similarity(query_embedding, chunk_embedding)
 
@@ -454,7 +477,9 @@ class CodexRAG:
                         keyword_score = overlap / len(query_tokens)
 
                 if has_query_embedding:
-                    score = (semantic_score * HYBRID_SEMANTIC_WEIGHT) + (keyword_score * HYBRID_KEYWORD_WEIGHT)
+                    score = (semantic_score * HYBRID_SEMANTIC_WEIGHT) + (
+                        keyword_score * HYBRID_KEYWORD_WEIGHT
+                    )
                 else:
                     score = keyword_score
 
@@ -508,7 +533,9 @@ class CodexRAG:
                 break
 
             if include_sources:
-                context_parts.append(f"[Source: {result.source_path}]\n{result.content}")
+                context_parts.append(
+                    f"[Source: {result.source_path}]\n{result.content}"
+                )
             else:
                 context_parts.append(result.content)
 
