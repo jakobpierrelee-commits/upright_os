@@ -1755,30 +1755,7 @@ def main() -> int:
     threading.Thread(target=watchdog_loop, args=(gw, control, stop_evt), daemon=True).start()
     threading.Thread(target=serial_reconnect_loop, args=(gw, firmware, stop_evt), daemon=True).start()
 
-    server = ThreadingHTTPServer(
-        (args.host, args.http_port),
-        build_handler(
-            gw,
-            control,
-            commissioning,
-            host_capture,
-            firmware,
-            ai,
-            ai_profiles,
-            knowledge,
-            agent_mission,
-            provider_router,
-            auth,
-            mission_memory,
-            profiles,
-            config_history,
-            args.telemetry_port,
-            codex_agent,
-            hardware_context,
-            setup_attempt_history,
-            prearm_safety,
-        ),
-    )
+    server = ThreadingHTTPServer((args.host, args.http_port), build_handler(gw, control, commissioning, host_capture, firmware, ai, ai_profiles, knowledge, agent_mission, provider_router, auth, mission_memory, profiles, config_history, args.telemetry_port, codex_agent, hardware_context, setup_attempt_history, prearm_safety))
     print(f"bridge listening on http://{args.host}:{args.http_port}")
     try:
         server.serve_forever()
@@ -1786,7 +1763,6 @@ def main() -> int:
         pass
     finally:
         stop_evt.set()
-        pass  # TelemetryHub is now a simple pub/sub hub, no stop needed
         server.server_close()
         gw.close()
     return 0
