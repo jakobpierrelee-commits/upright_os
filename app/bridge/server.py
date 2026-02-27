@@ -150,27 +150,13 @@ try:
 except ImportError:
     from clean_legacy_gate import legacy_execution_block_payload, legacy_execution_enabled  # type: ignore
 try:
-    from app.bridge.clean_threads import (
-        handle_clean_thread_new,
-        handle_clean_thread_select,
-        handle_clean_threads_get,
-    )
+    from app.bridge.clean_threads import handle_clean_thread_new, handle_clean_thread_select, handle_clean_threads_get
 except ImportError:
-    from clean_threads import (  # type: ignore
-        handle_clean_thread_new,
-        handle_clean_thread_select,
-        handle_clean_threads_get,
-    )
+    from clean_threads import handle_clean_thread_new, handle_clean_thread_select, handle_clean_threads_get  # type: ignore
 try:
-    from app.bridge.clean_status import (
-        build_agent_status_payload,
-        build_clean_status_payload,
-    )
+    from app.bridge.clean_status import build_agent_status_payload, build_clean_status_payload
 except ImportError:
-    from clean_status import (  # type: ignore
-        build_agent_status_payload,
-        build_clean_status_payload,
-    )
+    from clean_status import build_agent_status_payload, build_clean_status_payload  # type: ignore
 # clean_profiles imports removed - all were unused
 # clean_firmware imports removed - all were unused
 try:
@@ -180,29 +166,11 @@ try:
 except ImportError:
     pass
 try:
-    from app.bridge.clean_tuning import (
-        build_burst_status_payload,
-        build_commissioning_artifacts_payload,
-        build_commissioning_status_payload,
-        build_lines_payload,
-        build_tuning_result_payload,
-    )
+    from app.bridge.clean_tuning import build_burst_status_payload, build_commissioning_artifacts_payload, build_commissioning_status_payload, build_lines_payload, build_tuning_result_payload
 except ImportError:
-    from clean_tuning import (  # type: ignore
-        build_burst_status_payload,
-        build_commissioning_artifacts_payload,
-        build_commissioning_status_payload,
-        build_lines_payload,
-        build_tuning_result_payload,
-    )
+    from clean_tuning import build_burst_status_payload, build_commissioning_artifacts_payload, build_commissioning_status_payload, build_lines_payload, build_tuning_result_payload  # type: ignore
 try:
-    from app.bridge.clean_probe import (
-        build_compat_probe_payload,
-        build_design_memory_best_payload,
-        build_design_memory_payload,
-        build_probe_payload,
-        build_tooling_traces_payload,
-    )
+    from app.bridge.clean_probe import build_compat_probe_payload, build_design_memory_best_payload, build_design_memory_payload, build_probe_payload, build_tooling_traces_payload
 except ImportError:
     pass
 try:
