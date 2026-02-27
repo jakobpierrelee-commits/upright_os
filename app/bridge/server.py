@@ -1797,27 +1797,7 @@ def build_handler(
                     return
 
                 if u.path == "/agent/clean/preflight":
-                    code, payload = handle_clean_preflight_post(
-                        body=body,
-                        ai=ai,
-                        firmware=firmware,
-                        profiles=profiles,
-                        repo_root=repo_root,
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        parse_clean_preflight_request_fn=parse_clean_preflight_request,
-                        clean_default_sketch_path_fn=_clean_default_sketch_path,
-                        resolve_manifest_gates_fn=resolve_manifest_gates,
-                        runtime_manifest_profile_compatibility_fn=_runtime_manifest_profile_compatibility,
-                        run_clean_preflight_fn=run_clean_preflight,
-                        run_clean_auto_tools_fn=_run_clean_auto_tools,
-                        build_clean_agent_context_fn=_build_clean_agent_context,
-                        clean_system_prompt_fn=_clean_system_prompt,
-                        normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
-                        validate_clean_preflight_response_fn=validate_clean_preflight_response,
-                        env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
-                        env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")),
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_clean_preflight_post(body=body, ai=ai, firmware=firmware, profiles=profiles, repo_root=repo_root, codex_cli_login_status_fn=_codex_cli_login_status, parse_clean_preflight_request_fn=parse_clean_preflight_request, clean_default_sketch_path_fn=_clean_default_sketch_path, resolve_manifest_gates_fn=resolve_manifest_gates, runtime_manifest_profile_compatibility_fn=_runtime_manifest_profile_compatibility, run_clean_preflight_fn=run_clean_preflight, run_clean_auto_tools_fn=_run_clean_auto_tools, build_clean_agent_context_fn=_build_clean_agent_context, clean_system_prompt_fn=_clean_system_prompt, normalize_reply_for_prompt_fn=_normalize_reply_for_prompt, validate_clean_preflight_response_fn=validate_clean_preflight_response, env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")), env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120"))))
 
                 if u.path == "/agent/clean/preflight/stream":
                     codex_login = _codex_cli_login_status()
