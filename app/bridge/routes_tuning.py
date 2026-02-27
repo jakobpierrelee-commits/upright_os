@@ -421,3 +421,130 @@ def handle_tuning_capabilities_get(
 
     caps = detect_tuning_capabilities_fn(status, [], [])
     return 200, build_capabilities_payload(capabilities=caps, source="status_only")
+
+
+def handle_pid_post(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    config_history: Any,
+    tuning_preflight: Any,
+    require_action_allowed_fn: Callable,
+    status_float_fn: Callable,
+    guard_pid_apply_fn: Callable,
+    enforce_preflight_if_needed_fn: Callable,
+    build_tuning_result_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /pid POST request."""
+    kp = float(body["kp"])
+    ki = float(body["ki"])
+    kd = float(body["kd"])
+    status_before = gateway.get_status()
+    require_action_allowed_fn("pid", gateway, control, status_override=status_before)
+    current = {
+        "kp": status_float_fn(status_before, "kp", default=31.0),
+        "ki": status_float_fn(status_before, "ki", default=0.05),
+        "kd": status_float_fn(status_before, "kd", default=1.05),
+    }
+    target = {"kp": kp, "ki": ki, "kd": kd}
+    guard_pid_apply_fn(status_before, kp, ki, kd)
+    preflight_used = enforce_preflight_if_needed_fn(
+        preflight_store=tuning_preflight,
+        body=body,
+        family="pid",
+        status_before=status_before,
+        current=current,
+        target=target,
+    )
+    snap = config_history.save_snapshot(source="/pid", status_before=status_before)
+    res = gateway.command(f"PID {kp} {ki} {kd}", expect_contains="OK PID", timeout=2.0)
+    return 200, build_tuning_result_payload_fn(
+        result=res,
+        snapshot=snap,
+        status=gateway.get_status(),
+        control=control.snapshot(),
+        preflight_id=preflight_used,
+    )
+
+
+def handle_motion_post(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    config_history: Any,
+    tuning_preflight: Any,
+    require_action_allowed_fn: Callable,
+    status_float_fn: Callable,
+    guard_motion_apply_fn: Callable,
+    enforce_preflight_if_needed_fn: Callable,
+    build_tuning_result_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /motion POST request."""
+    kv = float(body["kv"])
+    kx = float(body["kx"])
+    status_before = gateway.get_status()
+    require_action_allowed_fn("motion", gateway, control, status_override=status_before)
+    current = {
+        "kv": status_float_fn(status_before, "kv", default=0.0),
+        "kx": status_float_fn(status_before, "kx", default=0.0),
+    }
+    target = {"kv": kv, "kx": kx}
+    guard_motion_apply_fn(status_before, kv, kx)
+    preflight_used = enforce_preflight_if_needed_fn(
+        preflight_store=tuning_preflight,
+        body=body,
+        family="motion",
+        status_before=status_before,
+        current=current,
+        target=target,
+    )
+    snap = config_history.save_snapshot(source="/motion", status_before=status_before)
+    res = gateway.command(f"MOTION {kv} {kx}", expect_contains="OK MOTION", timeout=2.0)
+    return 200, build_tuning_result_payload_fn(
+        result=res,
+        snapshot=snap,
+        status=gateway.get_status(),
+        control=control.snapshot(),
+        preflight_id=preflight_used,
+    )
+
+
+def handle_setpoint_post(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    config_history: Any,
+    tuning_preflight: Any,
+    require_action_allowed_fn: Callable,
+    status_float_fn: Callable,
+    guard_setpoint_apply_fn: Callable,
+    enforce_preflight_if_needed_fn: Callable,
+    build_tuning_result_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /setpoint POST request."""
+    deg = float(body["deg"])
+    status_before = gateway.get_status()
+    require_action_allowed_fn("setpoint", gateway, control, status_override=status_before)
+    current = {"deg": status_float_fn(status_before, "set", default=0.0)}
+    target = {"deg": deg}
+    guard_setpoint_apply_fn(status_before, deg)
+    preflight_used = enforce_preflight_if_needed_fn(
+        preflight_store=tuning_preflight,
+        body=body,
+        family="setpoint",
+        status_before=status_before,
+        current=current,
+        target=target,
+    )
+    snap = config_history.save_snapshot(source="/setpoint", status_before=status_before)
+    res = gateway.command(f"SETPOINT {deg}", expect_contains="OK SETPOINT", timeout=2.0)
+    return 200, build_tuning_result_payload_fn(
+        result=res,
+        snapshot=snap,
+        status=gateway.get_status(),
+        control=control.snapshot(),
+        preflight_id=preflight_used,
+    )

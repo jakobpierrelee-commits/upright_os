@@ -291,12 +291,18 @@ try:
         handle_tuning_capabilities_get,
         handle_tuning_preflight,
         handle_tuning_recommend,
+        handle_pid_post,
+        handle_motion_post,
+        handle_setpoint_post,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
         handle_tuning_capabilities_get,
         handle_tuning_preflight,
         handle_tuning_recommend,
+        handle_pid_post,
+        handle_motion_post,
+        handle_setpoint_post,
     )
 try:
     from app.bridge.routes_burst import (
@@ -4690,119 +4696,49 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/pid":
-                    kp = float(body["kp"])
-                    ki = float(body["ki"])
-                    kd = float(body["kd"])
-                    status_before = gateway.get_status()
-                    _require_action_allowed(
-                        "pid", gateway, control, status_override=status_before
-                    )
-                    current = {
-                        "kp": _status_float(status_before, "kp", default=31.0),
-                        "ki": _status_float(status_before, "ki", default=0.05),
-                        "kd": _status_float(status_before, "kd", default=1.05),
-                    }
-                    target = {"kp": kp, "ki": ki, "kd": kd}
-                    _guard_pid_apply(status_before, kp, ki, kd)
-                    preflight_used = _enforce_preflight_if_needed(
-                        preflight_store=tuning_preflight,
+                    code, payload = handle_pid_post(
                         body=body,
-                        family="pid",
-                        status_before=status_before,
-                        current=current,
-                        target=target,
+                        gateway=gateway,
+                        control=control,
+                        config_history=config_history,
+                        tuning_preflight=tuning_preflight,
+                        require_action_allowed_fn=_require_action_allowed,
+                        status_float_fn=_status_float,
+                        guard_pid_apply_fn=_guard_pid_apply,
+                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
+                        build_tuning_result_payload_fn=build_tuning_result_payload,
                     )
-                    snap = config_history.save_snapshot(
-                        source="/pid", status_before=status_before
-                    )
-                    res = gateway.command(
-                        f"PID {kp} {ki} {kd}", expect_contains="OK PID", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_result_payload(
-                            result=res,
-                            snapshot=snap,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                            preflight_id=preflight_used,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/motion":
-                    kv = float(body["kv"])
-                    kx = float(body["kx"])
-                    status_before = gateway.get_status()
-                    _require_action_allowed(
-                        "motion", gateway, control, status_override=status_before
-                    )
-                    current = {
-                        "kv": _status_float(status_before, "kv", default=0.0),
-                        "kx": _status_float(status_before, "kx", default=0.0),
-                    }
-                    target = {"kv": kv, "kx": kx}
-                    _guard_motion_apply(status_before, kv, kx)
-                    preflight_used = _enforce_preflight_if_needed(
-                        preflight_store=tuning_preflight,
+                    code, payload = handle_motion_post(
                         body=body,
-                        family="motion",
-                        status_before=status_before,
-                        current=current,
-                        target=target,
+                        gateway=gateway,
+                        control=control,
+                        config_history=config_history,
+                        tuning_preflight=tuning_preflight,
+                        require_action_allowed_fn=_require_action_allowed,
+                        status_float_fn=_status_float,
+                        guard_motion_apply_fn=_guard_motion_apply,
+                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
+                        build_tuning_result_payload_fn=build_tuning_result_payload,
                     )
-                    snap = config_history.save_snapshot(
-                        source="/motion", status_before=status_before
-                    )
-                    res = gateway.command(
-                        f"MOTION {kv} {kx}", expect_contains="OK MOTION", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_result_payload(
-                            result=res,
-                            snapshot=snap,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                            preflight_id=preflight_used,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/setpoint":
-                    deg = float(body["deg"])
-                    status_before = gateway.get_status()
-                    _require_action_allowed(
-                        "setpoint", gateway, control, status_override=status_before
-                    )
-                    current = {"deg": _status_float(status_before, "set", default=0.0)}
-                    target = {"deg": deg}
-                    _guard_setpoint_apply(status_before, deg)
-                    preflight_used = _enforce_preflight_if_needed(
-                        preflight_store=tuning_preflight,
+                    code, payload = handle_setpoint_post(
                         body=body,
-                        family="setpoint",
-                        status_before=status_before,
-                        current=current,
-                        target=target,
+                        gateway=gateway,
+                        control=control,
+                        config_history=config_history,
+                        tuning_preflight=tuning_preflight,
+                        require_action_allowed_fn=_require_action_allowed,
+                        status_float_fn=_status_float,
+                        guard_setpoint_apply_fn=_guard_setpoint_apply,
+                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
+                        build_tuning_result_payload_fn=build_tuning_result_payload,
                     )
-                    snap = config_history.save_snapshot(
-                        source="/setpoint", status_before=status_before
-                    )
-                    res = gateway.command(
-                        f"SETPOINT {deg}", expect_contains="OK SETPOINT", timeout=2.0
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_result_payload(
-                            result=res,
-                            snapshot=snap,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                            preflight_id=preflight_used,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/limits":
                     out_max = float(body["out_max"])
