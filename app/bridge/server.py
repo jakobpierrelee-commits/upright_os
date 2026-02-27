@@ -1135,22 +1135,8 @@ def build_handler(
 
     def _design_evidence_snapshot() -> Dict[str, Any]:
         fw_status = firmware.status()
-        fw_state = (
-            str(
-                (fw_status.get("state", "") if isinstance(fw_status, dict) else "")
-                or ""
-            )
-            .strip()
-            .lower()
-        )
-        fw_phase = (
-            str(
-                (fw_status.get("phase", "") if isinstance(fw_status, dict) else "")
-                or ""
-            )
-            .strip()
-            .lower()
-        )
+        fw_state = str((fw_status.get("state", "") if isinstance(fw_status, dict) else "") or "").strip().lower()
+        fw_phase = str((fw_status.get("phase", "") if isinstance(fw_status, dict) else "") or "").strip().lower()
         fw_rc = (
             fw_status.get("returncode", None) if isinstance(fw_status, dict) else None
         )
