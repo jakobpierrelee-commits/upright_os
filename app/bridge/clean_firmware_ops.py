@@ -338,3 +338,153 @@ def resolve_clean_upload_inputs(
         "idempotency_key": idempotency_key,
         "port": port,
     }
+
+
+def build_upload_target_runbook(target: Dict[str, Any]) -> Dict[str, Any]:
+    """Build upload sequence and recovery runbook for a target board."""
+    family = str(target.get("board_family", "")).strip().lower()
+    board_id = str(target.get("board_id", "")).strip().lower()
+    fqbn = str(target.get("fqbn", "")).strip().lower()
+
+    upload_sequence_steps = [
+        {
+            "id": "confirm_port",
+            "label": "Confirm selected serial port matches the active board.",
+            "action_key": "detect_port",
+        },
+        {
+            "id": "compile_first",
+            "label": "Compile first.",
+            "action_key": "compile",
+        },
+        {
+            "id": "upload_guarded",
+            "label": "Run guarded upload.",
+            "action_key": "upload",
+        },
+        {
+            "id": "verify_after_upload",
+            "label": "Refresh status and verify telemetry is live.",
+            "action_key": "refresh_status",
+        },
+    ]
+    family_boot = "Use board-specific boot/reset sequence before retry."
+    if family == "arduino_avr":
+        if board_id == "nano":
+            if "atmega328old" in fqbn:
+                family_boot = "Nano (Old bootloader selected): if sync fails, try New bootloader and retry within 2s of reset."
+            else:
+                family_boot = "Nano (New bootloader selected): if sync fails, try Old bootloader and retry within 2s of reset."
+        else:
+            family_boot = "AVR board: press reset once and retry upload immediately."
+    elif family == "esp32":
+        family_boot = "ESP32: hold BOOT, tap EN/RESET once, then retry upload."
+    elif family == "rp2040":
+        family_boot = "RP2040: hold BOOTSEL while plugging in (or reset to UF2 mode), then retry upload."
+    elif family == "teensy":
+        family_boot = "Teensy: press Program button once, then retry upload."
+
+    recovery_steps = {
+        "firmware_busy": [
+            {
+                "id": "firmware_busy_refresh",
+                "label": "Refresh status and ensure runner is idle.",
+                "action_key": "refresh_status",
+            },
+            {
+                "id": "firmware_busy_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "upload_port_missing": [
+            {
+                "id": "port_missing_detect",
+                "label": "Run Detect / Re-Detect Port.",
+                "action_key": "detect_port",
+            },
+            {
+                "id": "port_missing_select",
+                "label": "Select the active serial port.",
+                "action_key": "select_port",
+            },
+            {
+                "id": "port_missing_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "selected_port_not_detected": [
+            {
+                "id": "port_not_detected_redetect",
+                "label": "Run Re-Detect Port.",
+                "action_key": "detect_port",
+            },
+            {
+                "id": "port_not_detected_select",
+                "label": "Select the detected board port.",
+                "action_key": "select_port",
+            },
+            {
+                "id": "port_not_detected_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "bridge_disconnected": [
+            {
+                "id": "bridge_disconnected_copy",
+                "label": "Copy restart command.",
+                "action_key": "copy_restart_cmd",
+            },
+            {
+                "id": "bridge_disconnected_check",
+                "label": "Run recovery check after restart.",
+                "action_key": "check",
+            },
+            {
+                "id": "bridge_disconnected_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "runtime_manifest_invalid": [
+            {
+                "id": "manifest_invalid_check",
+                "label": "Run recovery check and read manifest validation errors.",
+                "action_key": "check",
+            },
+            {
+                "id": "manifest_invalid_retry",
+                "label": "After fixing manifest, retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+        "bootloader_sync": [
+            {
+                "id": "bootloader_sync_switch",
+                "label": family_boot,
+                "action_key": "set_bootloader",
+            },
+            {
+                "id": "bootloader_sync_retry",
+                "label": "Retry upload.",
+                "action_key": "retry_upload",
+            },
+        ],
+    }
+    recovery = {
+        k: [str(step.get("label", "")).strip() for step in v if isinstance(step, dict)]
+        for k, v in recovery_steps.items()
+    }
+    return {
+        "target": target,
+        "upload_sequence": [
+            str(step.get("label", "")).strip()
+            for step in upload_sequence_steps
+            if isinstance(step, dict)
+        ],
+        "upload_sequence_steps": upload_sequence_steps,
+        "recovery": recovery,
+        "recovery_steps": recovery_steps,
+    }
