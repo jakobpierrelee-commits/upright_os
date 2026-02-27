@@ -733,3 +733,75 @@ def apply_tuning_plan(
         "changed": changed,
         "status": gateway.get_status(),
     }
+
+
+def sanitize_apply_plan(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize and validate an apply plan for tuning operations."""
+    out: Dict[str, Any] = {}
+    pid = raw.get("pid")
+    if isinstance(pid, dict):
+        kp = _safe_float(pid.get("kp"))
+        ki = _safe_float(pid.get("ki"))
+        kd = _safe_float(pid.get("kd"))
+        partial: Dict[str, float] = {}
+        if kp is not None:
+            partial["kp"] = kp
+        if ki is not None:
+            partial["ki"] = ki
+        if kd is not None:
+            partial["kd"] = kd
+        if partial:
+            out["pid"] = partial
+    motion = raw.get("motion")
+    if isinstance(motion, dict):
+        kv = _safe_float(motion.get("kv"))
+        kx = _safe_float(motion.get("kx"))
+        partial_m: Dict[str, float] = {}
+        if kv is not None:
+            partial_m["kv"] = kv
+        if kx is not None:
+            partial_m["kx"] = kx
+        if partial_m:
+            out["motion"] = partial_m
+    setpoint = raw.get("setpoint")
+    if isinstance(setpoint, dict):
+        deg = _safe_float(setpoint.get("deg"))
+        if deg is not None:
+            out["setpoint"] = {"deg": deg}
+    else:
+        deg = _safe_float(setpoint)
+        if deg is not None:
+            out["setpoint"] = {"deg": deg}
+    limits = raw.get("limits")
+    if isinstance(limits, dict):
+        out_max = _safe_float(limits.get("out_max"))
+        tip_deg = _safe_float(limits.get("tip_deg"))
+        i_max = _safe_float(limits.get("i_max"))
+        partial_l: Dict[str, float] = {}
+        if out_max is not None:
+            partial_l["out_max"] = out_max
+        if tip_deg is not None:
+            partial_l["tip_deg"] = tip_deg
+        if i_max is not None:
+            partial_l["i_max"] = i_max
+        if partial_l:
+            out["limits"] = partial_l
+    unified = raw.get("unified")
+    if isinstance(unified, dict):
+        profile = unified.get("profile")
+        sketch_name = unified.get("sketch_name")
+        if isinstance(profile, dict):
+            part_u: Dict[str, Any] = {"profile": profile}
+            if isinstance(sketch_name, str) and sketch_name.strip():
+                part_u["sketch_name"] = sketch_name.strip()
+            out["unified"] = part_u
+    sketch = raw.get("sketch")
+    if isinstance(sketch, dict):
+        content = sketch.get("content")
+        path = sketch.get("path")
+        if isinstance(content, str) and content.strip():
+            part_s: Dict[str, Any] = {"content": content}
+            if isinstance(path, str) and path.strip():
+                part_s["path"] = path.strip()
+            out["sketch"] = part_s
+    return out
