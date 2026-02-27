@@ -58,9 +58,7 @@ try:
 except ImportError:
     from domains.firmware_lifecycle.firmware_manager import FirmwareManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.mission_memory import (
-        MissionMemoryStore,
-    )
+    from app.bridge.domains.session_traceability.mission_memory import MissionMemoryStore
 except ImportError:
     from domains.session_traceability.mission_memory import MissionMemoryStore  # type: ignore
 try:
@@ -68,35 +66,23 @@ try:
 except ImportError:
     from domains.session_traceability.design_memory import DesignMemoryStore  # type: ignore
 try:
-    from app.bridge.domains.hardware_profile.hardware_context import (
-        HardwareContextStore,
-    )
+    from app.bridge.domains.hardware_profile.hardware_context import HardwareContextStore
 except ImportError:
     from domains.hardware_profile.hardware_context import HardwareContextStore  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.setup_attempt_history import (
-        SetupAttemptHistoryStore,
-    )
+    from app.bridge.domains.session_traceability.setup_attempt_history import SetupAttemptHistoryStore
 except ImportError:
-    from domains.session_traceability.setup_attempt_history import (
-        SetupAttemptHistoryStore,
-    )  # type: ignore
+    from domains.session_traceability.setup_attempt_history import SetupAttemptHistoryStore  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.config_history_manager import (
-        ConfigHistoryManager,
-    )
+    from app.bridge.domains.session_traceability.config_history_manager import ConfigHistoryManager
 except ImportError:
     from domains.session_traceability.config_history_manager import ConfigHistoryManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.ai_profile_manager import (
-        AIProfileManager,
-    )
+    from app.bridge.domains.session_traceability.ai_profile_manager import AIProfileManager
 except ImportError:
     from domains.session_traceability.ai_profile_manager import AIProfileManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.assistant_knowledge import (
-        AssistantKnowledgeManager,
-    )
+    from app.bridge.domains.session_traceability.assistant_knowledge import AssistantKnowledgeManager
 except ImportError:
     from domains.session_traceability.assistant_knowledge import (
         AssistantKnowledgeManager,
