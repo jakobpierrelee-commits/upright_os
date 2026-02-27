@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `87feaa4`
+**SHA:** `1dccc42`
 
 ### Strategic Pivot
 
@@ -26,15 +26,20 @@ This session pivoted from incremental extraction to a **Hybrid Rebuild** strateg
 - Consolidated agent modes to single `robot_dev` mode in `agent_helpers.py`
 - **server.py: 6,380 → 5,511 lines (-869 lines, 14% reduction)**
 
-**Phase 2a — Extract /agent/chat handler: ✅ COMPLETE**
-- Extracted `handle_agent_chat_post` (235 lines) to `routes_ai.py`
-- **server.py: 5,514 → 5,312 lines (-202 lines)**
-- routes_ai.py: 571 → 802 lines (+231 lines)
+**Phase 2 — Extract Services: ✅ 8 BATCHES COMPLETE**
+- **2a:** `/agent/chat` handler → routes_ai.py (-202 lines)
+- **2b:** `/design-memory/report-success` → routes_design.py (-42 lines)
+- **2c:** `/v1/setup/*` (3 handlers) → routes_probe.py (-94 lines)
+- **2d:** `/pid`, `/motion`, `/setpoint` → routes_tuning.py (-64 lines)
+- **2e:** `/limits` → routes_tuning.py (-32 lines)
+- **2f:** `/agent/clean/firmware/release-serial` → routes_firmware.py (-42 lines)
+- **2g:** `/agent/clean/preflight` → routes_ai.py (-21 lines)
+- **Total extraction: -497 lines from server.py**
 
-**Phase 2b — Remaining Extractions: DEFERRED**
-- `/agent/chat/stream` (253 lines) - streaming handler, tightly coupled to HTTP response
-- Large helper functions (~2,000 lines) - requires careful dependency management
-- Route count: 102 (down from 124)
+**Remaining large handlers (deferred):**
+- `/agent/chat/stream` (253 lines) - streaming, tightly coupled to HTTP response
+- `/agent/clean/chat/stream` (54 lines) - streaming
+- `/agent/clean/preflight/stream` (55 lines) - streaming
 
 ### Files Changed
 - `docs/PRODUCT_VISION_V1.md` — NEW (vision document)
@@ -51,12 +56,16 @@ python3 -m py_compile app/bridge/agent_helpers.py  → PASS
 ```
 
 ### Current Metrics
-| Metric | Before Session | After Session | Target |
+| Metric | Before Session | After Session | Change |
 |--------|----------------|---------------|--------|
-| server.py | 6,380 | 5,312 | ~500 |
-| Routes | 124 | 102 | ~20 |
-| Agent modes | 4+ | 1 | 1 |
-| routes_ai.py | 571 | 802 | N/A |
+| **server.py** | 6,380 | **5,023** | **-1,357 lines (21%)** |
+| Routes | 124 | 102 | -22 routes |
+| Agent modes | 4+ | 1 | Consolidated |
+| routes_ai.py | 571 | 865 | +294 lines |
+| routes_tuning.py | 424 | 600 | +176 lines |
+| routes_probe.py | 105 | 248 | +143 lines |
+| routes_design.py | 103 | 155 | +52 lines |
+| routes_firmware.py | 332 | 375 | +43 lines |
 
 ### Next Recommended Tasks (Priority Order)
 1. **Continue route deletions** — Remove `/commissioning/*` (4 routes), `/v1/setup/*` (4 routes) if not needed
