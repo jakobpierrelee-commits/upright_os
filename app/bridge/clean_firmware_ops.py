@@ -630,3 +630,35 @@ def summarize_sketch_artifact_issues(tool_calls: Any) -> str:
     if not lines:
         return ""
     return "\n".join(lines[:3])
+
+
+def summarize_tool_failures(tool_calls: Any) -> str:
+    """Return a concise deterministic failure summary from tool call results."""
+    if not isinstance(tool_calls, list):
+        return ""
+    lines: list[str] = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        tool = str(tc.get("tool", "")).strip() or "unknown_tool"
+        result = tc.get("result", {})
+        ok = bool(result.get("ok")) if isinstance(result, dict) else False
+        if ok:
+            continue
+        err = ""
+        if isinstance(result, dict):
+            err = str(result.get("error") or "").strip()
+        if not err:
+            err = "tool_failed_without_error_detail"
+
+        if tool == "generate_sketch" and "invalid_unified_profile" in err:
+            details = err.split("invalid_unified_profile:", 1)[-1].strip()
+            lines.append(
+                f"generate_sketch failed: missing/invalid profile fields ({details})."
+            )
+        else:
+            lines.append(f"{tool} failed: {err}.")
+
+    if not lines:
+        return ""
+    return "\n".join(f"- {line}" for line in lines[:3])
