@@ -1748,25 +1748,12 @@ def main() -> int:
     prearm_safety = PreArmSafetyGate(required=True)
     telemetry = TelemetryHub()
 
-    if startup_serial_error:
-        print(
-            f"bridge started without serial target: {args.port} @ {args.baud} ({startup_serial_error})"
-        )
-    else:
-        print(f"bridge serial opened: {args.port} @ {args.baud}")
-    print(
-        f"telemetry websocket: ws://{args.host}:{args.telemetry_port}/telemetry enabled={websockets is not None}"
-    )
+    print(f"bridge started without serial target: {args.port} @ {args.baud} ({startup_serial_error})" if startup_serial_error else f"bridge serial opened: {args.port} @ {args.baud}")
+    print(f"telemetry websocket: ws://{args.host}:{args.telemetry_port}/telemetry enabled={websockets is not None}")
 
     stop_evt = threading.Event()
-    wd = threading.Thread(
-        target=watchdog_loop, args=(gw, control, stop_evt), daemon=True
-    )
-    wd.start()
-    reconn = threading.Thread(
-        target=serial_reconnect_loop, args=(gw, firmware, stop_evt), daemon=True
-    )
-    reconn.start()
+    threading.Thread(target=watchdog_loop, args=(gw, control, stop_evt), daemon=True).start()
+    threading.Thread(target=serial_reconnect_loop, args=(gw, firmware, stop_evt), daemon=True).start()
 
     server = ThreadingHTTPServer(
         (args.host, args.http_port),
