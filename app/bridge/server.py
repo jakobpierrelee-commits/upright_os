@@ -1663,15 +1663,7 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/config/revert":
-                    code, payload = handle_config_revert(
-                        body=body,
-                        revert_snapshot_fn=lambda snapshot_id: revert_snapshot(
-                            gateway, config_history, snapshot_id=snapshot_id
-                        ),
-                        control_snapshot=control.snapshot(),
-                        build_revert_control_payload_fn=build_revert_control_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_config_revert(body=body, revert_snapshot_fn=lambda snapshot_id: revert_snapshot(gateway, config_history, snapshot_id=snapshot_id), control_snapshot=control.snapshot(), build_revert_control_payload_fn=build_revert_control_payload))
 
                 # File upload routes (identical handlers)
                 if u.path in {"/agent/file/upload", "/agent/clean/file/upload"}:
@@ -1687,50 +1679,19 @@ def build_handler(
                     return _json(self, *handle_clean_firmware_upload(firmware=firmware, gateway=gateway, prearm_safety=prearm_safety, sketch=_sketch, fqbn=_fqbn, port=inputs.get("port"), idempotency_key=_idem, tool_call_builder=_clean_tool_call))
 
                 if u.path == "/agent/clean/firmware/upload/precheck":
-                    requested_port = str(body.get("port", "")).strip()
-                    requested_fqbn = (
-                        str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
-                    )
-                    requested_sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    code, payload = handle_clean_upload_precheck(
-                        precheck_builder=lambda **kwargs: build_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs
-                        ),
-                        requested_port=requested_port,
-                        requested_fqbn=requested_fqbn,
-                        requested_sketch=requested_sketch,
-                    )
-                    return _json(self, code, payload)
+                    _port, _fqbn = str(body.get("port", "")).strip(), str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    _sketch = str(body.get("sketch", "")).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    _precheck = lambda **kwargs: build_upload_precheck_payload(gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs)
+                    return _json(self, *handle_clean_upload_precheck(precheck_builder=_precheck, requested_port=_port, requested_fqbn=_fqbn, requested_sketch=_sketch))
 
                 if u.path == "/agent/clean/firmware/release-serial":
                     return _json(self, *handle_release_serial_post(body=body, repo_root=repo_root, build_port_released_payload_fn=build_port_released_payload))
 
                 if u.path == "/agent/clean/recovery/known-good":
-                    requested_port = str(body.get("port", "")).strip()
-                    requested_fqbn = (
-                        str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
-                    )
-                    requested_sketch = str(
-                        body.get("sketch", "")
-                    ).strip() or _clean_default_sketch_path(repo_root, firmware)
-                    code, payload = handle_clean_known_good_recovery(
-                        gateway=gateway,
-                        firmware=firmware,
-                        control=control,
-                        prearm_safety=prearm_safety,
-                        requested_port=requested_port,
-                        requested_fqbn=requested_fqbn,
-                        requested_sketch=requested_sketch,
-                        precheck_builder=lambda **kwargs: build_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs
-                        ),
-                        normalize_status=_normalize_status_for_hud,
-                        resolve_action_gates=_resolve_action_gates,
-                        tool_call_builder=_clean_tool_call,
-                    )
-                    return _json(self, code, payload)
+                    _port, _fqbn = str(body.get("port", "")).strip(), str(body.get("fqbn", "")).strip() or _clean_default_fqbn()
+                    _sketch = str(body.get("sketch", "")).strip() or _clean_default_sketch_path(repo_root, firmware)
+                    _precheck = lambda **kwargs: build_upload_precheck_payload(gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs)
+                    return _json(self, *handle_clean_known_good_recovery(gateway=gateway, firmware=firmware, control=control, prearm_safety=prearm_safety, requested_port=_port, requested_fqbn=_fqbn, requested_sketch=_sketch, precheck_builder=_precheck, normalize_status=_normalize_status_for_hud, resolve_action_gates=_resolve_action_gates, tool_call_builder=_clean_tool_call))
 
                 # Clean thread routes
                 if u.path in {"/agent/clean/thread/new", "/agent/clean/thread/select"}:
