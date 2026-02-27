@@ -478,6 +478,7 @@ try:
         handle_session_heartbeat,
         handle_setup_attempt_history_get,
         handle_agent_chat_post,
+        handle_clean_preflight_post,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -500,6 +501,7 @@ except ImportError:
         handle_session_heartbeat,
         handle_setup_attempt_history_get,
         handle_agent_chat_post,
+        handle_clean_preflight_post,
     )
 try:
     from app.bridge.routes_auth import (
@@ -4054,49 +4056,27 @@ def build_handler(
                     return
 
                 if u.path == "/agent/clean/preflight":
-                    codex_login = _codex_cli_login_status()
-                    err, req = parse_clean_preflight_request(
+                    code, payload = handle_clean_preflight_post(
                         body=body,
-                        codex_login=codex_login,
-                        env_model=str(
-                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ),
-                        env_timeout=str(
-                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
-                        ),
-                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
-                    )
-                    if err is not None:
-                        code, payload = err
-                        return _json(self, code, payload)
-                    assert req is not None
-                    manifest_gate, compat_gate, active_profile_id = (
-                        resolve_manifest_gates(
-                            firmware=firmware,
-                            profiles=profiles,
-                            compatibility_fn=_runtime_manifest_profile_compatibility,
-                            sketch=str(req["sketch"]),
-                        )
-                    )
-                    payload = run_clean_preflight(
-                        mode=str(req["mode"]),
-                        max_ms=int(req["max_ms"]),
-                        max_ms_tools=int(req["max_ms_tools"]),
-                        gate_only=bool(req["gate_only"]),
-                        with_compile=bool(req["with_compile"]),
-                        model=str(req["model"]),
-                        clean_timeout_s=int(req["clean_timeout_s"]),
-                        manifest_gate=manifest_gate,
-                        compat_gate=compat_gate,
-                        active_profile_id=active_profile_id,
                         ai=ai,
-                        run_auto_tools=_run_clean_auto_tools,
-                        build_context=_build_clean_agent_context,
-                        system_prompt_for_mode=_clean_system_prompt,
-                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
-                        validate_preflight_payload=validate_clean_preflight_response,
+                        firmware=firmware,
+                        profiles=profiles,
+                        repo_root=repo_root,
+                        codex_cli_login_status_fn=_codex_cli_login_status,
+                        parse_clean_preflight_request_fn=parse_clean_preflight_request,
+                        clean_default_sketch_path_fn=_clean_default_sketch_path,
+                        resolve_manifest_gates_fn=resolve_manifest_gates,
+                        runtime_manifest_profile_compatibility_fn=_runtime_manifest_profile_compatibility,
+                        run_clean_preflight_fn=run_clean_preflight,
+                        run_clean_auto_tools_fn=_run_clean_auto_tools,
+                        build_clean_agent_context_fn=_build_clean_agent_context,
+                        clean_system_prompt_fn=_clean_system_prompt,
+                        normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
+                        validate_clean_preflight_response_fn=validate_clean_preflight_response,
+                        env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
+                        env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")),
                     )
-                    return _json(self, 200, payload)
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/preflight/stream":
                     codex_login = _codex_cli_login_status()

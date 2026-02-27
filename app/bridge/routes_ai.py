@@ -800,3 +800,65 @@ def handle_agent_chat_post(
         provider="openai",
         executor="openai_chat",
     )
+
+
+def handle_clean_preflight_post(
+    *,
+    body: Dict[str, Any],
+    ai: Any,
+    firmware: Any,
+    profiles: Any,
+    repo_root: Any,
+    codex_cli_login_status_fn: Callable,
+    parse_clean_preflight_request_fn: Callable,
+    clean_default_sketch_path_fn: Callable,
+    resolve_manifest_gates_fn: Callable,
+    runtime_manifest_profile_compatibility_fn: Callable,
+    run_clean_preflight_fn: Callable,
+    run_clean_auto_tools_fn: Callable,
+    build_clean_agent_context_fn: Callable,
+    clean_system_prompt_fn: Callable,
+    normalize_reply_for_prompt_fn: Callable,
+    validate_clean_preflight_response_fn: Callable,
+    env_clean_model: str,
+    env_clean_timeout: str,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /agent/clean/preflight POST request."""
+    import os
+    codex_login = codex_cli_login_status_fn()
+    err, req = parse_clean_preflight_request_fn(
+        body=body,
+        codex_login=codex_login,
+        env_model=env_clean_model,
+        env_timeout=env_clean_timeout,
+        default_sketch=clean_default_sketch_path_fn(repo_root, firmware),
+    )
+    if err is not None:
+        code, payload = err
+        return code, payload
+    assert req is not None
+    manifest_gate, compat_gate, active_profile_id = resolve_manifest_gates_fn(
+        firmware=firmware,
+        profiles=profiles,
+        compatibility_fn=runtime_manifest_profile_compatibility_fn,
+        sketch=str(req["sketch"]),
+    )
+    payload = run_clean_preflight_fn(
+        mode=str(req["mode"]),
+        max_ms=int(req["max_ms"]),
+        max_ms_tools=int(req["max_ms_tools"]),
+        gate_only=bool(req["gate_only"]),
+        with_compile=bool(req["with_compile"]),
+        model=str(req["model"]),
+        clean_timeout_s=int(req["clean_timeout_s"]),
+        manifest_gate=manifest_gate,
+        compat_gate=compat_gate,
+        active_profile_id=active_profile_id,
+        ai=ai,
+        run_auto_tools=run_clean_auto_tools_fn,
+        build_context=build_clean_agent_context_fn,
+        system_prompt_for_mode=clean_system_prompt_fn,
+        normalize_reply_for_prompt=normalize_reply_for_prompt_fn,
+        validate_preflight_payload=validate_clean_preflight_response_fn,
+    )
+    return 200, payload
