@@ -1724,25 +1724,7 @@ def build_handler(
                     send_evt = make_sse_emitter(wfile=self.wfile)
 
                     send_evt("start", {"ok": True, "mode": str(req["mode"])})
-                    run_clean_preflight(
-                        mode=str(req["mode"]),
-                        max_ms=int(req["max_ms"]),
-                        max_ms_tools=int(req["max_ms_tools"]),
-                        gate_only=bool(req["gate_only"]),
-                        with_compile=bool(req["with_compile"]),
-                        model=str(req["model"]),
-                        clean_timeout_s=int(req["clean_timeout_s"]),
-                        manifest_gate=manifest_gate,
-                        compat_gate=compat_gate,
-                        active_profile_id=active_profile_id,
-                        ai=ai,
-                        run_auto_tools=_run_clean_auto_tools,
-                        build_context=_build_clean_agent_context,
-                        system_prompt_for_mode=_clean_system_prompt,
-                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
-                        validate_preflight_payload=validate_clean_preflight_response,
-                        emit=send_evt,
-                    )
+                    run_clean_preflight(mode=str(req["mode"]), max_ms=int(req["max_ms"]), max_ms_tools=int(req["max_ms_tools"]), gate_only=bool(req["gate_only"]), with_compile=bool(req["with_compile"]), model=str(req["model"]), clean_timeout_s=int(req["clean_timeout_s"]), manifest_gate=manifest_gate, compat_gate=compat_gate, active_profile_id=active_profile_id, ai=ai, run_auto_tools=_run_clean_auto_tools, build_context=_build_clean_agent_context, system_prompt_for_mode=_clean_system_prompt, normalize_reply_for_prompt=_normalize_reply_for_prompt, validate_preflight_payload=validate_clean_preflight_response, emit=send_evt)
                     return
 
                 # Agent mode/thread routes
