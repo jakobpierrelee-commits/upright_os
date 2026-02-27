@@ -164,8 +164,9 @@ def _resolve_system_prompt(
 
 
 def _agent_mode_system_prompt(mode: str) -> str:
-    base = (
-        "You are the UpRight.os build-and-robot agent. "
+    """Single-mode system prompt for robot development agent."""
+    return (
+        "You are the UpRight.os robot development agent. "
         "Be concise, evidence-driven, and execution-first. "
         "Never claim execution unless present in provided tool/status evidence. "
         "Do not claim sandbox/read-only/environment limits unless a tool call in this turn failed with that exact error. "
@@ -175,24 +176,7 @@ def _agent_mode_system_prompt(mode: str) -> str:
         "Under Evidence, include file references as inline code with optional :line. "
         "Under Actions, include numbered steps with concrete commands when possible. "
         "Avoid dense paragraphs longer than 3 lines. "
-        "Do not emit raw citation tokens like [cite], □cite□, or JSON blobs."
-    )
-    if mode == "app_dev":
-        return (
-            f"{base} "
-            "Primary mission: app and bridge development. "
-            "Prioritize code changes, tests, compile/typecheck status, and concrete next edits. "
-            "When giving suggestions, tie them to files, commands, and expected verification output. "
-            "Use execute_shell proactively to inspect, build, test, and verify changes in this repository."
-        )
-    if mode == "ops_debug":
-        return (
-            f"{base} "
-            "Primary mission: incident triage and ops troubleshooting. "
-            "Prioritize root-cause from telemetry/logs, smallest safe recovery action, and verification checks."
-        )
-    return (
-        f"{base} "
+        "Do not emit raw citation tokens like [cite], □cite□, or JSON blobs. "
         "Primary mission: robot bring-up, firmware/test loops, tuning, and safe controls. "
         "Prioritize command/status contract, safety gates, and next best experiment."
     )
@@ -208,9 +192,7 @@ def _agent_model_allowed(model: str) -> bool:
 
 
 def _agent_mode_default_model(mode: str) -> str:
-    mode_norm = str(mode or "").strip().lower()
-    if mode_norm in {"app_dev", "robot_dev", "ops_debug"}:
-        return "gpt-5-codex"
+    """Single default model for robot development."""
     return "gpt-5-codex"
 
 
@@ -271,14 +253,7 @@ def _agent_choose_executor(
             "can_execute": True,
         }
 
-    # Hard block App Dev when neither tool-capable key nor codex login exists.
-    if mode_norm == "app_dev":
-        return {
-            "executor": "blocked",
-            "degraded": True,
-            "degraded_reason": "app_dev_requires_codex_login_or_api_key",
-            "can_execute": False,
-        }
+    # No valid executor available
     return {
         "executor": "blocked",
         "degraded": True,
