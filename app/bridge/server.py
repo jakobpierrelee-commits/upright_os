@@ -1728,31 +1728,14 @@ def main() -> int:
     agent_mission = AgentMissionManager(repo_root)
     provider_router = ProviderRouter(repo_root)
 
-    # Initialize CodexAgent for tool-enabled chat (optional - gracefully degrades if unavailable)
     codex_agent: Optional[Any] = None
     if create_codex_agent is not None:
         try:
-            codex_agent = create_codex_agent(
-                gateway=gw,
-                firmware_module=firmware,
-                probe_funcs={
-                    "run_compat_probe": run_compat_probe,
-                    "run_connect_probe": run_connect_probe,
-                },
-                repo_root=str(repo_root),
-                host_capture=host_capture,
-            )
+            codex_agent = create_codex_agent(gateway=gw, firmware_module=firmware, probe_funcs={"run_compat_probe": run_compat_probe, "run_connect_probe": run_connect_probe}, repo_root=str(repo_root), host_capture=host_capture)
             print("codex agent initialized with tool support")
-            # Kick off background RAG indexing (non-blocking)
             startup_openai_key = os.environ.get("OPENAI_API_KEY")
             if startup_openai_key:
-                rag_thread = threading.Thread(
-                    target=_startup_rag_indexing,
-                    args=(startup_openai_key,),
-                    daemon=True,
-                    name="startup-rag-indexing",
-                )
-                rag_thread.start()
+                threading.Thread(target=_startup_rag_indexing, args=(startup_openai_key,), daemon=True, name="startup-rag-indexing").start()
                 print("background RAG indexing started")
         except Exception as exc:
             print(f"codex agent init failed (tool support disabled): {exc}")
