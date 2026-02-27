@@ -531,6 +531,8 @@ try:
         format_hardware_context_notice,
         attachment_kind,
         startup_rag_indexing,
+        needs_ide_disambiguation,
+        ide_disambiguation_reply,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -562,6 +564,8 @@ except ImportError:
         format_hardware_context_notice,
         attachment_kind,
         startup_rag_indexing,
+        needs_ide_disambiguation,
+        ide_disambiguation_reply,
     )
 try:
     from app.bridge.routes_auth import (
@@ -1015,28 +1019,7 @@ def _clean_default_fqbn() -> str:
 # _summarize_sketch_artifact_issues moved to clean_firmware_ops.py as summarize_sketch_artifact_issues
 
 
-def _needs_ide_disambiguation(
-    user_msg: str, mission_facts: Optional[Dict[str, str]]
-) -> bool:
-    low = user_msg.lower()
-    if "ide" not in low:
-        return False
-    facts = mission_facts or {}
-    if str(facts.get("ide_term_meaning", "")).strip():
-        return False
-    asked = str(facts.get("ide_disambiguation_asked", "")).strip().lower()
-    if asked in {"1", "true", "yes"}:
-        return False
-    return True
-
-
-def _ide_disambiguation_reply() -> str:
-    return (
-        "Quick clarifier before I proceed: when you say IDE, do you mean "
-        "the external Arduino IDE, or the in-app CLI workbench in UpRight.os?"
-    )
-
-
+# _needs_ide_disambiguation, _ide_disambiguation_reply moved to routes_ai.py
 # _hardware_context_board_label, _format_hardware_context_notice moved to routes_ai.py
 # _pin_range_for_family already imported from manifest_validation.py
 # _family_capabilities, _protocol_schema, _has_valid_pin, _validate_protocol_pins

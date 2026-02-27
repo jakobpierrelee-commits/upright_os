@@ -1168,3 +1168,27 @@ def startup_rag_indexing(
         )
     except Exception as exc:
         logger.warning(f"Background RAG indexing failed (non-fatal): {exc}")
+
+
+def needs_ide_disambiguation(
+    user_msg: str, mission_facts: Optional[Dict[str, str]]
+) -> bool:
+    """Check if user message needs IDE term disambiguation."""
+    low = user_msg.lower()
+    if "ide" not in low:
+        return False
+    facts = mission_facts or {}
+    if str(facts.get("ide_term_meaning", "")).strip():
+        return False
+    asked = str(facts.get("ide_disambiguation_asked", "")).strip().lower()
+    if asked in {"1", "true", "yes"}:
+        return False
+    return True
+
+
+def ide_disambiguation_reply() -> str:
+    """Return the IDE disambiguation question."""
+    return (
+        "Quick clarifier before I proceed: when you say IDE, do you mean "
+        "the external Arduino IDE, or the in-app CLI workbench in UpRight.os?"
+    )
