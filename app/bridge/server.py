@@ -1742,63 +1742,26 @@ def build_handler(
                 body = _read_json(self)
 
 
-                if u.path == "/auth/openai-key":
+                # Auth routes requiring authentication
+                if u.path in {"/auth/openai-key", "/auth/openai-key/delete"}:
                     tok = _extract_auth_token(self, body)
                     me = auth.me(tok)
                     if not me:
-                        return _json(
-                            self, 401, {"ok": False, "error": "unauthenticated"}
-                        )
-                    code, payload = handle_auth_openai_key_set(
-                        body=body, me=me, auth=auth
-                    )
-                    return _json(self, code, payload)
+                        return _json(self, 401, {"ok": False, "error": "unauthenticated"})
+                    if u.path == "/auth/openai-key":
+                        return _json(self, *handle_auth_openai_key_set(body=body, me=me, auth=auth))
+                    return _json(self, *handle_auth_openai_key_delete(me=me, auth=auth))
 
-                if u.path == "/auth/openai-key/delete":
-                    tok = _extract_auth_token(self, body)
-                    me = auth.me(tok)
-                    if not me:
-                        return _json(
-                            self, 401, {"ok": False, "error": "unauthenticated"}
-                        )
-                    code, payload = handle_auth_openai_key_delete(me=me, auth=auth)
-                    return _json(self, code, payload)
-
-                if u.path == "/session/heartbeat":
-                    code, payload = handle_session_heartbeat(
-                        control=control,
-                        build_session_heartbeat_payload_fn=build_session_heartbeat_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/design-memory/report-success":
-                    code, payload = handle_design_memory_report_success(
-                        body=body,
-                        firmware=firmware,
-                        design_memory=design_memory,
-                        current_runtime_identity_fn=_current_runtime_identity,
-                        current_sketch_hash_fn=_current_sketch_hash,
-                        design_evidence_snapshot_fn=_design_evidence_snapshot,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/design-memory/rate":
-                    code, payload = handle_design_memory_rate(
-                        body=body,
-                        design_memory=design_memory,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/commissioning/run":
-                    code, payload = handle_commissioning_run(
-                        body=body,
-                        gateway=gateway,
-                        commissioning=commissioning,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/commissioning/step":
-                    code, payload = handle_commissioning_step()
+                # Simple POST routes dispatch
+                _simple_routes = {
+                    "/session/heartbeat": lambda: handle_session_heartbeat(control=control, build_session_heartbeat_payload_fn=build_session_heartbeat_payload),
+                    "/design-memory/report-success": lambda: handle_design_memory_report_success(body=body, firmware=firmware, design_memory=design_memory, current_runtime_identity_fn=_current_runtime_identity, current_sketch_hash_fn=_current_sketch_hash, design_evidence_snapshot_fn=_design_evidence_snapshot),
+                    "/design-memory/rate": lambda: handle_design_memory_rate(body=body, design_memory=design_memory),
+                    "/commissioning/run": lambda: handle_commissioning_run(body=body, gateway=gateway, commissioning=commissioning),
+                    "/commissioning/step": lambda: handle_commissioning_step(),
+                }
+                if u.path in _simple_routes:
+                    code, payload = _simple_routes[u.path]()
                     return _json(self, code, payload)
 
                 # Firmware routes dispatch
