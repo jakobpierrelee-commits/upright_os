@@ -563,3 +563,70 @@ def build_upload_precheck_payload(
         "manifest_validation": manifest_gate,
         "target_runbook": runbook,
     }
+
+
+def summarize_sketch_artifact_issues(tool_calls: Any) -> str:
+    """Validate successful sketch tool outputs still point to non-empty on-disk files."""
+    import pathlib
+
+    if not isinstance(tool_calls, list):
+        return ""
+    lines: list[str] = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        tool = str(tc.get("tool", "")).strip()
+        result = tc.get("result", {})
+        ok = bool(result.get("ok")) if isinstance(result, dict) else False
+        if not ok:
+            continue
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+        if not isinstance(data, dict):
+            continue
+
+        if tool == "generate_sketch":
+            path = str(data.get("main_file", "")).strip()
+            if not path:
+                lines.append(
+                    "- generate_sketch failed post-check: missing main_file in tool result."
+                )
+                continue
+            p = pathlib.Path(path)
+            if not p.exists() or not p.is_file():
+                lines.append(
+                    f"- generate_sketch failed post-check: main_file not found ({path})."
+                )
+                continue
+            try:
+                if p.stat().st_size <= 0:
+                    lines.append(
+                        f"- generate_sketch failed post-check: main_file is empty ({path})."
+                    )
+            except OSError:
+                lines.append(
+                    f"- generate_sketch failed post-check: unable to read main_file size ({path})."
+                )
+
+        if tool == "edit_sketch_value":
+            path = str(data.get("file", "")).strip()
+            if not path:
+                continue
+            p = pathlib.Path(path)
+            if not p.exists() or not p.is_file():
+                lines.append(
+                    f"- edit_sketch_value failed post-check: edited file not found ({path})."
+                )
+                continue
+            try:
+                if p.stat().st_size <= 0:
+                    lines.append(
+                        f"- edit_sketch_value failed post-check: edited file is empty ({path})."
+                    )
+            except OSError:
+                lines.append(
+                    f"- edit_sketch_value failed post-check: unable to read edited file size ({path})."
+                )
+
+    if not lines:
+        return ""
+    return "\n".join(lines[:3])
