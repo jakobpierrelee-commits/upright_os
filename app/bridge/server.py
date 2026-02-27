@@ -1586,26 +1586,13 @@ def build_handler(
                     return _json(self, *handle_firmware_boards_get(firmware=firmware))
                 if u.path == "/firmware/targets":
                     return _json(self, *handle_firmware_targets_get(firmware=firmware))
+                # Firmware manifest/folders routes
                 if u.path == "/firmware/runtime-manifest/validate":
-                    q = parse_qs(u.query)
-                    code, payload = handle_firmware_runtime_manifest_validate_get(
-                        firmware=firmware, query=q
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_runtime_manifest_validate_get(firmware=firmware, query=parse_qs(u.query)))
                 if u.path == "/firmware/runtime-manifest/compat":
-                    q = parse_qs(u.query)
-                    code, payload = handle_firmware_runtime_manifest_compat_get(
-                        firmware=firmware,
-                        profiles=profiles,
-                        query=q,
-                        compatibility_fn=_runtime_manifest_profile_compatibility,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_runtime_manifest_compat_get(firmware=firmware, profiles=profiles, query=parse_qs(u.query), compatibility_fn=_runtime_manifest_profile_compatibility))
                 if u.path == "/firmware/sketch-folders":
-                    code, payload = handle_firmware_sketch_folders_get(
-                        firmware=firmware
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_sketch_folders_get(firmware=firmware))
                 if u.path == "/probe/compat":
                     q = parse_qs(u.query)
                     code, payload = handle_probe_compat_get(
