@@ -1470,67 +1470,21 @@ def build_handler(
         def do_GET(self) -> None:
             try:
                 u = urlparse(self.path)
-                if u.path == "/health":
-                    code, payload = handle_health(
-                        gateway=gateway,
-                        control=control,
-                        prearm_safety=prearm_safety,
-                        telemetry_port=telemetry_port,
-                        telemetry_enabled=websockets is not None,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/status":
-                    code, payload = handle_status(
-                        gateway=gateway,
-                        control=control,
-                        prearm_safety=prearm_safety,
-                        normalize_status_fn=_normalize_status_for_hud,
-                        resolve_action_gates_fn=_resolve_action_gates,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/telemetry/adapter-map":
-                    code, payload = handle_telemetry_adapter_map_get(
-                        gateway=gateway,
-                        normalize_status_fn=_normalize_status_for_hud,
-                        build_telemetry_adapters_payload_fn=build_telemetry_adapters_payload,
-                        runtime_telemetry_adapters=RUNTIME_TELEMETRY_ADAPTERS,
-                        hud_canonical_fields=list(HUD_CANONICAL_FIELDS),
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/diag/serial":
-                    code, payload = handle_diag_serial_get(
-                        gateway=gateway,
-                        control=control,
-                        build_diag_serial_payload_fn=build_diag_serial_payload,
-                    )
-                    return _json(self, code, payload)
+                # Core GET routes dispatch
+                _core_get = {
+                    "/health": lambda: handle_health(gateway=gateway, control=control, prearm_safety=prearm_safety, telemetry_port=telemetry_port, telemetry_enabled=websockets is not None),
+                    "/status": lambda: handle_status(gateway=gateway, control=control, prearm_safety=prearm_safety, normalize_status_fn=_normalize_status_for_hud, resolve_action_gates_fn=_resolve_action_gates),
+                    "/telemetry/adapter-map": lambda: handle_telemetry_adapter_map_get(gateway=gateway, normalize_status_fn=_normalize_status_for_hud, build_telemetry_adapters_payload_fn=build_telemetry_adapters_payload, runtime_telemetry_adapters=RUNTIME_TELEMETRY_ADAPTERS, hud_canonical_fields=list(HUD_CANONICAL_FIELDS)),
+                    "/diag/serial": lambda: handle_diag_serial_get(gateway=gateway, control=control, build_diag_serial_payload_fn=build_diag_serial_payload),
+                    "/burst/status": lambda: handle_burst_status_get(burst_status_fn=burst_status, build_burst_status_payload_fn=build_burst_status_payload),
+                    "/commissioning/status": lambda: handle_commissioning_status_get(commissioning=commissioning, build_commissioning_status_payload_fn=build_commissioning_status_payload),
+                    "/commissioning/artifacts": lambda: handle_commissioning_artifacts_get(commissioning=commissioning, build_commissioning_artifacts_payload_fn=build_commissioning_artifacts_payload),
+                }
+                if u.path in _core_get:
+                    return _json(self, *_core_get[u.path]())
                 if u.path == "/lines":
                     q = parse_qs(u.query)
-                    n = int(q.get("n", ["100"])[0])
-                    code, payload = handle_lines_get(
-                        gateway=gateway,
-                        n=n,
-                        build_lines_payload_fn=build_lines_payload,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/burst/status":
-                    code, payload = handle_burst_status_get(
-                        burst_status_fn=burst_status,
-                        build_burst_status_payload_fn=build_burst_status_payload,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/commissioning/status":
-                    code, payload = handle_commissioning_status_get(
-                        commissioning=commissioning,
-                        build_commissioning_status_payload_fn=build_commissioning_status_payload,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/commissioning/artifacts":
-                    code, payload = handle_commissioning_artifacts_get(
-                        commissioning=commissioning,
-                        build_commissioning_artifacts_payload_fn=build_commissioning_artifacts_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_lines_get(gateway=gateway, n=int(q.get("n", ["100"])[0]), build_lines_payload_fn=build_lines_payload))
                 # Firmware GET routes dispatch
                 if u.path == "/firmware/status":
                     return _json(self, *handle_firmware_status_get(firmware=firmware))
