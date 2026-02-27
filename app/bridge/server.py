@@ -1017,26 +1017,7 @@ def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
 # _revert_snapshot moved to routes_tuning.py as revert_snapshot
 
 
-def _read_csv_tail(path: pathlib.Path, max_tail: int = 80) -> Dict[str, Any]:
-    total_lines = 0
-    header = ""
-    tail: "collections.deque[str]" = collections.deque(maxlen=max(1, max_tail))
-    with path.open("r", encoding="utf-8", errors="replace") as f:
-        for idx, line in enumerate(f):
-            txt = line.rstrip("\n")
-            if idx == 0:
-                header = txt
-            else:
-                tail.append(txt)
-            total_lines += 1
-    return {
-        "path": str(path),
-        "line_count": total_lines,
-        "header": header,
-        "tail_rows": list(tail),
-    }
-
-
+# _read_csv_tail moved to routes_health.py as read_csv_tail
 # HostCaptureManager moved to domains/tuning_intelligence/host_capture_manager.py
 
 
