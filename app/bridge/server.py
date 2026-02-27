@@ -186,15 +186,9 @@ try:
 except ImportError:
     from routes_tooling import handle_param_sweep, handle_surrogate_simulate, handle_tooling_traces_get, handle_trace_replay  # type: ignore
 try:
-    from app.bridge.routes_commissioning import (
-        handle_commissioning_run,
-        handle_commissioning_step,
-    )
+    from app.bridge.routes_commissioning import handle_commissioning_run, handle_commissioning_step
 except ImportError:
-    from routes_commissioning import (  # type: ignore
-        handle_commissioning_run,
-        handle_commissioning_step,
-    )
+    from routes_commissioning import handle_commissioning_run, handle_commissioning_step  # type: ignore
 try:
     from app.bridge.routes_firmware import (
         handle_firmware_artifacts_get,
