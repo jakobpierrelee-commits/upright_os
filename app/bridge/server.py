@@ -1519,32 +1519,13 @@ def build_handler(
                         build_agent_status_payload_fn=build_agent_status_payload,
                     )
                     return _json(self, code, payload)
+                # Agent clean routes
                 if u.path == "/agent/clean/status":
-                    q = parse_qs(u.query)
-                    code, payload = handle_agent_clean_status_get(
-                        query=q,
-                        gateway=gateway,
-                        control=control,
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        env_model=os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"),
-                        build_clean_status_payload_fn=build_clean_status_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_agent_clean_status_get(query=parse_qs(u.query), gateway=gateway, control=control, codex_cli_login_status_fn=_codex_cli_login_status, env_model=os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"), build_clean_status_payload_fn=build_clean_status_payload))
                 if u.path == "/agent/clean/threads":
                     q = parse_qs(u.query)
-                    mode = (
-                        str((q.get("mode", ["app_dev"]) or ["app_dev"])[0]).strip()
-                        or "app_dev"
-                    )
-                    payload = handle_clean_threads_get(
-                        mode=mode,
-                        ai=ai,
-                        codex_logged_in=bool(
-                            _codex_cli_login_status().get("logged_in", False)
-                        ),
-                        model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
-                    )
-                    return _json(self, 200, payload)
+                    mode = str((q.get("mode", ["app_dev"]) or ["app_dev"])[0]).strip() or "app_dev"
+                    return _json(self, 200, handle_clean_threads_get(mode=mode, ai=ai, codex_logged_in=bool(_codex_cli_login_status().get("logged_in", False)), model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"))))
                 if u.path == "/agent/threads":
                     guard = _legacy_execution_guard(u.path)
                     if guard is not None:
