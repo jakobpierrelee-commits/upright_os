@@ -645,6 +645,8 @@ try:
         handle_setup_smoke_check,
         handle_setup_overwatch_check,
         classify_imu_command_result,
+        normalize_cmd,
+        blocked_while_latched,
     )
 except ImportError:
     from routes_probe import (  # type: ignore
@@ -654,6 +656,8 @@ except ImportError:
         handle_setup_smoke_check,
         handle_setup_overwatch_check,
         classify_imu_command_result,
+        normalize_cmd,
+        blocked_while_latched,
     )
 try:
     from app.bridge.clean_ai import (
@@ -1001,16 +1005,7 @@ except ImportError:
 # TelemetryHub moved to domain module
 # _json, _read_json, _extract_auth_token moved to routes_health.py
 # AuthManager moved to domain module
-def _normalize_cmd(cmd: str) -> str:
-    return " ".join(cmd.strip().split()).upper()
-
-
-def _blocked_while_latched(cmd: str) -> bool:
-    c = _normalize_cmd(cmd)
-    safe_prefixes = ("GET", "DISARM", "HELP", "LOGCSV", "LOGT")
-    return not c.startswith(safe_prefixes)
-
-
+# _normalize_cmd, _blocked_while_latched moved to routes_probe.py
 # _classify_imu_command_result moved to routes_probe.py as classify_imu_command_result
 
 

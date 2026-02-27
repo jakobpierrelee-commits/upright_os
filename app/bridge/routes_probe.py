@@ -292,3 +292,15 @@ def classify_imu_command_result(
         "error": f"imu_{cmd_name.lower()}_failed",
         "detail": imu_line,
     }
+
+
+def normalize_cmd(cmd: str) -> str:
+    """Normalize a command string to uppercase with single spaces."""
+    return " ".join(cmd.strip().split()).upper()
+
+
+def blocked_while_latched(cmd: str) -> bool:
+    """Check if a command should be blocked while in latched state."""
+    c = normalize_cmd(cmd)
+    safe_prefixes = ("GET", "DISARM", "HELP", "LOGCSV", "LOGT")
+    return not c.startswith(safe_prefixes)
