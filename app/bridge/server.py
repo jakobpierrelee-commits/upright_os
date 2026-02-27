@@ -1670,12 +1670,8 @@ def serial_reconnect_loop(
 def main() -> int:
     _install_runtime_diagnostics()
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--port", default=os.environ.get("NANO_PORT", "/dev/tty.usbserial-2210")
-    )
-    ap.add_argument(
-        "--baud", type=int, default=int(os.environ.get("NANO_BAUD", "115200"))
-    )
+    ap.add_argument("--port", default=os.environ.get("NANO_PORT", "/dev/tty.usbserial-2210"))
+    ap.add_argument("--baud", type=int, default=int(os.environ.get("NANO_BAUD", "115200")))
     ap.add_argument("--host", default=os.environ.get("APP_BRIDGE_HOST", "127.0.0.1"))
     ap.add_argument("--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8797")))
     ap.add_argument("--telemetry-port", type=int, default=int(os.environ.get("APP_TELEMETRY_PORT", "8798")))
