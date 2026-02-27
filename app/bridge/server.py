@@ -1500,25 +1500,7 @@ def build_handler(
                     return _json(self, *handle_firmware_unified_schema_get(firmware=firmware))
                 if u.path == "/agent/status":
                     tok = _extract_auth_token(self)
-                    me = auth.me(tok) if tok else None
-                    code, payload = handle_agent_status_get(
-                        me=me,
-                        auth=auth,
-                        agent_mission=agent_mission,
-                        provider_router=provider_router,
-                        ai=ai,
-                        gateway=gateway,
-                        control=control,
-                        knowledge=knowledge,
-                        codex_agent_available=bool(codex_agent is not None),
-                        env_model=os.environ.get("OPENAI_MODEL", ""),
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        agent_choose_executor_fn=_agent_choose_executor,
-                        agent_resolve_model_fn=_agent_resolve_model,
-                        agent_model_allowed_fn=_agent_model_allowed,
-                        build_agent_status_payload_fn=build_agent_status_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_agent_status_get(me=auth.me(tok) if tok else None, auth=auth, agent_mission=agent_mission, provider_router=provider_router, ai=ai, gateway=gateway, control=control, knowledge=knowledge, codex_agent_available=bool(codex_agent is not None), env_model=os.environ.get("OPENAI_MODEL", ""), codex_cli_login_status_fn=_codex_cli_login_status, agent_choose_executor_fn=_agent_choose_executor, agent_resolve_model_fn=_agent_resolve_model, agent_model_allowed_fn=_agent_model_allowed, build_agent_status_payload_fn=build_agent_status_payload))
                 # Agent clean routes
                 if u.path == "/agent/clean/status":
                     return _json(self, *handle_agent_clean_status_get(query=parse_qs(u.query), gateway=gateway, control=control, codex_cli_login_status_fn=_codex_cli_login_status, env_model=os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"), build_clean_status_payload_fn=build_clean_status_payload))
