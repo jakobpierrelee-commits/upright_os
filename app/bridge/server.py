@@ -1119,19 +1119,7 @@ def build_handler(
 
     def _current_runtime_identity() -> Dict[str, str]:
         st = dict(gateway.health().get("last_status", {}))
-        return {
-            "runtime_version": str(
-                st.get("runtime", st.get("runtime_version", "")) or ""
-            ).strip(),
-            "tune_version": str(
-                st.get("tune", st.get("tune_version", "")) or ""
-            ).strip(),
-            "ident": str(st.get("ident", "") or "").strip(),
-            "hash": str(st.get("hash", "") or "").strip(),
-            "mode": str(st.get("mode", "") or "").strip(),
-            "estop": str(st.get("estop", "") or "").strip(),
-            "fault": str(st.get("fault", "") or "").strip(),
-        }
+        return {"runtime_version": str(st.get("runtime", st.get("runtime_version", "")) or "").strip(), "tune_version": str(st.get("tune", st.get("tune_version", "")) or "").strip(), "ident": str(st.get("ident", "") or "").strip(), "hash": str(st.get("hash", "") or "").strip(), "mode": str(st.get("mode", "") or "").strip(), "estop": str(st.get("estop", "") or "").strip(), "fault": str(st.get("fault", "") or "").strip()}
 
     def _design_evidence_snapshot() -> Dict[str, Any]:
         fw_status = firmware.status()
