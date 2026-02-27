@@ -1137,14 +1137,8 @@ def build_handler(
         fw_status = firmware.status()
         fw_state = str((fw_status.get("state", "") if isinstance(fw_status, dict) else "") or "").strip().lower()
         fw_phase = str((fw_status.get("phase", "") if isinstance(fw_status, dict) else "") or "").strip().lower()
-        fw_rc = (
-            fw_status.get("returncode", None) if isinstance(fw_status, dict) else None
-        )
-        fw_tail = (
-            list(fw_status.get("log_tail", [])[-20:])
-            if isinstance(fw_status, dict)
-            else []
-        )
+        fw_rc = fw_status.get("returncode", None) if isinstance(fw_status, dict) else None
+        fw_tail = list(fw_status.get("log_tail", [])[-20:]) if isinstance(fw_status, dict) else []
         health = gateway.health()
         status = dict(health.get("last_status", {}))
         prearm = prearm_safety.snapshot()
