@@ -1801,42 +1801,15 @@ def build_handler(
                         },
                     )
 
-                if u.path == "/v1/setup/compat-test":
-                    code, payload = handle_setup_compat_test(
-                        body=body,
-                        gateway=gateway,
-                        setup_attempt_history=setup_attempt_history,
-                        run_setup_compat_test_fn=run_setup_compat_test,
-                        current_sketch_hash_fn=_current_sketch_hash,
-                        report_design_observation_fn=_report_design_observation,
-                        build_setup_check_payload_fn=build_setup_check_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/v1/setup/smoke-check":
-                    code, payload = handle_setup_smoke_check(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        setup_attempt_history=setup_attempt_history,
-                        run_setup_smoke_check_fn=run_setup_smoke_check,
-                        current_sketch_hash_fn=_current_sketch_hash,
-                        report_design_observation_fn=_report_design_observation,
-                        build_setup_check_payload_fn=build_setup_check_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/v1/setup/overwatch-check":
-                    code, payload = handle_setup_overwatch_check(
-                        body=body,
-                        gateway=gateway,
-                        firmware=firmware,
-                        setup_attempt_history=setup_attempt_history,
-                        run_setup_overwatch_check_fn=run_setup_overwatch_check,
-                        current_sketch_hash_fn=_current_sketch_hash,
-                        report_design_observation_fn=_report_design_observation,
-                        build_setup_check_payload_fn=build_setup_check_payload,
-                    )
+                # Setup check routes dispatch
+                _setup_deps = dict(body=body, gateway=gateway, setup_attempt_history=setup_attempt_history, current_sketch_hash_fn=_current_sketch_hash, report_design_observation_fn=_report_design_observation, build_setup_check_payload_fn=build_setup_check_payload)
+                _setup_routes = {
+                    "/v1/setup/compat-test": lambda: handle_setup_compat_test(**_setup_deps, run_setup_compat_test_fn=run_setup_compat_test),
+                    "/v1/setup/smoke-check": lambda: handle_setup_smoke_check(**_setup_deps, control=control, run_setup_smoke_check_fn=run_setup_smoke_check),
+                    "/v1/setup/overwatch-check": lambda: handle_setup_overwatch_check(**_setup_deps, firmware=firmware, run_setup_overwatch_check_fn=run_setup_overwatch_check),
+                }
+                if u.path in _setup_routes:
+                    code, payload = _setup_routes[u.path]()
                     return _json(self, code, payload)
 
                 # Profile routes dispatch
@@ -1860,27 +1833,10 @@ def build_handler(
                     )
                     return _json(self, code, payload)
 
-                if u.path == "/agent/file/upload":
-                    code, payload = handle_agent_file_upload(
-                        body=body,
-                        repo_root=repo_root,
-                        agent_upload_from_body_fn=lambda repo, body: agent_upload_from_body(
-                            repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind
-                        ),
-                        build_attachment_payload_fn=build_attachment_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/agent/clean/file/upload":
-                    code, payload = handle_agent_file_upload(
-                        body=body,
-                        repo_root=repo_root,
-                        agent_upload_from_body_fn=lambda repo, body: agent_upload_from_body(
-                            repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind
-                        ),
-                        build_attachment_payload_fn=build_attachment_payload,
-                    )
-                    return _json(self, code, payload)
+                # File upload routes (identical handlers)
+                if u.path in {"/agent/file/upload", "/agent/clean/file/upload"}:
+                    _upload_fn = lambda repo, body: agent_upload_from_body(repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind)
+                    return _json(self, *handle_agent_file_upload(body=body, repo_root=repo_root, agent_upload_from_body_fn=_upload_fn, build_attachment_payload_fn=build_attachment_payload))
 
                 if u.path == "/agent/clean/firmware/compile":
                     inputs = resolve_clean_upload_inputs(
@@ -2592,8 +2548,7 @@ def main() -> int:
     profiles = RobotProfilesManager(repo_root)
     config_history = ConfigHistoryManager(repo_root)
     prearm_safety = PreArmSafetyGate(required=True)
-    telemetry = TelemetryHub(gw, control, host_capture, args.host, args.telemetry_port)
-    telemetry.start()
+    telemetry = TelemetryHub()
 
     if startup_serial_error:
         print(
@@ -2646,7 +2601,7 @@ def main() -> int:
         pass
     finally:
         stop_evt.set()
-        telemetry.stop()
+        pass  # TelemetryHub is now a simple pub/sub hub, no stop needed
         server.server_close()
         gw.close()
     return 0
