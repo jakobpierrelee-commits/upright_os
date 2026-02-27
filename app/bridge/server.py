@@ -2600,64 +2600,16 @@ def build_handler(
                     code, payload = _cfg_routes[u.path]()
                     return _json(self, code, payload)
 
-                if u.path == "/pid":
-                    code, payload = handle_pid_post(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        config_history=config_history,
-                        tuning_preflight=tuning_preflight,
-                        require_action_allowed_fn=_require_action_allowed,
-                        status_float_fn=_status_float,
-                        guard_pid_apply_fn=_guard_pid_apply,
-                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
-                        build_tuning_result_payload_fn=build_tuning_result_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/motion":
-                    code, payload = handle_motion_post(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        config_history=config_history,
-                        tuning_preflight=tuning_preflight,
-                        require_action_allowed_fn=_require_action_allowed,
-                        status_float_fn=_status_float,
-                        guard_motion_apply_fn=_guard_motion_apply,
-                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
-                        build_tuning_result_payload_fn=build_tuning_result_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/setpoint":
-                    code, payload = handle_setpoint_post(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        config_history=config_history,
-                        tuning_preflight=tuning_preflight,
-                        require_action_allowed_fn=_require_action_allowed,
-                        status_float_fn=_status_float,
-                        guard_setpoint_apply_fn=_guard_setpoint_apply,
-                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
-                        build_tuning_result_payload_fn=build_tuning_result_payload,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/limits":
-                    code, payload = handle_limits_post(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        config_history=config_history,
-                        tuning_preflight=tuning_preflight,
-                        require_action_allowed_fn=_require_action_allowed,
-                        status_float_fn=_status_float,
-                        guard_limits_apply_fn=_guard_limits_apply,
-                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
-                        build_tuning_result_payload_fn=build_tuning_result_payload,
-                    )
+                # Tuning routes dispatch - shared deps
+                _tuning_deps = dict(body=body, gateway=gateway, control=control, config_history=config_history, tuning_preflight=tuning_preflight, require_action_allowed_fn=_require_action_allowed, status_float_fn=_status_float, enforce_preflight_if_needed_fn=_enforce_preflight_if_needed, build_tuning_result_payload_fn=build_tuning_result_payload)
+                _tuning_routes = {
+                    "/pid": lambda: handle_pid_post(**_tuning_deps, guard_pid_apply_fn=_guard_pid_apply),
+                    "/motion": lambda: handle_motion_post(**_tuning_deps, guard_motion_apply_fn=_guard_motion_apply),
+                    "/setpoint": lambda: handle_setpoint_post(**_tuning_deps, guard_setpoint_apply_fn=_guard_setpoint_apply),
+                    "/limits": lambda: handle_limits_post(**_tuning_deps, guard_limits_apply_fn=_guard_limits_apply),
+                }
+                if u.path in _tuning_routes:
+                    code, payload = _tuning_routes[u.path]()
                     return _json(self, code, payload)
 
                 return _json(self, 404, {"ok": False, "error": "not_found"})
