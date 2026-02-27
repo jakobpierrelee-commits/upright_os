@@ -360,6 +360,7 @@ try:
         handle_firmware_unified_schema_get,
         handle_firmware_upload,
         handle_firmware_upload_guarded,
+        handle_release_serial_post,
     )
 except ImportError:
     from routes_firmware import (  # type: ignore
@@ -381,6 +382,7 @@ except ImportError:
         handle_firmware_unified_schema_get,
         handle_firmware_upload,
         handle_firmware_upload_guarded,
+        handle_release_serial_post,
     )
 try:
     from app.bridge.routes_profiles import (
@@ -3911,55 +3913,12 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/agent/clean/firmware/release-serial":
-                    try:
-                        confirm = str(body.get("confirm", "")).strip()
-                        if confirm != "I_UNDERSTAND_STOP_BRIDGE":
-                            return _json(
-                                self,
-                                400,
-                                {
-                                    "ok": False,
-                                    "error": "release_serial_confirm_required",
-                                    "hint": "send confirm=I_UNDERSTAND_STOP_BRIDGE to proceed",
-                                },
-                            )
-                        stop_script = repo_root / "tools" / "stop_bridge.sh"
-                        if not stop_script.exists():
-                            return _json(
-                                self,
-                                404,
-                                {
-                                    "ok": False,
-                                    "error": "stop_bridge_script_missing",
-                                    "path": str(stop_script),
-                                },
-                            )
-                        subprocess.Popen(
-                            [
-                                "/bin/bash",
-                                "-lc",
-                                f"sleep 0.25; '{str(stop_script)}' >/dev/null 2>&1",
-                            ],
-                            cwd=str(repo_root),
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True,
-                            close_fds=True,
-                        )
-                        return _json(
-                            self,
-                            200,
-                            build_port_released_payload(
-                                released=True,
-                                note="bridge stopping in background; use IDE upload now",
-                            ),
-                        )
-                    except Exception as exc:
-                        return _json(
-                            self,
-                            500,
-                            {"ok": False, "error": f"release_serial_failed:{exc}"},
-                        )
+                    code, payload = handle_release_serial_post(
+                        body=body,
+                        repo_root=repo_root,
+                        build_port_released_payload_fn=build_port_released_payload,
+                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/clean/recovery/known-good":
                     requested_port = str(body.get("port", "")).strip()

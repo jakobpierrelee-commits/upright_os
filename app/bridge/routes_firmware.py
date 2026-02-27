@@ -329,3 +329,46 @@ def handle_firmware_generate_docs_pack(
         force_regenerate=force_regenerate,
     )
     return 200, build_docs_pack_payload(docs_pack=out)
+
+
+def handle_release_serial_post(
+    *,
+    body: Dict[str, Any],
+    repo_root: Any,
+    build_port_released_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /agent/clean/firmware/release-serial POST request."""
+    import subprocess
+    try:
+        confirm = str(body.get("confirm", "")).strip()
+        if confirm != "I_UNDERSTAND_STOP_BRIDGE":
+            return 400, {
+                "ok": False,
+                "error": "release_serial_confirm_required",
+                "hint": "send confirm=I_UNDERSTAND_STOP_BRIDGE to proceed",
+            }
+        stop_script = repo_root / "tools" / "stop_bridge.sh"
+        if not stop_script.exists():
+            return 404, {
+                "ok": False,
+                "error": "stop_bridge_script_missing",
+                "path": str(stop_script),
+            }
+        subprocess.Popen(
+            [
+                "/bin/bash",
+                "-lc",
+                f"sleep 0.25; '{str(stop_script)}' >/dev/null 2>&1",
+            ],
+            cwd=str(repo_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        return 200, build_port_released_payload_fn(
+            released=True,
+            note="bridge stopping in background; use IDE upload now",
+        )
+    except Exception as exc:
+        return 500, {"ok": False, "error": f"release_serial_failed:{exc}"}
