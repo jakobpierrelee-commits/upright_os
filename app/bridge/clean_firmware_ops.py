@@ -488,3 +488,78 @@ def build_upload_target_runbook(target: Dict[str, Any]) -> Dict[str, Any]:
         "recovery": recovery,
         "recovery_steps": recovery_steps,
     }
+
+
+def build_upload_precheck_payload(
+    *,
+    gateway: Any,
+    firmware: Any,
+    requested_port: str,
+    requested_fqbn: str,
+    requested_sketch: str,
+    target_meta_fn: Any,
+) -> Dict[str, Any]:
+    """Build upload precheck payload with port detection and manifest validation."""
+    effective_port = (
+        requested_port or str(os.environ.get("UPRIGHT_CLEAN_UPLOAD_PORT", "")).strip()
+    )
+    firmware_st = firmware.status()
+    boards = firmware.list_boards()
+    detected_ports: list[str] = []
+    for row in boards.get("ports") or []:
+        if not isinstance(row, dict):
+            continue
+        addr = str(row.get("address") or "").strip()
+        if addr:
+            detected_ports.append(addr)
+    detected_set = set(detected_ports)
+    health = gateway.health()
+
+    reasons: list[str] = []
+    if bool(firmware_st.get("running", False)):
+        reasons.append("firmware_busy")
+    if not effective_port:
+        reasons.append("upload_port_missing")
+    if (
+        effective_port
+        and bool(boards.get("ok", False))
+        and len(detected_set) > 0
+        and effective_port not in detected_set
+    ):
+        reasons.append("selected_port_not_detected")
+    if not bool(health.get("connected", False)):
+        reasons.append("bridge_disconnected")
+    manifest_gate = firmware.validate_runtime_manifest(
+        sketch=requested_sketch,
+        require_exists=True,
+    )
+    if not bool(manifest_gate.get("ok", False)):
+        reasons.append("runtime_manifest_invalid")
+    runbook = build_upload_target_runbook(
+        target_meta_fn(fqbn=requested_fqbn, firmware=firmware)
+    )
+    hard_fail_reasons = [
+        r
+        for r in reasons
+        if r
+        in (
+            "firmware_busy",
+            "upload_port_missing",
+            "selected_port_not_detected",
+            "runtime_manifest_invalid",
+        )
+    ]
+    return {
+        "ok": True,
+        "ready": len(hard_fail_reasons) == 0,
+        "error": "upload_precheck_failed" if hard_fail_reasons else "",
+        "reasons": reasons,
+        "hard_fail_reasons": hard_fail_reasons,
+        "port": effective_port,
+        "sketch": requested_sketch,
+        "detected_ports": detected_ports,
+        "boards_ok": bool(boards.get("ok", False)),
+        "bridge_connected": bool(health.get("connected", False)),
+        "manifest_validation": manifest_gate,
+        "target_runbook": runbook,
+    }

@@ -159,6 +159,7 @@ try:
         handle_clean_upload_precheck,
         resolve_clean_upload_inputs,
         build_upload_target_runbook,
+        build_upload_precheck_payload,
     )
 except ImportError:
     from clean_firmware_ops import (  # type: ignore
@@ -168,6 +169,7 @@ except ImportError:
         handle_clean_upload_precheck,
         resolve_clean_upload_inputs,
         build_upload_target_runbook,
+        build_upload_precheck_payload,
     )
 try:
     from app.bridge.clean_contracts import (
@@ -1401,80 +1403,7 @@ def _clean_upload_target_meta(
 
 
 # _clean_upload_target_runbook moved to clean_firmware_ops.py as build_upload_target_runbook
-
-
-def _clean_upload_precheck_payload(
-    *,
-    gateway: NanoSerialGateway,
-    firmware: FirmwareManager,
-    requested_port: str,
-    requested_fqbn: str,
-    requested_sketch: str,
-) -> Dict[str, Any]:
-    effective_port = (
-        requested_port or str(os.environ.get("UPRIGHT_CLEAN_UPLOAD_PORT", "")).strip()
-    )
-    firmware_st = firmware.status()
-    boards = firmware.list_boards()
-    detected_ports: list[str] = []
-    for row in boards.get("ports") or []:
-        if not isinstance(row, dict):
-            continue
-        addr = str(row.get("address") or "").strip()
-        if addr:
-            detected_ports.append(addr)
-    detected_set = set(detected_ports)
-    health = gateway.health()
-
-    reasons: list[str] = []
-    if bool(firmware_st.get("running", False)):
-        reasons.append("firmware_busy")
-    if not effective_port:
-        reasons.append("upload_port_missing")
-    if (
-        effective_port
-        and bool(boards.get("ok", False))
-        and len(detected_set) > 0
-        and effective_port not in detected_set
-    ):
-        reasons.append("selected_port_not_detected")
-    if not bool(health.get("connected", False)):
-        # Informational for upload flows; guarded upload can still attempt recovery.
-        reasons.append("bridge_disconnected")
-    manifest_gate = firmware.validate_runtime_manifest(
-        sketch=requested_sketch,
-        require_exists=True,
-    )
-    if not bool(manifest_gate.get("ok", False)):
-        reasons.append("runtime_manifest_invalid")
-    runbook = build_upload_target_runbook(
-        _clean_upload_target_meta(fqbn=requested_fqbn, firmware=firmware)
-    )
-    hard_fail_reasons = [
-        r
-        for r in reasons
-        if r
-        in (
-            "firmware_busy",
-            "upload_port_missing",
-            "selected_port_not_detected",
-            "runtime_manifest_invalid",
-        )
-    ]
-    return {
-        "ok": True,
-        "ready": len(hard_fail_reasons) == 0,
-        "error": "upload_precheck_failed" if hard_fail_reasons else "",
-        "reasons": reasons,
-        "hard_fail_reasons": hard_fail_reasons,
-        "port": effective_port,
-        "sketch": requested_sketch,
-        "detected_ports": detected_ports,
-        "boards_ok": bool(boards.get("ok", False)),
-        "bridge_connected": bool(health.get("connected", False)),
-        "manifest_validation": manifest_gate,
-        "target_runbook": runbook,
-    }
+# _clean_upload_precheck_payload moved to clean_firmware_ops.py as build_upload_precheck_payload
 
 
 def _summarize_tool_failures(tool_calls: Any) -> str:
@@ -2856,8 +2785,8 @@ def build_handler(
                         body.get("sketch", "")
                     ).strip() or _clean_default_sketch_path(repo_root, firmware)
                     code, payload = handle_clean_upload_precheck(
-                        precheck_builder=lambda **kwargs: _clean_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, **kwargs
+                        precheck_builder=lambda **kwargs: build_upload_precheck_payload(
+                            gateway=gateway, firmware=firmware, target_meta_fn=_clean_upload_target_meta, **kwargs
                         ),
                         requested_port=requested_port,
                         requested_fqbn=requested_fqbn,
@@ -2889,8 +2818,8 @@ def build_handler(
                         requested_port=requested_port,
                         requested_fqbn=requested_fqbn,
                         requested_sketch=requested_sketch,
-                        precheck_builder=lambda **kwargs: _clean_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, **kwargs
+                        precheck_builder=lambda **kwargs: build_upload_precheck_payload(
+                            gateway=gateway, firmware=firmware, target_meta_fn=_clean_upload_target_meta, **kwargs
                         ),
                         normalize_status=_normalize_status_for_hud,
                         resolve_action_gates=_resolve_action_gates,
