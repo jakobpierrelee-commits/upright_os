@@ -1070,11 +1070,8 @@ def build_handler(
 ):
     repo_root = firmware.repo_root
     hw_context_store = hardware_context_store or HardwareContextStore(repo_root)
-    setup_attempt_history = setup_attempt_history_store or SetupAttemptHistoryStore(
-        repo_root
-    )
-    design_memory = DesignMemoryStore(repo_root)
-    prearm_safety = prearm_safety_gate or PreArmSafetyGate(required=True)
+    setup_attempt_history = setup_attempt_history_store or SetupAttemptHistoryStore(repo_root)
+    design_memory, prearm_safety = DesignMemoryStore(repo_root), prearm_safety_gate or PreArmSafetyGate(required=True)
     tuning_preflight = TuningPreflightStore(ttl_s=900.0, max_entries=256)
     probe_cache_lock = threading.Lock()
     probe_cache: Dict[str, Dict[str, Any]] = {"compat": {"ts": 0.0, "report": None}, "connect": {"ts": 0.0, "report": None}, "overwatch": {"ts": 0.0, "report": None}}
