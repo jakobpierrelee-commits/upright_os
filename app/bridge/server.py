@@ -163,6 +163,8 @@ try:
         summarize_sketch_artifact_issues,
         summarize_tool_failures,
         clean_upload_target_meta,
+        clean_default_sketch_path,
+        clean_default_fqbn,
     )
 except ImportError:
     from clean_firmware_ops import (  # type: ignore
@@ -176,6 +178,8 @@ except ImportError:
         summarize_sketch_artifact_issues,
         summarize_tool_failures,
         clean_upload_target_meta,
+        clean_default_sketch_path,
+        clean_default_fqbn,
     )
 try:
     from app.bridge.clean_contracts import (
@@ -969,26 +973,7 @@ def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
 # AssistantKnowledgeManager moved to domain module
 # AgentMissionManager moved to domain module
 
-def _clean_default_sketch_path(
-    repo_root: pathlib.Path, firmware: "FirmwareManager"
-) -> str:
-    env_override = str(os.environ.get("UPRIGHT_CLEAN_SKETCH", "")).strip()
-    if env_override:
-        return env_override
-    # Clean lane must not inherit legacy firmware defaults from FirmwareManager.
-    return str(
-        repo_root / "app" / "bridge" / "firmware_templates" / "profiled_runtime_v1"
-    )
-
-
-def _clean_default_fqbn() -> str:
-    return str(
-        os.environ.get(
-            "UPRIGHT_CLEAN_COMPILE_FQBN", "arduino:avr:nano:cpu=atmega328old"
-        )
-    )
-
-
+# _clean_default_sketch_path, _clean_default_fqbn moved to clean_firmware_ops.py
 # _clean_upload_target_meta moved to clean_firmware_ops.py as clean_upload_target_meta
 # _clean_upload_target_runbook moved to clean_firmware_ops.py as build_upload_target_runbook
 # _clean_upload_precheck_payload moved to clean_firmware_ops.py as build_upload_precheck_payload

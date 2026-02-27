@@ -685,3 +685,24 @@ def clean_upload_target_meta(
         "board_family": family,
         "board_label": board_label,
     }
+
+
+def clean_default_sketch_path(repo_root: Any, firmware: Any) -> str:
+    """Get the default sketch path for clean firmware operations."""
+    import os
+    env_override = str(os.environ.get("UPRIGHT_CLEAN_SKETCH", "")).strip()
+    if env_override:
+        return env_override
+    return str(
+        repo_root / "app" / "bridge" / "firmware_templates" / "profiled_runtime_v1"
+    )
+
+
+def clean_default_fqbn() -> str:
+    """Get the default FQBN for clean firmware operations."""
+    import os
+    return str(
+        os.environ.get(
+            "UPRIGHT_CLEAN_COMPILE_FQBN", "arduino:avr:nano:cpu=atmega328old"
+        )
+    )
