@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `90a6cb8`
+**SHA:** `87feaa4`
 
 ### Strategic Pivot
 
@@ -26,9 +26,14 @@ This session pivoted from incremental extraction to a **Hybrid Rebuild** strateg
 - Consolidated agent modes to single `robot_dev` mode in `agent_helpers.py`
 - **server.py: 6,380 → 5,511 lines (-869 lines, 14% reduction)**
 
-**Phase 2 — Extract Services: IN PROGRESS**
-- Analyzed helper function blocks for extraction
-- Identified 51 helper functions (~2,000 lines) that can be moved to domain modules
+**Phase 2a — Extract /agent/chat handler: ✅ COMPLETE**
+- Extracted `handle_agent_chat_post` (235 lines) to `routes_ai.py`
+- **server.py: 5,514 → 5,312 lines (-202 lines)**
+- routes_ai.py: 571 → 802 lines (+231 lines)
+
+**Phase 2b — Remaining Extractions: DEFERRED**
+- `/agent/chat/stream` (253 lines) - streaming handler, tightly coupled to HTTP response
+- Large helper functions (~2,000 lines) - requires careful dependency management
 - Route count: 102 (down from 124)
 
 ### Files Changed
@@ -48,10 +53,10 @@ python3 -m py_compile app/bridge/agent_helpers.py  → PASS
 ### Current Metrics
 | Metric | Before Session | After Session | Target |
 |--------|----------------|---------------|--------|
-| server.py | 6,380 | 5,511 | ~500 |
+| server.py | 6,380 | 5,312 | ~500 |
 | Routes | 124 | 102 | ~20 |
 | Agent modes | 4+ | 1 | 1 |
-| Backend total | ~41,000 | ~40,000 | ~5,000 |
+| routes_ai.py | 571 | 802 | N/A |
 
 ### Next Recommended Tasks (Priority Order)
 1. **Continue route deletions** — Remove `/commissioning/*` (4 routes), `/v1/setup/*` (4 routes) if not needed
