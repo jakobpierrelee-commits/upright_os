@@ -3,12 +3,13 @@ Overwatch route handlers extracted from server.py (Phase B+).
 
 These handlers manage system-wide status and health monitoring.
 """
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from app.bridge.clean_probe import build_overwatch_payload
+    from app.bridge.clean_misc import build_overwatch_payload
 except ImportError:
-    from clean_probe import build_overwatch_payload  # type: ignore
+    from clean_misc import build_overwatch_payload  # type: ignore
 
 
 def handle_overwatch_status_get(
@@ -27,9 +28,11 @@ def handle_overwatch_status_get(
 
     Returns (status_code, payload).
     """
-    force_refresh = str(
-        (query.get("refresh", ["0"]) or ["0"])[0]
-    ).strip().lower() in {"1", "true", "yes"}
+    force_refresh = str((query.get("refresh", ["0"]) or ["0"])[0]).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     if not force_refresh:
         cached = cached_probe_fn("overwatch")
