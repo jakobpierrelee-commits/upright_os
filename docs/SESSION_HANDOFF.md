@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `41252fd`
+**SHA:** `c5abd66`
 
 ### Strategic Pivot
 
@@ -58,15 +58,16 @@ python3 -m py_compile app/bridge/agent_helpers.py  → PASS
 ### Current Metrics
 | Metric | Before Session | After Session | Change |
 |--------|----------------|---------------|--------|
-| **server.py** | 6,380 | **3,694** | **-2,686 lines (42.1%)** |
+| **server.py** | 6,380 | **3,295** | **-3,085 lines (48.4%)** |
 | Routes | 124 | 102 | -22 routes |
 | Agent modes | 4+ | 1 | Consolidated |
-| routes_ai.py | 571 | 992 | +421 lines |
-| routes_tuning.py | 424 | 862 | +438 lines |
-| routes_probe.py | 105 | 248 | +143 lines |
-| routes_health.py | 73 | 141 | +68 lines |
+| routes_ai.py | 571 | 1,077 | +506 lines |
+| routes_tuning.py | 424 | 896 | +472 lines |
+| routes_probe.py | 105 | 295 | +190 lines |
+| routes_health.py | 73 | 206 | +133 lines |
 | hardware_registry.py | 0 | 176 | NEW |
-| clean_firmware_ops.py | 340 | 566 | +226 lines |
+| clean_firmware_ops.py | 340 | 688 | +348 lines |
+| manifest_validation.py | 806 | 862 | +56 lines |
 
 ### Next Recommended Tasks (Priority Order)
 1. **Extract _summarize_sketch_artifact_issues** — 65 lines to firmware module
