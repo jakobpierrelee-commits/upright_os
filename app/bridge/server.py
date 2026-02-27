@@ -1740,21 +1740,7 @@ def build_handler(
                     return _json(self, *handle_clean_thread_select(mode=mode, thread_id=str(body.get("thread_id", "")).strip(), ai=ai))
 
                 if u.path == "/agent/clean/chat":
-                    code, payload = handle_clean_chat_post(
-                        body=body,
-                        ai=ai,
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        parse_clean_chat_request_fn=parse_clean_chat_request,
-                        sanitize_agent_attachments_fn=_sanitize_agent_attachments,
-                        run_clean_chat_fn=run_clean_chat,
-                        run_clean_auto_tools_fn=_run_clean_auto_tools,
-                        build_clean_agent_context_fn=_build_clean_agent_context,
-                        clean_system_prompt_fn=_clean_system_prompt,
-                        normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
-                        env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
-                        env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")),
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_clean_chat_post(body=body, ai=ai, codex_cli_login_status_fn=_codex_cli_login_status, parse_clean_chat_request_fn=parse_clean_chat_request, sanitize_agent_attachments_fn=_sanitize_agent_attachments, run_clean_chat_fn=run_clean_chat, run_clean_auto_tools_fn=_run_clean_auto_tools, build_clean_agent_context_fn=_build_clean_agent_context, clean_system_prompt_fn=_clean_system_prompt, normalize_reply_for_prompt_fn=_normalize_reply_for_prompt, env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")), env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120"))))
 
                 if u.path == "/agent/clean/chat/stream":
                     codex_login = _codex_cli_login_status()
