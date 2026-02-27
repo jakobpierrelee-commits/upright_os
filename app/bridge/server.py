@@ -1524,13 +1524,7 @@ def build_handler(
                 if u.path == "/burst/label":
                     return _json(self, *handle_burst_label(body=body, host_capture=host_capture, burst_status_fn=burst_status))
 
-                # Arm/disarm routes dispatch
-                _arm_routes = {
-                    "/arm/prepare": ("arm_prepare", lambda: handle_arm_prepare(control=control)),
-                    "/arm/confirm": ("arm_confirm", lambda: handle_arm_confirm(gateway=gateway, control=control)),
-                    "/arm": ("arm", lambda: handle_arm(gateway=gateway, control=control)),
-                    "/disarm": ("disarm", lambda: handle_disarm(gateway=gateway, control=control)),
-                }
+                _arm_routes = {"/arm/prepare": ("arm_prepare", lambda: handle_arm_prepare(control=control)), "/arm/confirm": ("arm_confirm", lambda: handle_arm_confirm(gateway=gateway, control=control)), "/arm": ("arm", lambda: handle_arm(gateway=gateway, control=control)), "/disarm": ("disarm", lambda: handle_disarm(gateway=gateway, control=control))}
                 if u.path in _arm_routes:
                     action, handler = _arm_routes[u.path]
                     _require_action_allowed(action, gateway, control, prearm_gate=prearm_safety)
