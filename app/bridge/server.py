@@ -1173,34 +1173,13 @@ def build_handler(
         return design_memory.report(session_key=session_key, observation=observation, success=bool(success), source=source, note=note)
 
     def _active_robot_profile() -> Optional[Dict[str, Any]]:
-        state = profiles.list()
-        active_id = str(state.get("active_profile_id") or "").strip()
+        state, active_id = profiles.list(), str(profiles.list().get("active_profile_id") or "").strip()
         if not active_id:
             return None
-        return next(
-            (
-                p
-                for p in list(state.get("profiles") or [])
-                if isinstance(p, dict)
-                and str(p.get("profile_id", "")).strip() == active_id
-            ),
-            None,
-        )
+        return next((p for p in list(state.get("profiles") or []) if isinstance(p, dict) and str(p.get("profile_id", "")).strip() == active_id), None)
 
-    def _burst_threshold_defaults(
-        active_profile: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        # Nano compatibility lane: trigger-early defaults so brief runaway events are captured.
-        out = {
-            "freq_hz": 25.0,
-            "trigger_enabled": True,
-            "prebuffer_lines": 40,
-            "trigger_angle_deg": 4.5,
-            "trigger_out_frac": 0.55,
-            "trigger_runaway": 0.18,
-            "post_trigger_lines": 100,
-            "profile_family": "arduino_avr",
-        }
+    def _burst_threshold_defaults(active_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        out = {"freq_hz": 25.0, "trigger_enabled": True, "prebuffer_lines": 40, "trigger_angle_deg": 4.5, "trigger_out_frac": 0.55, "trigger_runaway": 0.18, "post_trigger_lines": 100, "profile_family": "arduino_avr"}
         if not isinstance(active_profile, dict):
             return out
         board = active_profile.get("board")
@@ -1210,26 +1189,14 @@ def build_handler(
         fam = _family_for_fqbn(profile_fqbn, firmware.list_targets()) or "arduino_avr"
         out["profile_family"] = fam
         if fam in {"esp32", "rp2040", "teensy"}:
-            out.update(
-                {
-                    "freq_hz": 40.0,
-                    "prebuffer_lines": 36,
-                    "trigger_angle_deg": 5.0,
-                    "trigger_out_frac": 0.85,
-                    "trigger_runaway": 0.45,
-                    "post_trigger_lines": 36,
-                }
-            )
+            out.update({"freq_hz": 40.0, "prebuffer_lines": 36, "trigger_angle_deg": 5.0, "trigger_out_frac": 0.85, "trigger_runaway": 0.45, "post_trigger_lines": 36})
         firmware_node = active_profile.get("firmware")
         if isinstance(firmware_node, dict):
             tm = str(firmware_node.get("telemetry_mode", "")).strip().lower()
             if tm == "binary_highrate" and fam == "arduino_avr":
-                # Guard against impossible profile claims on Nano-class boards.
                 out["profile_family"] = "arduino_avr/compat"
             if tm == "binary_highrate" and fam in {"esp32", "rp2040", "teensy"}:
-                out.update(
-                    {"freq_hz": 50.0, "prebuffer_lines": 40, "post_trigger_lines": 40}
-                )
+                out.update({"freq_hz": 50.0, "prebuffer_lines": 40, "post_trigger_lines": 40})
         return out
 
     def burst_status() -> Dict[str, Any]:
