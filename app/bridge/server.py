@@ -1515,15 +1515,11 @@ def build_handler(
                         build_commissioning_artifacts_payload_fn=build_commissioning_artifacts_payload,
                     )
                     return _json(self, code, payload)
+                # Firmware GET routes dispatch
                 if u.path == "/firmware/status":
-                    code, payload = handle_firmware_status_get(firmware=firmware)
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_status_get(firmware=firmware))
                 if u.path == "/firmware/artifacts":
-                    q = parse_qs(u.query)
-                    code, payload = handle_firmware_artifacts_get(
-                        firmware=firmware, query=q
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_artifacts_get(firmware=firmware, query=parse_qs(u.query)))
                 if u.path == "/design-memory":
                     q = parse_qs(u.query)
                     code, payload = handle_design_memory_list_get(
@@ -1624,18 +1620,13 @@ def build_handler(
                         build_openai_config_payload_fn=build_openai_config_payload,
                     )
                     return _json(self, code, payload)
+                # More firmware GET routes
                 if u.path == "/firmware/sketch":
-                    q = parse_qs(u.query)
-                    code, payload = handle_firmware_sketch_get(
-                        firmware=firmware, query=q
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_sketch_get(firmware=firmware, query=parse_qs(u.query)))
                 if u.path == "/firmware/boards":
-                    code, payload = handle_firmware_boards_get(firmware=firmware)
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_boards_get(firmware=firmware))
                 if u.path == "/firmware/targets":
-                    code, payload = handle_firmware_targets_get(firmware=firmware)
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_targets_get(firmware=firmware))
                 if u.path == "/firmware/runtime-manifest/validate":
                     q = parse_qs(u.query)
                     code, payload = handle_firmware_runtime_manifest_validate_get(
