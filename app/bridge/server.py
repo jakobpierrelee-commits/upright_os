@@ -1166,44 +1166,11 @@ def build_handler(
         checks = {"upload_ok": bool(fw_rc == 0 or "upload_guarded_pass" in fw_state or "upload" in fw_phase), "reconnect_ok": any("bridge reconnected" in str(line).lower() for line in fw_tail) or bool(health.get("connected", False)), "preflight_ok": bool(preflight_ok), "prearm_ok": bool(prearm.get("passed", False)), "telemetry_feed_ok": bool(status), "no_fault": fault in {"", "0"}, "safe_mode_ok": mode in {"SAFE_IDLE", "IDLE", "BALANCING", "BALANCE"}}
         return {"checks": checks, "sources": {"firmware": {"state": fw_state, "phase": fw_phase, "returncode": fw_rc}, "bridge_connected": bool(health.get("connected", False)), "status_snapshot": dict(status), "status_mode": mode, "status_fault": fault, "prearm_passed": bool(prearm.get("passed", False)), "recent_preflight_ok": bool(preflight_ok), "overwatch_score_pct": latest_overwatch_score_pct}}
 
-    def _report_design_observation(
-        *,
-        session_key: str,
-        success: bool,
-        source: str,
-        note: str,
-        profile_id: str = "",
-        profile_label: str = "",
-        sketch_revision: str = "",
-        sketch_hash: str = "",
-        test_type: str = "",
-    ) -> Dict[str, Any]:
-        fw_status = firmware.status()
-        fw_defaults = (
-            (fw_status.get("defaults", {}) or {}) if isinstance(fw_status, dict) else {}
-        )
-        runtime = _current_runtime_identity()
-        observation = {
-            "runtime_version": runtime.get("runtime_version", ""),
-            "tune_version": runtime.get("tune_version", ""),
-            "ident": runtime.get("ident", ""),
-            "hash": runtime.get("hash", ""),
-            "profile_id": str(profile_id or "").strip(),
-            "profile_label": str(profile_label or "").strip(),
-            "sketch_revision": str(sketch_revision or "").strip(),
-            "sketch_hash": str(sketch_hash or "").strip() or _current_sketch_hash(),
-            "test_type": str(test_type or "").strip(),
-            "fqbn": str(fw_defaults.get("fqbn", "") or "").strip(),
-            "port": str(fw_defaults.get("port", "") or "").strip(),
-            "evidence": _design_evidence_snapshot(),
-        }
-        return design_memory.report(
-            session_key=session_key,
-            observation=observation,
-            success=bool(success),
-            source=source,
-            note=note,
-        )
+    def _report_design_observation(*, session_key: str, success: bool, source: str, note: str, profile_id: str = "", profile_label: str = "", sketch_revision: str = "", sketch_hash: str = "", test_type: str = "") -> Dict[str, Any]:
+        fw_status, runtime = firmware.status(), _current_runtime_identity()
+        fw_defaults = (fw_status.get("defaults", {}) or {}) if isinstance(fw_status, dict) else {}
+        observation = {"runtime_version": runtime.get("runtime_version", ""), "tune_version": runtime.get("tune_version", ""), "ident": runtime.get("ident", ""), "hash": runtime.get("hash", ""), "profile_id": str(profile_id or "").strip(), "profile_label": str(profile_label or "").strip(), "sketch_revision": str(sketch_revision or "").strip(), "sketch_hash": str(sketch_hash or "").strip() or _current_sketch_hash(), "test_type": str(test_type or "").strip(), "fqbn": str(fw_defaults.get("fqbn", "") or "").strip(), "port": str(fw_defaults.get("port", "") or "").strip(), "evidence": _design_evidence_snapshot()}
+        return design_memory.report(session_key=session_key, observation=observation, success=bool(success), source=source, note=note)
 
     def _active_robot_profile() -> Optional[Dict[str, Any]]:
         state = profiles.list()
