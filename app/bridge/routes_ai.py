@@ -367,6 +367,77 @@ def handle_agent_clean_status_get(
     return 200, payload
 
 
+def handle_agent_thread_new(
+    *,
+    body: Dict[str, Any],
+    me: Optional[Dict[str, Any]],
+    agent_mission: Any,
+    ai: Any,
+    build_agent_thread_state_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/thread/new POST request.
+
+    Returns (status_code, payload).
+    """
+    mode_state = agent_mission.status()
+    mode = str(body.get("mode", "")).strip() or str(
+        mode_state.get("mode", "robot_dev")
+    )
+    session_key = (
+        f"user:{me['id']}:agent:{mode}"
+        if me and isinstance(me.get("id"), int)
+        else f"local:{mode}"
+    )
+    title = str(body.get("title", "")).strip() or None
+    thread = ai.create_thread(session_key, title)
+    return 200, build_agent_thread_state_payload_fn(
+        agent=mode_state,
+        thread=thread,
+        threads=ai.list_threads(session_key),
+        history=ai.history(session_key, str(thread.get("id")))[-80:],
+    )
+
+
+def handle_agent_thread_select(
+    *,
+    body: Dict[str, Any],
+    me: Optional[Dict[str, Any]],
+    agent_mission: Any,
+    ai: Any,
+    build_agent_thread_state_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/thread/select POST request.
+
+    Returns (status_code, payload).
+    """
+    mode_state = agent_mission.status()
+    mode = str(body.get("mode", "")).strip() or str(
+        mode_state.get("mode", "robot_dev")
+    )
+    thread_id = str(body.get("thread_id", "")).strip()
+    if not thread_id:
+        return 400, {"ok": False, "error": "thread_id_required"}
+    session_key = (
+        f"user:{me['id']}:agent:{mode}"
+        if me and isinstance(me.get("id"), int)
+        else f"local:{mode}"
+    )
+    try:
+        thread = ai.select_thread(session_key, thread_id)
+    except RuntimeError as exc:
+        if str(exc) == "thread_not_found":
+            return 404, {"ok": False, "error": "thread_not_found"}
+        raise
+    return 200, build_agent_thread_state_payload_fn(
+        agent=mode_state,
+        thread=thread,
+        threads=ai.list_threads(session_key),
+        history=ai.history(session_key, str(thread.get("id")))[-80:],
+    )
+
+
 def handle_agent_threads_get(
     *,
     query: Dict[str, List[str]],

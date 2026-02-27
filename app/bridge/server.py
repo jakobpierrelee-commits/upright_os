@@ -461,6 +461,8 @@ try:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_agent_status_get,
+        handle_agent_thread_new,
+        handle_agent_thread_select,
         handle_agent_threads_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
@@ -481,6 +483,8 @@ except ImportError:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_agent_status_get,
+        handle_agent_thread_new,
+        handle_agent_thread_select,
         handle_agent_threads_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
@@ -6731,70 +6735,16 @@ def build_handler(
                     guard = _legacy_execution_guard(u.path)
                     if guard is not None:
                         return _json(self, 403, guard)
-                    mode_state = agent_mission.status()
-                    mode = str(body.get("mode", "")).strip() or str(
-                        mode_state.get("mode", "robot_dev")
-                    )
                     tok = _extract_auth_token(self, body)
                     me = auth.me(tok) if tok else None
-                    session_key = (
-                        f"user:{me['id']}:agent:{mode}"
-                        if me and isinstance(me.get("id"), int)
-                        else f"local:{mode}"
+                    code, payload = handle_agent_thread_new(
+                        body=body,
+                        me=me,
+                        agent_mission=agent_mission,
+                        ai=ai,
+                        build_agent_thread_state_payload_fn=build_agent_thread_state_payload,
                     )
-                    title = str(body.get("title", "")).strip() or None
-                    thread = ai.create_thread(session_key, title)
-                    return _json(
-                        self,
-                        200,
-                        build_agent_thread_state_payload(
-                            agent=mode_state,
-                            thread=thread,
-                            threads=ai.list_threads(session_key),
-                            history=ai.history(session_key, str(thread.get("id")))[
-                                -80:
-                            ],
-                        ),
-                    )
-
-                if u.path == "/agent/thread/select":
-                    guard = _legacy_execution_guard(u.path)
-                    if guard is not None:
-                        return _json(self, 403, guard)
-                    mode_state = agent_mission.status()
-                    mode = str(body.get("mode", "")).strip() or str(
-                        mode_state.get("mode", "robot_dev")
-                    )
-                    thread_id = str(body.get("thread_id", "")).strip()
-                    if not thread_id:
-                        return _json(
-                            self, 400, {"ok": False, "error": "thread_id_required"}
-                        )
-                    tok = _extract_auth_token(self, body)
-                    me = auth.me(tok) if tok else None
-                    session_key = (
-                        f"user:{me['id']}:agent:{mode}"
-                        if me and isinstance(me.get("id"), int)
-                        else f"local:{mode}"
-                    )
-                    try:
-                        thread = ai.select_thread(session_key, thread_id)
-                    except RuntimeError as exc:
-                        if str(exc) == "thread_not_found":
-                            return _json(
-                                self, 404, {"ok": False, "error": "thread_not_found"}
-                            )
-                        raise
-                    return _json(
-                        self,
-                        200,
-                        build_agent_thread_state_payload(
-                            agent=mode_state,
-                            thread=thread,
-                            threads=ai.list_threads(session_key),
-                            history=ai.history(session_key, thread_id)[-80:],
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/chat":
                     guard = _legacy_execution_guard(u.path)
