@@ -1548,30 +1548,15 @@ def build_handler(
                     code, payload = _estop_routes[u.path]()
                     return _json(self, code, payload)
 
-                # IMU and calibration routes dispatch
                 _imu_fn = lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd)
-                _imu_routes = {
-                    "/cal_zero": lambda: handle_cal_zero(gateway=gateway, control=control),
-                    "/imu/calibrate": lambda: handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
-                    "/imu/load": lambda: handle_imu_load(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
-                    "/imu/save": lambda: handle_imu_save(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
-                    "/imu/info": lambda: handle_imu_info(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
-                }
+                _imu_routes = {"/cal_zero": lambda: handle_cal_zero(gateway=gateway, control=control), "/imu/calibrate": lambda: handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/load": lambda: handle_imu_load(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/save": lambda: handle_imu_save(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/info": lambda: handle_imu_info(gateway=gateway, control=control, classify_imu_fn=_imu_fn)}
                 if u.path in _imu_routes:
                     if u.path in {"/cal_zero", "/imu/calibrate"}:
                         _require_action_allowed("cal_zero", gateway, control)
-                    code, payload = _imu_routes[u.path]()
-                    return _json(self, code, payload)
-
-                # Config persistence routes dispatch
-                _cfg_routes = {
-                    "/savecfg": lambda: handle_savecfg(gateway=gateway, control=control),
-                    "/loadcfg": lambda: handle_loadcfg(gateway=gateway, control=control),
-                    "/defaultcfg": lambda: handle_defaultcfg(gateway=gateway, control=control),
-                }
+                    return _json(self, *_imu_routes[u.path]())
+                _cfg_routes = {"/savecfg": lambda: handle_savecfg(gateway=gateway, control=control), "/loadcfg": lambda: handle_loadcfg(gateway=gateway, control=control), "/defaultcfg": lambda: handle_defaultcfg(gateway=gateway, control=control)}
                 if u.path in _cfg_routes:
-                    code, payload = _cfg_routes[u.path]()
-                    return _json(self, code, payload)
+                    return _json(self, *_cfg_routes[u.path]())
 
                 # Tuning routes dispatch - shared deps
                 _tuning_deps = dict(body=body, gateway=gateway, control=control, config_history=config_history, tuning_preflight=tuning_preflight, require_action_allowed_fn=_require_action_allowed, status_float_fn=_status_float, enforce_preflight_if_needed_fn=_enforce_preflight_if_needed, build_tuning_result_payload_fn=build_tuning_result_payload)
