@@ -510,9 +510,15 @@ except ImportError:
         handle_auth_register,
     )
 try:
-    from app.bridge.routes_design import handle_design_memory_rate
+    from app.bridge.routes_design import (
+        handle_design_memory_list_get,
+        handle_design_memory_rate,
+    )
 except ImportError:
-    from routes_design import handle_design_memory_rate  # type: ignore
+    from routes_design import (  # type: ignore
+        handle_design_memory_list_get,
+        handle_design_memory_rate,
+    )
 try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
@@ -5628,31 +5634,11 @@ def build_handler(
                     return _json(self, code, payload)
                 if u.path == "/design-memory":
                     q = parse_qs(u.query)
-                    n_raw = str((q.get("limit") or ["30"])[0]).strip()
-                    session_key = str((q.get("session_key") or [""])[0]).strip()
-                    profile_id = str((q.get("profile_id") or [""])[0]).strip()
-                    try:
-                        n = int(n_raw)
-                    except Exception:
-                        n = 30
-                    rows = design_memory.list_recent(limit=n)
-                    if session_key:
-                        rows = [
-                            r
-                            for r in rows
-                            if str(r.get("last_session_key", "")).strip() == session_key
-                        ]
-                    if profile_id:
-                        rows = [
-                            r
-                            for r in rows
-                            if str(r.get("profile_id", "")).strip() == profile_id
-                        ]
-                    return _json(
-                        self,
-                        200,
-                        build_design_memory_payload(design_memory=rows),
+                    code, payload = handle_design_memory_list_get(
+                        query=q,
+                        design_memory=design_memory,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/design-memory/best":
                     q = parse_qs(u.query)
                     session_key = str((q.get("session_key") or [""])[0]).strip()

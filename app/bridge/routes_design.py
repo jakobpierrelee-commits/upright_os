@@ -47,3 +47,36 @@ def handle_design_memory_rate(
             return 404, {"ok": False, "error": err}
         return 400, {"ok": False, "error": err}
     return 200, build_design_payload(design=row)
+
+
+def handle_design_memory_list_get(
+    *,
+    query: Dict[str, Any],
+    design_memory: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /design-memory GET request.
+
+    Returns (status_code, payload).
+    """
+    n_raw = str((query.get("limit") or ["30"])[0]).strip()
+    session_key = str((query.get("session_key") or [""])[0]).strip()
+    profile_id = str((query.get("profile_id") or [""])[0]).strip()
+    try:
+        n = int(n_raw)
+    except Exception:
+        n = 30
+    rows = design_memory.list_recent(limit=n)
+    if session_key:
+        rows = [
+            r
+            for r in rows
+            if str(r.get("last_session_key", "")).strip() == session_key
+        ]
+    if profile_id:
+        rows = [
+            r
+            for r in rows
+            if str(r.get("profile_id", "")).strip() == profile_id
+        ]
+    return 200, build_design_memory_payload(design_memory=rows)
