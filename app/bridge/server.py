@@ -2329,45 +2329,20 @@ def build_handler(
                     )
                     return _json(self, code, payload)
 
-                if u.path == "/arm/prepare":
-                    _require_action_allowed(
-                        "arm_prepare", gateway, control, prearm_gate=prearm_safety
-                    )
-                    code, payload = handle_arm_prepare(control=control)
+                # Arm/disarm routes dispatch
+                _arm_routes = {
+                    "/arm/prepare": ("arm_prepare", lambda: handle_arm_prepare(control=control)),
+                    "/arm/confirm": ("arm_confirm", lambda: handle_arm_confirm(gateway=gateway, control=control)),
+                    "/arm": ("arm", lambda: handle_arm(gateway=gateway, control=control)),
+                    "/disarm": ("disarm", lambda: handle_disarm(gateway=gateway, control=control)),
+                }
+                if u.path in _arm_routes:
+                    action, handler = _arm_routes[u.path]
+                    _require_action_allowed(action, gateway, control, prearm_gate=prearm_safety)
+                    code, payload = handler()
                     return _json(self, code, payload)
-
                 if u.path == "/arm/precheck":
-                    code, payload = handle_arm_precheck(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        prearm_safety=prearm_safety,
-                        run_prearm_hardware_check_fn=_run_prearm_hardware_check,
-                        report_design_observation_fn=_report_design_observation,
-                        resolve_action_gates_fn=_resolve_action_gates,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/arm/confirm":
-                    _require_action_allowed(
-                        "arm_confirm", gateway, control, prearm_gate=prearm_safety
-                    )
-                    code, payload = handle_arm_confirm(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/arm":
-                    _require_action_allowed(
-                        "arm", gateway, control, prearm_gate=prearm_safety
-                    )
-                    code, payload = handle_arm(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/disarm":
-                    _require_action_allowed(
-                        "disarm", gateway, control, prearm_gate=prearm_safety
-                    )
-                    code, payload = handle_disarm(gateway=gateway, control=control)
-                    return _json(self, code, payload)
+                    return _json(self, *handle_arm_precheck(body=body, gateway=gateway, control=control, prearm_safety=prearm_safety, run_prearm_hardware_check_fn=_run_prearm_hardware_check, report_design_observation_fn=_report_design_observation, resolve_action_gates_fn=_resolve_action_gates))
 
                 # Estop and simple control routes dispatch
                 _estop_routes = {
@@ -2378,24 +2353,18 @@ def build_handler(
                     code, payload = _estop_routes[u.path]()
                     return _json(self, code, payload)
 
-                if u.path == "/cal_zero":
-                    _require_action_allowed("cal_zero", gateway, control)
-                    code, payload = handle_cal_zero(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/imu/calibrate":
-                    _require_action_allowed("cal_zero", gateway, control)
-                    code, payload = handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd))
-                    return _json(self, code, payload)
-
-                # IMU routes dispatch
+                # IMU and calibration routes dispatch
                 _imu_fn = lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd)
                 _imu_routes = {
+                    "/cal_zero": lambda: handle_cal_zero(gateway=gateway, control=control),
+                    "/imu/calibrate": lambda: handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
                     "/imu/load": lambda: handle_imu_load(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
                     "/imu/save": lambda: handle_imu_save(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
                     "/imu/info": lambda: handle_imu_info(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
                 }
                 if u.path in _imu_routes:
+                    if u.path in {"/cal_zero", "/imu/calibrate"}:
+                        _require_action_allowed("cal_zero", gateway, control)
                     code, payload = _imu_routes[u.path]()
                     return _json(self, code, payload)
 
