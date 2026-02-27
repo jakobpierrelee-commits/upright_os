@@ -540,6 +540,7 @@ try:
         safe_float,
         first_float,
         safe_upload_filename,
+        sanitize_agent_attachments_wrapper,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -576,6 +577,7 @@ except ImportError:
         safe_float,
         first_float,
         safe_upload_filename,
+        sanitize_agent_attachments_wrapper,
     )
 try:
     from app.bridge.routes_auth import (
@@ -946,15 +948,7 @@ except ImportError:
 # _format_apply_note moved to routes_tuning.py as format_apply_note
 # _attachment_kind moved to routes_ai.py as attachment_kind
 # _agent_upload_from_body moved to routes_ai.py as agent_upload_from_body
-
-
-def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
-    return sanitize_agent_attachments(
-        raw=raw,
-        safe_upload_filename_fn=safe_upload_filename,
-        attachment_kind_fn=attachment_kind,
-    )
-
+# _sanitize_agent_attachments moved to routes_ai.py as sanitize_agent_attachments_wrapper
 
 # ConfigHistoryManager moved to domain module
 # _apply_tuning_plan moved to routes_tuning.py as apply_tuning_plan

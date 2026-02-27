@@ -1224,3 +1224,14 @@ def safe_upload_filename(name: str) -> str:
     if not cleaned:
         cleaned = f"upload_{int(time.time())}.bin"
     return cleaned[:120]
+
+
+def sanitize_agent_attachments_wrapper(
+    raw: Any, *, sanitize_fn: Any
+) -> list:
+    """Wrapper for sanitize_agent_attachments with default functions."""
+    return sanitize_fn(
+        raw=raw,
+        safe_upload_filename_fn=safe_upload_filename,
+        attachment_kind_fn=attachment_kind,
+    )
