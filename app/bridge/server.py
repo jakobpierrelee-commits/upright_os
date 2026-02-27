@@ -2475,58 +2475,16 @@ def build_handler(
                     return
 
 
-                if u.path == "/tooling/trace-replay":
-                    code, payload = handle_trace_replay(
-                        body=body,
-                        repo_root=repo_root,
-                        replay_file=replay_file,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/tooling/param-sweep":
-                    code, payload = handle_param_sweep(
-                        body=body,
-                        gateway=gateway,
-                        ParameterSweepRunner=ParameterSweepRunner,
-                        parse_range_spec=parse_range_spec,
-                        SweepConfig=SweepConfig,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/tooling/surrogate/simulate":
-                    code, payload = handle_surrogate_simulate(
-                        body=body,
-                        repo_root=repo_root,
-                        simulate_from_logs=simulate_from_logs,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/tooling/tuning/recommend":
-                    code, payload = handle_tuning_recommend(
-                        body=body,
-                        repo_root=repo_root,
-                        evaluate_tuning_plan=evaluate_tuning_plan,
-                        replay_file=replay_file,
-                        simulate_from_logs=simulate_from_logs,
-                        validate_contract_fn=_validate_tuning_recommendation_contract,
-                        evaluate_quality_fn=_evaluate_tuning_recommendation_quality,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/tooling/tuning/preflight":
-                    code, payload = handle_tuning_preflight(
-                        body=body,
-                        repo_root=repo_root,
-                        status_now=gateway.get_status(),
-                        evaluate_tuning_plan=evaluate_tuning_plan,
-                        replay_file=replay_file,
-                        simulate_from_logs=simulate_from_logs,
-                        validate_contract_fn=_validate_tuning_recommendation_contract,
-                        evaluate_quality_fn=_evaluate_tuning_recommendation_quality,
-                        build_signature_fn=_build_tuning_apply_signature,
-                        preflight_issue_fn=tuning_preflight.issue,
-                        status_float_fn=_status_float,
-                    )
+                # Tooling routes dispatch
+                _tooling_routes = {
+                    "/tooling/trace-replay": lambda: handle_trace_replay(body=body, repo_root=repo_root, replay_file=replay_file),
+                    "/tooling/param-sweep": lambda: handle_param_sweep(body=body, gateway=gateway, ParameterSweepRunner=ParameterSweepRunner, parse_range_spec=parse_range_spec, SweepConfig=SweepConfig),
+                    "/tooling/surrogate/simulate": lambda: handle_surrogate_simulate(body=body, repo_root=repo_root, simulate_from_logs=simulate_from_logs),
+                    "/tooling/tuning/recommend": lambda: handle_tuning_recommend(body=body, repo_root=repo_root, evaluate_tuning_plan=evaluate_tuning_plan, replay_file=replay_file, simulate_from_logs=simulate_from_logs, validate_contract_fn=_validate_tuning_recommendation_contract, evaluate_quality_fn=_evaluate_tuning_recommendation_quality),
+                    "/tooling/tuning/preflight": lambda: handle_tuning_preflight(body=body, repo_root=repo_root, status_now=gateway.get_status(), evaluate_tuning_plan=evaluate_tuning_plan, replay_file=replay_file, simulate_from_logs=simulate_from_logs, validate_contract_fn=_validate_tuning_recommendation_contract, evaluate_quality_fn=_evaluate_tuning_recommendation_quality, build_signature_fn=_build_tuning_apply_signature, preflight_issue_fn=tuning_preflight.issue, status_float_fn=_status_float),
+                }
+                if u.path in _tooling_routes:
+                    code, payload = _tooling_routes[u.path]()
                     return _json(self, code, payload)
 
                 if u.path == "/command":
