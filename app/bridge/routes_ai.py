@@ -230,3 +230,49 @@ def handle_session_heartbeat(
     Returns (status_code, payload).
     """
     return 200, build_session_heartbeat_payload_fn(control=control.heartbeat())
+
+
+def handle_setup_attempt_history_get(
+    *,
+    query: Dict[str, List[str]],
+    setup_attempt_history: Any,
+    build_attempt_history_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /v1/setup/attempt-history GET request.
+
+    Returns (status_code, payload).
+    """
+    limit = int((query.get("limit", ["40"]) or ["40"])[0] or 40)
+    cursor = str((query.get("cursor", [""]) or [""])[0] or "")
+    kind = str((query.get("kind", ["all"]) or ["all"])[0] or "all")
+    page = setup_attempt_history.list_recent_page(
+        limit=limit, cursor_attempt_id=cursor, kind=kind
+    )
+    return 200, build_attempt_history_payload_fn(
+        attempts=page.get("attempts", []),
+        next_cursor=page.get("next_cursor", ""),
+        has_more=bool(page.get("has_more", False)),
+    )
+
+
+def handle_ai_threads_get(
+    *,
+    me: Dict[str, Any],
+    ai: Any,
+    build_ai_threads_status_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /ai/threads GET request.
+
+    Returns (status_code, payload).
+    """
+    skey = f"user:{me['id']}"
+    return 200, build_ai_threads_status_payload_fn(
+        threads=ai.list_threads(skey),
+        ai=ai.status(
+            configured=bool(me.get("openai_configured")),
+            model=str(me.get("openai_model") or "gpt-5-codex"),
+            session_key=skey,
+        ),
+    )

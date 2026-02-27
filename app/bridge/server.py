@@ -466,7 +466,9 @@ try:
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
+        handle_ai_threads_get,
         handle_session_heartbeat,
+        handle_setup_attempt_history_get,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -479,7 +481,9 @@ except ImportError:
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
+        handle_ai_threads_get,
         handle_session_heartbeat,
+        handle_setup_attempt_history_get,
     )
 try:
     from app.bridge.routes_auth import (
@@ -5824,19 +5828,12 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    skey = f"user:{me['id']}"
-                    return _json(
-                        self,
-                        200,
-                        build_ai_threads_status_payload(
-                            threads=ai.list_threads(skey),
-                            ai=ai.status(
-                                configured=bool(me.get("openai_configured")),
-                                model=str(me.get("openai_model") or "gpt-5-codex"),
-                                session_key=skey,
-                            ),
-                        ),
+                    code, payload = handle_ai_threads_get(
+                        me=me,
+                        ai=ai,
+                        build_ai_threads_status_payload_fn=build_ai_threads_status_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/ai/profiles":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
@@ -6055,21 +6052,12 @@ def build_handler(
                     return _json(self, 200, build_overwatch_payload(overwatch=report))
                 if u.path == "/v1/setup/attempt-history":
                     q = parse_qs(u.query)
-                    limit = int((q.get("limit", ["40"]) or ["40"])[0] or 40)
-                    cursor = str((q.get("cursor", [""]) or [""])[0] or "")
-                    kind = str((q.get("kind", ["all"]) or ["all"])[0] or "all")
-                    page = setup_attempt_history.list_recent_page(
-                        limit=limit, cursor_attempt_id=cursor, kind=kind
+                    code, payload = handle_setup_attempt_history_get(
+                        query=q,
+                        setup_attempt_history=setup_attempt_history,
+                        build_attempt_history_payload_fn=build_attempt_history_payload,
                     )
-                    return _json(
-                        self,
-                        200,
-                        build_attempt_history_payload(
-                            attempts=page.get("attempts", []),
-                            next_cursor=page.get("next_cursor", ""),
-                            has_more=bool(page.get("has_more", False)),
-                        ),
-                    )
+                    return _json(self, code, payload)
                 if u.path == "/profiles":
                     code, payload = handle_profiles_list(profiles=profiles)
                     return _json(self, code, payload)
