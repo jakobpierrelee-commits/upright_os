@@ -1164,23 +1164,7 @@ def build_handler(
         mode = str(status.get("mode", "") or "").strip().upper()
         fault = str(status.get("fault", "") or "").strip()
         checks = {"upload_ok": bool(fw_rc == 0 or "upload_guarded_pass" in fw_state or "upload" in fw_phase), "reconnect_ok": any("bridge reconnected" in str(line).lower() for line in fw_tail) or bool(health.get("connected", False)), "preflight_ok": bool(preflight_ok), "prearm_ok": bool(prearm.get("passed", False)), "telemetry_feed_ok": bool(status), "no_fault": fault in {"", "0"}, "safe_mode_ok": mode in {"SAFE_IDLE", "IDLE", "BALANCING", "BALANCE"}}
-        return {
-            "checks": checks,
-            "sources": {
-                "firmware": {
-                    "state": fw_state,
-                    "phase": fw_phase,
-                    "returncode": fw_rc,
-                },
-                "bridge_connected": bool(health.get("connected", False)),
-                "status_snapshot": dict(status),
-                "status_mode": mode,
-                "status_fault": fault,
-                "prearm_passed": bool(prearm.get("passed", False)),
-                "recent_preflight_ok": bool(preflight_ok),
-                "overwatch_score_pct": latest_overwatch_score_pct,
-            },
-        }
+        return {"checks": checks, "sources": {"firmware": {"state": fw_state, "phase": fw_phase, "returncode": fw_rc}, "bridge_connected": bool(health.get("connected", False)), "status_snapshot": dict(status), "status_mode": mode, "status_fault": fault, "prearm_passed": bool(prearm.get("passed", False)), "recent_preflight_ok": bool(preflight_ok), "overwatch_score_pct": latest_overwatch_score_pct}}
 
     def _report_design_observation(
         *,
