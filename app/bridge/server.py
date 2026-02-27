@@ -1794,63 +1794,21 @@ def build_handler(
                     code, payload = handle_commissioning_step()
                     return _json(self, code, payload)
 
-                if u.path == "/firmware/check":
-                    code, payload = handle_firmware_check_post(firmware=firmware)
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/compile":
-                    code, payload = handle_firmware_compile(
-                        body=body, firmware=firmware
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/upload":
-                    code, payload = handle_firmware_upload(
-                        body=body, firmware=firmware, prearm_safety=prearm_safety
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/upload-guarded":
-                    code, payload = handle_firmware_upload_guarded(
-                        body=body,
-                        firmware=firmware,
-                        gateway=gateway,
-                        prearm_safety=prearm_safety,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/install-cli":
-                    code, payload = handle_firmware_install_cli(firmware=firmware)
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/sketch":
-                    code, payload = handle_firmware_sketch_write(
-                        body=body, firmware=firmware
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/sketch-folder/pick":
-                    code, payload = handle_firmware_sketch_folder_pick(
-                        firmware=firmware
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/generate-unified":
-                    code, payload = handle_firmware_generate_unified(
-                        body=body, firmware=firmware
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/firmware/generate-docs-pack":
-                    code, payload = handle_firmware_generate_docs_pack(
-                        body=body, firmware=firmware
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/profiles/validate":
-                    code, payload = handle_profiles_validate(
-                        body=body, profiles=profiles, gateway=gateway
-                    )
+                # Firmware routes dispatch
+                _fw_routes = {
+                    "/firmware/check": lambda: handle_firmware_check_post(firmware=firmware),
+                    "/firmware/compile": lambda: handle_firmware_compile(body=body, firmware=firmware),
+                    "/firmware/upload": lambda: handle_firmware_upload(body=body, firmware=firmware, prearm_safety=prearm_safety),
+                    "/firmware/upload-guarded": lambda: handle_firmware_upload_guarded(body=body, firmware=firmware, gateway=gateway, prearm_safety=prearm_safety),
+                    "/firmware/install-cli": lambda: handle_firmware_install_cli(firmware=firmware),
+                    "/firmware/sketch": lambda: handle_firmware_sketch_write(body=body, firmware=firmware),
+                    "/firmware/sketch-folder/pick": lambda: handle_firmware_sketch_folder_pick(firmware=firmware),
+                    "/firmware/generate-unified": lambda: handle_firmware_generate_unified(body=body, firmware=firmware),
+                    "/firmware/generate-docs-pack": lambda: handle_firmware_generate_docs_pack(body=body, firmware=firmware),
+                    "/profiles/validate": lambda: handle_profiles_validate(body=body, profiles=profiles, gateway=gateway),
+                }
+                if u.path in _fw_routes:
+                    code, payload = _fw_routes[u.path]()
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/runtime-manifest/validate":
@@ -1911,18 +1869,14 @@ def build_handler(
                     )
                     return _json(self, code, payload)
 
-                if u.path == "/profiles/save":
-                    code, payload = handle_profiles_save(body=body, profiles=profiles)
-                    return _json(self, code, payload)
-
-                if u.path == "/profiles/activate":
-                    code, payload = handle_profiles_activate(
-                        body=body, profiles=profiles
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/profiles/delete":
-                    code, payload = handle_profiles_delete(body=body, profiles=profiles)
+                # Profile routes dispatch
+                _profile_routes = {
+                    "/profiles/save": lambda: handle_profiles_save(body=body, profiles=profiles),
+                    "/profiles/activate": lambda: handle_profiles_activate(body=body, profiles=profiles),
+                    "/profiles/delete": lambda: handle_profiles_delete(body=body, profiles=profiles),
+                }
+                if u.path in _profile_routes:
+                    code, payload = _profile_routes[u.path]()
                     return _json(self, code, payload)
 
                 if u.path == "/config/revert":
@@ -2648,12 +2602,13 @@ def build_handler(
                     code, payload = handle_disarm(gateway=gateway, control=control)
                     return _json(self, code, payload)
 
-                if u.path == "/estop/latch":
-                    code, payload = handle_estop_latch(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/estop/reset":
-                    code, payload = handle_estop_reset(gateway=gateway, control=control)
+                # Estop and simple control routes dispatch
+                _estop_routes = {
+                    "/estop/latch": lambda: handle_estop_latch(gateway=gateway, control=control),
+                    "/estop/reset": lambda: handle_estop_reset(gateway=gateway, control=control),
+                }
+                if u.path in _estop_routes:
+                    code, payload = _estop_routes[u.path]()
                     return _json(self, code, payload)
 
                 if u.path == "/cal_zero":
@@ -2663,55 +2618,28 @@ def build_handler(
 
                 if u.path == "/imu/calibrate":
                     _require_action_allowed("cal_zero", gateway, control)
-                    code, payload = handle_imu_calibrate(
-                        gateway=gateway,
-                        control=control,
-                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
-                            res, cmd_name=cmd
-                        ),
-                    )
+                    code, payload = handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd))
                     return _json(self, code, payload)
 
-                if u.path == "/imu/load":
-                    code, payload = handle_imu_load(
-                        gateway=gateway,
-                        control=control,
-                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
-                            res, cmd_name=cmd
-                        ),
-                    )
+                # IMU routes dispatch
+                _imu_fn = lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd)
+                _imu_routes = {
+                    "/imu/load": lambda: handle_imu_load(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
+                    "/imu/save": lambda: handle_imu_save(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
+                    "/imu/info": lambda: handle_imu_info(gateway=gateway, control=control, classify_imu_fn=_imu_fn),
+                }
+                if u.path in _imu_routes:
+                    code, payload = _imu_routes[u.path]()
                     return _json(self, code, payload)
 
-                if u.path == "/imu/save":
-                    code, payload = handle_imu_save(
-                        gateway=gateway,
-                        control=control,
-                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
-                            res, cmd_name=cmd
-                        ),
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/imu/info":
-                    code, payload = handle_imu_info(
-                        gateway=gateway,
-                        control=control,
-                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
-                            res, cmd_name=cmd
-                        ),
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/savecfg":
-                    code, payload = handle_savecfg(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/loadcfg":
-                    code, payload = handle_loadcfg(gateway=gateway, control=control)
-                    return _json(self, code, payload)
-
-                if u.path == "/defaultcfg":
-                    code, payload = handle_defaultcfg(gateway=gateway, control=control)
+                # Config persistence routes dispatch
+                _cfg_routes = {
+                    "/savecfg": lambda: handle_savecfg(gateway=gateway, control=control),
+                    "/loadcfg": lambda: handle_loadcfg(gateway=gateway, control=control),
+                    "/defaultcfg": lambda: handle_defaultcfg(gateway=gateway, control=control),
+                }
+                if u.path in _cfg_routes:
+                    code, payload = _cfg_routes[u.path]()
                     return _json(self, code, payload)
 
                 if u.path == "/pid":
