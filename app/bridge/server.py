@@ -1703,40 +1703,11 @@ def build_handler(
                         return _json(self, code, payload)
                     assert req is not None
 
-                    apply_sse_headers(
-                        send_response=self.send_response,
-                        send_header=self.send_header,
-                        end_headers=self.end_headers,
-                    )
-
-                    disconnected = threading.Event()
-                    cancelled = threading.Event()
-
-                    send_evt = make_sse_emitter(
-                        wfile=self.wfile,
-                        is_disconnected=lambda: disconnected.is_set(),
-                        on_write_error=lambda: (disconnected.set(), cancelled.set()),
-                    )
-
+                    apply_sse_headers(send_response=self.send_response, send_header=self.send_header, end_headers=self.end_headers)
+                    disconnected, cancelled = threading.Event(), threading.Event()
+                    send_evt = make_sse_emitter(wfile=self.wfile, is_disconnected=lambda: disconnected.is_set(), on_write_error=lambda: (disconnected.set(), cancelled.set()))
                     send_evt("start", {"ok": True})
-                    run_clean_chat_stream(
-                        msg=str(req["msg"]),
-                        mode=str(req["mode"]),
-                        model=str(req["model"]),
-                        clean_timeout_s=int(req["clean_timeout_s"]),
-                        session_key=str(req["session_key"]),
-                        thread_id=req.get("thread_id"),
-                        attachments=list(req.get("attachments") or []),
-                        auto_tools=bool(req.get("auto_tools", False)),
-                        ai=ai,
-                        run_auto_tools=_run_clean_auto_tools,
-                        build_context=_build_clean_agent_context,
-                        system_prompt_for_mode=_clean_system_prompt,
-                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
-                        emit=send_evt,
-                        is_disconnected=lambda: disconnected.is_set(),
-                        cancel_event=cancelled,
-                    )
+                    run_clean_chat_stream(msg=str(req["msg"]), mode=str(req["mode"]), model=str(req["model"]), clean_timeout_s=int(req["clean_timeout_s"]), session_key=str(req["session_key"]), thread_id=req.get("thread_id"), attachments=list(req.get("attachments") or []), auto_tools=bool(req.get("auto_tools", False)), ai=ai, run_auto_tools=_run_clean_auto_tools, build_context=_build_clean_agent_context, system_prompt_for_mode=_clean_system_prompt, normalize_reply_for_prompt=_normalize_reply_for_prompt, emit=send_evt, is_disconnected=lambda: disconnected.is_set(), cancel_event=cancelled)
                     return
 
                 if u.path == "/agent/clean/preflight":
@@ -1744,35 +1715,12 @@ def build_handler(
 
                 if u.path == "/agent/clean/preflight/stream":
                     codex_login = _codex_cli_login_status()
-                    err, req = parse_clean_preflight_request(
-                        body=body,
-                        codex_login=codex_login,
-                        env_model=str(
-                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ),
-                        env_timeout=str(
-                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
-                        ),
-                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
-                    )
+                    err, req = parse_clean_preflight_request(body=body, codex_login=codex_login, env_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")), env_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")), default_sketch=_clean_default_sketch_path(repo_root, firmware))
                     if err is not None:
-                        code, payload = err
-                        return _json(self, code, payload)
+                        return _json(self, err[0], err[1])
                     assert req is not None
-                    manifest_gate, compat_gate, active_profile_id = (
-                        resolve_manifest_gates(
-                            firmware=firmware,
-                            profiles=profiles,
-                            compatibility_fn=_runtime_manifest_profile_compatibility,
-                            sketch=str(req["sketch"]),
-                        )
-                    )
-
-                    apply_sse_headers(
-                        send_response=self.send_response,
-                        send_header=self.send_header,
-                        end_headers=self.end_headers,
-                    )
+                    manifest_gate, compat_gate, active_profile_id = resolve_manifest_gates(firmware=firmware, profiles=profiles, compatibility_fn=_runtime_manifest_profile_compatibility, sketch=str(req["sketch"]))
+                    apply_sse_headers(send_response=self.send_response, send_header=self.send_header, end_headers=self.end_headers)
                     send_evt = make_sse_emitter(wfile=self.wfile)
 
                     send_evt("start", {"ok": True, "mode": str(req["mode"])})
