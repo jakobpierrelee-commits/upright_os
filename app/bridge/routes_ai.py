@@ -332,3 +332,36 @@ def handle_ai_metrics_get(
         db_stats=db_stats,
         ts=current_time,
     )
+
+
+def handle_agent_clean_status_get(
+    *,
+    query: Dict[str, List[str]],
+    gateway: Any,
+    control: Any,
+    codex_cli_login_status_fn: Callable[[], Dict[str, Any]],
+    env_model: str,
+    build_clean_status_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/clean/status GET request.
+
+    Returns (status_code, payload).
+    """
+    mode = (
+        str((query.get("mode", ["app_dev"]) or ["app_dev"])[0] or "app_dev").strip()
+        or "app_dev"
+    )
+    codex_login = codex_cli_login_status_fn()
+    serial_h = gateway.health()
+    control_state = control.snapshot()
+    model = str(env_model).strip() or "gpt-5-codex"
+    payload = build_clean_status_payload_fn(
+        mode=mode,
+        codex_login=codex_login,
+        serial_health=serial_h,
+        control_snapshot=control_state,
+        model=model,
+        lines=gateway.recent_lines(80),
+    )
+    return 200, payload

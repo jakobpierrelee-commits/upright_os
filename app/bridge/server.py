@@ -457,6 +457,7 @@ except ImportError:
     )
 try:
     from app.bridge.routes_ai import (
+        handle_agent_clean_status_get,
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_ai_knowledge_get,
@@ -474,6 +475,7 @@ try:
     )
 except ImportError:
     from routes_ai import (  # type: ignore
+        handle_agent_clean_status_get,
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_ai_knowledge_get,
@@ -5738,33 +5740,16 @@ def build_handler(
                     )
                     return _json(self, 200, payload)
                 if u.path == "/agent/clean/status":
-                    mode = (
-                        str(
-                            (parse_qs(u.query).get("mode", ["app_dev"]) or ["app_dev"])[
-                                0
-                            ]
-                            or "app_dev"
-                        ).strip()
-                        or "app_dev"
+                    q = parse_qs(u.query)
+                    code, payload = handle_agent_clean_status_get(
+                        query=q,
+                        gateway=gateway,
+                        control=control,
+                        codex_cli_login_status_fn=_codex_cli_login_status,
+                        env_model=os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"),
+                        build_clean_status_payload_fn=build_clean_status_payload,
                     )
-                    codex_login = _codex_cli_login_status()
-                    serial_h = gateway.health()
-                    control_state = control.snapshot()
-                    model = (
-                        str(
-                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ).strip()
-                        or "gpt-5-codex"
-                    )
-                    payload = build_clean_status_payload(
-                        mode=mode,
-                        codex_login=codex_login,
-                        serial_health=serial_h,
-                        control_snapshot=control_state,
-                        model=model,
-                        lines=gateway.recent_lines(80),
-                    )
-                    return _json(self, 200, payload)
+                    return _json(self, code, payload)
                 if u.path == "/agent/clean/threads":
                     q = parse_qs(u.query)
                     mode = (
