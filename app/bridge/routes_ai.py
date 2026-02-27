@@ -989,3 +989,55 @@ def apply_assistant_plan(
         "artifacts": artifacts,
         "status": status_after,
     }
+
+
+def agent_upload_from_body(
+    repo_root: Any, body: Dict[str, Any], *, safe_filename_fn: Any, attachment_kind_fn: Any
+) -> Dict[str, Any]:
+    """Process a file upload from agent request body."""
+    import base64
+    import secrets
+    import time
+
+    name = safe_filename_fn(str(body.get("name", "")))
+    mime = (
+        str(body.get("mime", "application/octet-stream")).strip()
+        or "application/octet-stream"
+    )
+    payload_b64 = str(body.get("content_base64", "")).strip()
+    if not payload_b64:
+        raise RuntimeError("missing_content_base64")
+    try:
+        raw = base64.b64decode(payload_b64, validate=True)
+    except Exception as exc:
+        raise RuntimeError(f"invalid_base64:{exc}") from exc
+    if not raw:
+        raise RuntimeError("empty_file")
+    if len(raw) > (5 * 1024 * 1024):
+        raise RuntimeError("file_too_large_max_5mb")
+
+    up_dir = repo_root / "app" / "bridge" / "agent_uploads"
+    up_dir.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    token = secrets.token_hex(4)
+    final_name = f"{stamp}_{token}_{name}"
+    target = up_dir / final_name
+    target.write_bytes(raw)
+
+    kind = attachment_kind_fn(mime, name)
+    text_excerpt = ""
+    if kind in {"text", "csv"}:
+        try:
+            text_excerpt = raw.decode("utf-8", errors="replace")[:16000]
+        except Exception:
+            text_excerpt = ""
+
+    return {
+        "id": f"att_{stamp}_{token}",
+        "name": name,
+        "mime": mime,
+        "kind": kind,
+        "size": len(raw),
+        "path": str(target),
+        "text_excerpt": text_excerpt,
+    }

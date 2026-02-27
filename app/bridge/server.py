@@ -509,6 +509,7 @@ try:
         handle_clean_preflight_post,
         handle_clean_chat_post,
         apply_assistant_plan,
+        agent_upload_from_body,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -534,6 +535,7 @@ except ImportError:
         handle_clean_preflight_post,
         handle_clean_chat_post,
         apply_assistant_plan,
+        agent_upload_from_body,
     )
 try:
     from app.bridge.routes_auth import (
@@ -1014,51 +1016,7 @@ def _attachment_kind(mime: str, name: str) -> str:
     return "binary"
 
 
-def _agent_upload_from_body(
-    repo_root: pathlib.Path, body: Dict[str, Any]
-) -> Dict[str, Any]:
-    name = _safe_upload_filename(str(body.get("name", "")))
-    mime = (
-        str(body.get("mime", "application/octet-stream")).strip()
-        or "application/octet-stream"
-    )
-    payload_b64 = str(body.get("content_base64", "")).strip()
-    if not payload_b64:
-        raise RuntimeError("missing_content_base64")
-    try:
-        raw = base64.b64decode(payload_b64, validate=True)
-    except Exception as exc:
-        raise RuntimeError(f"invalid_base64:{exc}") from exc
-    if not raw:
-        raise RuntimeError("empty_file")
-    if len(raw) > (5 * 1024 * 1024):
-        raise RuntimeError("file_too_large_max_5mb")
-
-    up_dir = repo_root / "app" / "bridge" / "agent_uploads"
-    up_dir.mkdir(parents=True, exist_ok=True)
-    stamp = int(time.time())
-    token = secrets.token_hex(4)
-    final_name = f"{stamp}_{token}_{name}"
-    target = up_dir / final_name
-    target.write_bytes(raw)
-
-    kind = _attachment_kind(mime, name)
-    text_excerpt = ""
-    if kind in {"text", "csv"}:
-        try:
-            text_excerpt = raw.decode("utf-8", errors="replace")[:16000]
-        except Exception:
-            text_excerpt = ""
-
-    return {
-        "id": f"att_{stamp}_{token}",
-        "name": name,
-        "mime": mime,
-        "kind": kind,
-        "size": len(raw),
-        "path": str(target),
-        "text_excerpt": text_excerpt,
-    }
+# _agent_upload_from_body moved to routes_ai.py as agent_upload_from_body
 
 
 def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
@@ -2311,7 +2269,9 @@ def build_handler(
                     code, payload = handle_agent_file_upload(
                         body=body,
                         repo_root=repo_root,
-                        agent_upload_from_body_fn=_agent_upload_from_body,
+                        agent_upload_from_body_fn=lambda repo, body: agent_upload_from_body(
+                            repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind
+                        ),
                         build_attachment_payload_fn=build_attachment_payload,
                     )
                     return _json(self, code, payload)
@@ -2320,7 +2280,9 @@ def build_handler(
                     code, payload = handle_agent_file_upload(
                         body=body,
                         repo_root=repo_root,
-                        agent_upload_from_body_fn=_agent_upload_from_body,
+                        agent_upload_from_body_fn=lambda repo, body: agent_upload_from_body(
+                            repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind
+                        ),
                         build_attachment_payload_fn=build_attachment_payload,
                     )
                     return _json(self, code, payload)
