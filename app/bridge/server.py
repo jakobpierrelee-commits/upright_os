@@ -118,50 +118,15 @@ try:
 except ImportError:
     from provider_router import ProviderRouter
 try:
-    from app.bridge.arm_safety import (
-        PreArmSafetyGate,
-        run_prearm_hardware_check as _run_prearm_hardware_check_impl,
-    )
+    from app.bridge.arm_safety import PreArmSafetyGate, run_prearm_hardware_check as _run_prearm_hardware_check_impl
 except ImportError:
-    from arm_safety import (  # type: ignore
-        PreArmSafetyGate,
-        run_prearm_hardware_check as _run_prearm_hardware_check_impl,
-    )
+    from arm_safety import PreArmSafetyGate, run_prearm_hardware_check as _run_prearm_hardware_check_impl  # type: ignore
 try:
-    from app.bridge.clean_firmware_ops import (
-        handle_clean_firmware_compile,
-        handle_clean_firmware_upload,
-        handle_clean_known_good_recovery,
-        handle_clean_upload_precheck,
-        resolve_clean_upload_inputs,
-        build_upload_target_runbook,
-        build_upload_precheck_payload,
-        summarize_sketch_artifact_issues,
-        summarize_tool_failures,
-        clean_upload_target_meta,
-        clean_default_sketch_path,
-        clean_default_fqbn,
-    )
+    from app.bridge.clean_firmware_ops import handle_clean_firmware_compile, handle_clean_firmware_upload, handle_clean_known_good_recovery, handle_clean_upload_precheck, resolve_clean_upload_inputs, build_upload_target_runbook, build_upload_precheck_payload, summarize_sketch_artifact_issues, summarize_tool_failures, clean_upload_target_meta, clean_default_sketch_path, clean_default_fqbn
 except ImportError:
-    from clean_firmware_ops import (  # type: ignore
-        handle_clean_firmware_compile,
-        handle_clean_firmware_upload,
-        handle_clean_known_good_recovery,
-        handle_clean_upload_precheck,
-        resolve_clean_upload_inputs,
-        build_upload_target_runbook,
-        build_upload_precheck_payload,
-        summarize_sketch_artifact_issues,
-        summarize_tool_failures,
-        clean_upload_target_meta,
-        clean_default_sketch_path,
-        clean_default_fqbn,
-    )
+    from clean_firmware_ops import handle_clean_firmware_compile, handle_clean_firmware_upload, handle_clean_known_good_recovery, handle_clean_upload_precheck, resolve_clean_upload_inputs, build_upload_target_runbook, build_upload_precheck_payload, summarize_sketch_artifact_issues, summarize_tool_failures, clean_upload_target_meta, clean_default_sketch_path, clean_default_fqbn  # type: ignore
 try:
-    from app.bridge.clean_contracts import (
-        validate_clean_preflight_response,
-        validate_prearm_precheck_response,
-    )
+    from app.bridge.clean_contracts import validate_clean_preflight_response, validate_prearm_precheck_response
 except ImportError:
     from clean_contracts import (  # type: ignore
         validate_clean_preflight_response,
