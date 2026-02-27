@@ -306,6 +306,7 @@ try:
         apply_tuning_plan,
         sanitize_apply_plan,
         revert_snapshot,
+        format_apply_note,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
@@ -319,6 +320,7 @@ except ImportError:
         apply_tuning_plan,
         sanitize_apply_plan,
         revert_snapshot,
+        format_apply_note,
     )
 try:
     from app.bridge.routes_burst import (
@@ -959,37 +961,7 @@ def _strip_apply_json_block(answer: str) -> str:
     return merged
 
 
-def _format_apply_note(apply_result: Dict[str, Any]) -> str:
-    if not bool(apply_result.get("ok", False)):
-        return f"Apply failed: {str(apply_result.get('error', 'unknown_error'))}"
-    applied = apply_result.get("applied", [])
-    if not isinstance(applied, list):
-        applied = []
-    sections = ", ".join(str(x) for x in applied) if applied else "none"
-    changed = apply_result.get("changed", {})
-    kd_note = ""
-    if isinstance(changed, dict):
-        pid = changed.get("pid")
-        if isinstance(pid, dict):
-            before = pid.get("before") if isinstance(pid.get("before"), dict) else {}
-            target = pid.get("target") if isinstance(pid.get("target"), dict) else {}
-            bkd = before.get("kd")
-            tkd = target.get("kd")
-            if bkd is not None and tkd is not None:
-                kd_note = f" KD {float(bkd):.3f} -> {float(tkd):.3f}."
-    sid = str(apply_result.get("snapshot_id", "")).strip()
-    extras = apply_result.get("artifacts", {})
-    extra_note = ""
-    if isinstance(extras, dict):
-        sketch_path = extras.get("sketch_path")
-        unified_folder = extras.get("unified_folder")
-        if isinstance(unified_folder, str) and unified_folder:
-            extra_note += f" Unified scaffold: {unified_folder}."
-        if isinstance(sketch_path, str) and sketch_path:
-            extra_note += f" Sketch updated: {sketch_path}."
-    if sid:
-        return f"Applied now: {sections}.{kd_note}{extra_note} Revert point saved ({sid}).".strip()
-    return f"Applied now: {sections}.{kd_note}{extra_note}".strip()
+# _format_apply_note moved to routes_tuning.py as format_apply_note
 
 
 def _safe_upload_filename(name: str) -> str:
