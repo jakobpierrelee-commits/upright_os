@@ -1534,19 +1534,12 @@ def build_handler(
                 if u.path in _arm_routes:
                     action, handler = _arm_routes[u.path]
                     _require_action_allowed(action, gateway, control, prearm_gate=prearm_safety)
-                    code, payload = handler()
-                    return _json(self, code, payload)
+                    return _json(self, *handler())
                 if u.path == "/arm/precheck":
                     return _json(self, *handle_arm_precheck(body=body, gateway=gateway, control=control, prearm_safety=prearm_safety, run_prearm_hardware_check_fn=_run_prearm_hardware_check, report_design_observation_fn=_report_design_observation, resolve_action_gates_fn=_resolve_action_gates))
-
-                # Estop and simple control routes dispatch
-                _estop_routes = {
-                    "/estop/latch": lambda: handle_estop_latch(gateway=gateway, control=control),
-                    "/estop/reset": lambda: handle_estop_reset(gateway=gateway, control=control),
-                }
+                _estop_routes = {"/estop/latch": lambda: handle_estop_latch(gateway=gateway, control=control), "/estop/reset": lambda: handle_estop_reset(gateway=gateway, control=control)}
                 if u.path in _estop_routes:
-                    code, payload = _estop_routes[u.path]()
-                    return _json(self, code, payload)
+                    return _json(self, *_estop_routes[u.path]())
 
                 _imu_fn = lambda res, cmd: classify_imu_command_result(res, cmd_name=cmd)
                 _imu_routes = {"/cal_zero": lambda: handle_cal_zero(gateway=gateway, control=control), "/imu/calibrate": lambda: handle_imu_calibrate(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/load": lambda: handle_imu_load(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/save": lambda: handle_imu_save(gateway=gateway, control=control, classify_imu_fn=_imu_fn), "/imu/info": lambda: handle_imu_info(gateway=gateway, control=control, classify_imu_fn=_imu_fn)}
