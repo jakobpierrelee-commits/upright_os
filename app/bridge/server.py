@@ -1705,12 +1705,7 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/agent/clean/firmware/release-serial":
-                    code, payload = handle_release_serial_post(
-                        body=body,
-                        repo_root=repo_root,
-                        build_port_released_payload_fn=build_port_released_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_release_serial_post(body=body, repo_root=repo_root, build_port_released_payload_fn=build_port_released_payload))
 
                 if u.path == "/agent/clean/recovery/known-good":
                     requested_port = str(body.get("port", "")).strip()
