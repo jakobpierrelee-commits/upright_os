@@ -650,6 +650,22 @@ except ImportError:
         build_control_post_routes,
     )
 try:
+    from app.bridge.routes_streaming import (
+        build_agent_chat_stream_context,
+        resolve_agent_stream_runtime,
+        make_inline_sse_emitter,
+        apply_sse_response_headers,
+        run_agent_chat_stream_executor,
+    )
+except ImportError:
+    from routes_streaming import (  # type: ignore
+        build_agent_chat_stream_context,
+        resolve_agent_stream_runtime,
+        make_inline_sse_emitter,
+        apply_sse_response_headers,
+        run_agent_chat_stream_executor,
+    )
+try:
     from app.bridge.routes_probe import (
         handle_probe_compat_get,
         handle_probe_connect_get,
