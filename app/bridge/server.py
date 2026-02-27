@@ -1866,38 +1866,7 @@ def build_handler(
                     return _json(self, *handle_agent_thread_new(body=body, me=me, agent_mission=agent_mission, ai=ai, build_agent_thread_state_payload_fn=build_agent_thread_state_payload))
 
                 if u.path == "/agent/chat":
-                    code, payload = handle_agent_chat_post(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        firmware=firmware,
-                        commissioning=commissioning,
-                        host_capture=host_capture,
-                        config_history=config_history,
-                        knowledge=knowledge,
-                        ai=ai,
-                        auth=auth,
-                        agent_mission=agent_mission,
-                        provider_router=provider_router,
-                        codex_agent=codex_agent,
-                        burst_status_fn=burst_status,
-                        legacy_execution_guard_fn=_legacy_execution_guard,
-                        extract_auth_token_fn=_extract_auth_token,
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        agent_choose_executor_fn=_agent_choose_executor,
-                        agent_resolve_model_fn=_agent_resolve_model,
-                        agent_model_allowed_fn=_agent_model_allowed,
-                        agent_mode_system_prompt_fn=_agent_mode_system_prompt,
-                        sanitize_agent_attachments_fn=_sanitize_agent_attachments,
-                        commissioning_ai_context_fn=lambda c: commissioning_ai_context(c, read_csv_tail_fn=read_csv_tail),
-                        host_capture_ai_context_fn=lambda h: host_capture_ai_context(h, read_csv_tail_fn=read_csv_tail),
-                        assistant_capabilities_context_fn=assistant_capabilities_context,
-                        normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
-                        build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload,
-                        handler_self=self,
-                        env_openai_model=os.environ.get("OPENAI_MODEL", ""),
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_agent_chat_post(body=body, gateway=gateway, control=control, firmware=firmware, commissioning=commissioning, host_capture=host_capture, config_history=config_history, knowledge=knowledge, ai=ai, auth=auth, agent_mission=agent_mission, provider_router=provider_router, codex_agent=codex_agent, burst_status_fn=burst_status, legacy_execution_guard_fn=_legacy_execution_guard, extract_auth_token_fn=_extract_auth_token, codex_cli_login_status_fn=_codex_cli_login_status, agent_choose_executor_fn=_agent_choose_executor, agent_resolve_model_fn=_agent_resolve_model, agent_model_allowed_fn=_agent_model_allowed, agent_mode_system_prompt_fn=_agent_mode_system_prompt, sanitize_agent_attachments_fn=_sanitize_agent_attachments, commissioning_ai_context_fn=lambda c: commissioning_ai_context(c, read_csv_tail_fn=read_csv_tail), host_capture_ai_context_fn=lambda h: host_capture_ai_context(h, read_csv_tail_fn=read_csv_tail), assistant_capabilities_context_fn=assistant_capabilities_context, normalize_reply_for_prompt_fn=_normalize_reply_for_prompt, build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload, handler_self=self, env_openai_model=os.environ.get("OPENAI_MODEL", "")))
 
                 if u.path == "/agent/chat/stream":
                     guard = _legacy_execution_guard(u.path)
