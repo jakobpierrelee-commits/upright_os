@@ -1,5 +1,74 @@
 # UpRight.os Session Handoff
 
+## Handoff Snapshot — Cascade-2026-0226-HybridRebuild
+
+**Date:** 2026-02-26
+**Agent:** Cascade
+**Branch:** `recover/uiux-restore-2026-02-19`
+**SHA:** `90a6cb8`
+
+### Strategic Pivot
+
+This session pivoted from incremental extraction to a **Hybrid Rebuild** strategy based on strategic review with user. Created comprehensive PRD and architectural vision documents.
+
+### Work Completed
+
+**Strategic Review: ✅ COMPLETE**
+- Created `docs/PRODUCT_VISION_V1.md` — Core identity and 3 agent capabilities
+- Created `docs/IDEAL_ARCHITECTURE.md` — Target architecture (~5,000 lines vs current ~41,000)
+- Created `docs/SCOPE_CUT_CHECKLIST.md` — Actionable cut/keep decisions
+- Resolved open questions: Markdown+YAML for knowledge, 2 firmware templates, files over SQLite
+
+**Phase 1 — Delete Duplicates: ✅ COMPLETE**
+- Removed `/ai/*` routes (duplicate of `/agent/*`): -717 lines
+- Removed multi-user `/auth/*` routes: -26 lines
+- Removed `/auth/me` route: -9 lines
+- Consolidated agent modes to single `robot_dev` mode in `agent_helpers.py`
+- **server.py: 6,380 → 5,511 lines (-869 lines, 14% reduction)**
+
+**Phase 2 — Extract Services: IN PROGRESS**
+- Analyzed helper function blocks for extraction
+- Identified 51 helper functions (~2,000 lines) that can be moved to domain modules
+- Route count: 102 (down from 124)
+
+### Files Changed
+- `docs/PRODUCT_VISION_V1.md` — NEW (vision document)
+- `docs/IDEAL_ARCHITECTURE.md` — NEW (target architecture)
+- `docs/SCOPE_CUT_CHECKLIST.md` — NEW (actionable checklist)
+- `app/bridge/server.py` — Deleted /ai/*, /auth/* routes (-869 lines)
+- `app/bridge/agent_helpers.py` — Consolidated agent modes (-26 lines)
+
+### Verification Commands Run
+```bash
+python3 -m py_compile app/bridge/server.py  → PASS
+python3 -m py_compile app/bridge/agent_helpers.py  → PASS
+[check_import_boundaries] PASS (scanned=11324, boundary_scoped=56, zones=9)
+```
+
+### Current Metrics
+| Metric | Before Session | After Session | Target |
+|--------|----------------|---------------|--------|
+| server.py | 6,380 | 5,511 | ~500 |
+| Routes | 124 | 102 | ~20 |
+| Agent modes | 4+ | 1 | 1 |
+| Backend total | ~41,000 | ~40,000 | ~5,000 |
+
+### Next Recommended Tasks (Priority Order)
+1. **Continue route deletions** — Remove `/commissioning/*` (4 routes), `/v1/setup/*` (4 routes) if not needed
+2. **Consolidate `/agent/clean/*` into `/agent/*`** — 14 routes can be simplified
+3. **Extract manifest validation functions** — ~340 lines to `firmware_lifecycle/` domain
+4. **Extract `_build_hardware_registry`** — 160 lines to `hardware_profile/` domain
+
+### Open Risks/Blockers
+- Phase 2-6 require deeper refactoring than Phase 1 deletions
+- Frontend (App.tsx at 122KB) needs parallel simplification
+- Test coverage for deleted routes needs verification
+
+### PRD Reference
+Full Hybrid Rebuild PRD at: `/Users/jvke/.windsurf/plans/hybrid-prd-03fb24.md`
+
+---
+
 ## Handoff Snapshot — Cascade-2026-0226-PhaseB
 
 **Date:** 2026-02-26
