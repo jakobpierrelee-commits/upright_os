@@ -301,6 +301,7 @@ try:
         handle_limits_post,
         apply_tuning_plan,
         sanitize_apply_plan,
+        revert_snapshot,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
@@ -313,6 +314,7 @@ except ImportError:
         handle_limits_post,
         apply_tuning_plan,
         sanitize_apply_plan,
+        revert_snapshot,
     )
 try:
     from app.bridge.routes_burst import (
@@ -1066,59 +1068,7 @@ def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
 # ConfigHistoryManager moved to domain module
 # _apply_tuning_plan moved to routes_tuning.py as apply_tuning_plan
 # _apply_assistant_plan moved to routes_ai.py as apply_assistant_plan
-
-
-def _revert_snapshot(
-    gateway: NanoSerialGateway,
-    config_history: ConfigHistoryManager,
-    *,
-    snapshot_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    snap = config_history.get_snapshot(snapshot_id=snapshot_id)
-    if not snap:
-        raise RuntimeError("snapshot_not_found")
-    vals = snap.get("values", {})
-    pid = vals.get("pid", {}) if isinstance(vals, dict) else {}
-    motion = vals.get("motion", {}) if isinstance(vals, dict) else {}
-    setpoint = vals.get("setpoint", {}) if isinstance(vals, dict) else {}
-    limits = vals.get("limits", {}) if isinstance(vals, dict) else {}
-    actions: list[str] = []
-    if all(_safe_float(pid.get(k)) is not None for k in ("kp", "ki", "kd")):
-        gateway.command(
-            f"PID {float(pid['kp'])} {float(pid['ki'])} {float(pid['kd'])}",
-            expect_contains="OK PID",
-            timeout=2.0,
-        )
-        actions.append("pid")
-    if all(_safe_float(motion.get(k)) is not None for k in ("kv", "kx")):
-        gateway.command(
-            f"MOTION {float(motion['kv'])} {float(motion['kx'])}",
-            expect_contains="OK MOTION",
-            timeout=2.0,
-        )
-        actions.append("motion")
-    if _safe_float(setpoint.get("deg")) is not None:
-        gateway.command(
-            f"SETPOINT {float(setpoint['deg'])}",
-            expect_contains="OK SETPOINT",
-            timeout=2.0,
-        )
-        actions.append("setpoint")
-    if all(
-        _safe_float(limits.get(k)) is not None for k in ("out_max", "tip_deg", "i_max")
-    ):
-        gateway.command(
-            f"LIMITS {float(limits['out_max'])} {float(limits['tip_deg'])} {float(limits['i_max'])}",
-            expect_contains="OK LIMITS",
-            timeout=2.0,
-        )
-        actions.append("limits")
-    return {
-        "ok": True,
-        "snapshot_id": snap.get("snapshot_id"),
-        "reverted": actions,
-        "status": gateway.get_status(),
-    }
+# _revert_snapshot moved to routes_tuning.py as revert_snapshot
 
 
 def _read_csv_tail(path: pathlib.Path, max_tail: int = 80) -> Dict[str, Any]:
@@ -2575,7 +2525,7 @@ def build_handler(
                 if u.path == "/config/revert":
                     code, payload = handle_config_revert(
                         body=body,
-                        revert_snapshot_fn=lambda snapshot_id: _revert_snapshot(
+                        revert_snapshot_fn=lambda snapshot_id: revert_snapshot(
                             gateway, config_history, snapshot_id=snapshot_id
                         ),
                         control_snapshot=control.snapshot(),
