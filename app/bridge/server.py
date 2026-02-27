@@ -1200,55 +1200,30 @@ def build_handler(
         return out
 
     def burst_status() -> Dict[str, Any]:
-        lines = gateway.recent_lines(800)
+        lines, host = gateway.recent_lines(800), host_capture.status()
         burst_events = [ln for ln in lines if ln.startswith("BURSTCSV")]
         csv_recent = sum(1 for ln in lines if ln.startswith("CSV,"))
-        host = host_capture.status()
         state = "idle"
         if burst_events:
             last = burst_events[-1]
-            if "DONE" in last:
-                state = "done"
-            elif "CANCELED" in last:
-                state = "canceled"
-            elif "STABLE" in last:
-                state = "stable"
-            elif "ARMED" in last:
-                state = "armed"
+            state = "done" if "DONE" in last else "canceled" if "CANCELED" in last else "stable" if "STABLE" in last else "armed" if "ARMED" in last else "idle"
         else:
             hs = str(host.get("state", "idle"))
             if hs in {"armed", "capturing", "done", "failed"}:
                 state = hs
-        return {
-            "state": state,
-            "last_event": burst_events[-1] if burst_events else None,
-            "events_recent": burst_events[-12:],
-            "csv_recent": csv_recent,
-            "host_capture": host,
-        }
+        return {"state": state, "last_event": burst_events[-1] if burst_events else None, "events_recent": burst_events[-12:], "csv_recent": csv_recent, "host_capture": host}
 
     def tooling_trace_candidates() -> list[str]:
         paths: list[pathlib.Path] = []
-        for pat in (
-            "app/bridge/tests/fixtures/trace_replay_*.csv",
-            "tests/results/run_*.csv",
-            "tests/results/host_run_*.csv",
-            "tests/results/*.csv",
-        ):
+        for pat in ("app/bridge/tests/fixtures/trace_replay_*.csv", "tests/results/run_*.csv", "tests/results/host_run_*.csv", "tests/results/*.csv"):
             paths.extend(repo_root.glob(pat))
-        uniq = sorted({str(p.relative_to(repo_root)) for p in paths if p.exists()})
-        return uniq[-80:]
+        return sorted({str(p.relative_to(repo_root)) for p in paths if p.exists()})[-80:]
 
-    def history_with_reply(
-        history: list[Dict[str, Any]], reply: str
-    ) -> list[Dict[str, Any]]:
+    def history_with_reply(history: list[Dict[str, Any]], reply: str) -> list[Dict[str, Any]]:
         out = list(history)
         for i in range(len(out) - 1, -1, -1):
-            node = out[i]
-            if str(node.get("role", "")) == "assistant":
-                repl = dict(node)
-                repl["text"] = reply
-                out[i] = repl
+            if str(out[i].get("role", "")) == "assistant":
+                out[i] = {**out[i], "text": reply}
                 break
         return out
 
