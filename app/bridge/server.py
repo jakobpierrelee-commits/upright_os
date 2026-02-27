@@ -1590,14 +1590,8 @@ def build_handler(
                 return _json(self, 400, {"ok": False, "error": f"missing field: {exc}"})
             except RuntimeError as exc:
                 msg = str(exc)
-                # Error code lookup tables
-                _400_errs = {"invalid_email", "weak_password", "email_exists", "invalid_credentials", "invalid_openai_key", "empty_message", "sketch_content_empty", "profile_label_required", "profile_id_required", "ai_profile_label_required", "ai_profile_id_required"}
-                _404_errs = {"profile_not_found", "ai_profile_not_found", "snapshot_not_found"}
-                _401_errs = {"unauthenticated", "openai_api_key_missing"}
-                _409_ctrl = {"tuning_delta_too_large_while_balancing", "arm_not_prepared"}
-                _428_errs = {"preflight_required", "preflight_invalid", "preflight_mismatch"}
-                _423_errs = {"estop_latched", "session_stale"}
-                _409_fw = {"firmware_running", "operation_in_progress"}
+                _400_errs, _404_errs, _401_errs = {"invalid_email", "weak_password", "email_exists", "invalid_credentials", "invalid_openai_key", "empty_message", "sketch_content_empty", "profile_label_required", "profile_id_required", "ai_profile_label_required", "ai_profile_id_required"}, {"profile_not_found", "ai_profile_not_found", "snapshot_not_found"}, {"unauthenticated", "openai_api_key_missing"}
+                _409_ctrl, _428_errs, _423_errs, _409_fw = {"tuning_delta_too_large_while_balancing", "arm_not_prepared"}, {"preflight_required", "preflight_invalid", "preflight_mismatch"}, {"estop_latched", "session_stale"}, {"firmware_running", "operation_in_progress"}
                 if msg in _400_errs or msg.startswith("invalid_unified_profile:") or msg.startswith("invalid_tuning_value:"):
                     return _json(self, 400, {"ok": False, "error": msg})
                 if msg.startswith("openai_key_verification_failed:"):
@@ -1614,8 +1608,7 @@ def build_handler(
                     return _json(self, 423, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg.startswith("action_blocked:"):
                     parts = msg.split(":", 2)
-                    action, reasons_raw = (parts[1] if len(parts) > 1 else "unknown"), (parts[2] if len(parts) > 2 else "")
-                    return _json(self, 423, {"ok": False, "error": "action_blocked", "action": action, "reasons": [r for r in reasons_raw.split(",") if r], "action_gates": _resolve_action_gates(gateway, control, prearm_gate=prearm_safety), "control": control.snapshot()})
+                    return _json(self, 423, {"ok": False, "error": "action_blocked", "action": parts[1] if len(parts) > 1 else "unknown", "reasons": [r for r in (parts[2] if len(parts) > 2 else "").split(",") if r], "action_gates": _resolve_action_gates(gateway, control, prearm_gate=prearm_safety), "control": control.snapshot()})
                 if msg == "commissioning_running":
                     return _json(self, 409, {"ok": False, "error": msg, "commissioning": commissioning.status()})
                 if msg in _409_fw:
