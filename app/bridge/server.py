@@ -1677,29 +1677,11 @@ def main() -> int:
         "--baud", type=int, default=int(os.environ.get("NANO_BAUD", "115200"))
     )
     ap.add_argument("--host", default=os.environ.get("APP_BRIDGE_HOST", "127.0.0.1"))
-    ap.add_argument(
-        "--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8797"))
-    )
-    ap.add_argument(
-        "--telemetry-port",
-        type=int,
-        default=int(os.environ.get("APP_TELEMETRY_PORT", "8798")),
-    )
-    ap.add_argument(
-        "--instance",
-        default=os.environ.get("APP_BRIDGE_INSTANCE", "upright-lean-v1"),
-        help="Instance label for process isolation/observability",
-    )
-    ap.add_argument(
-        "--watchdog-timeout",
-        type=float,
-        default=float(os.environ.get("APP_WATCHDOG_TIMEOUT_S", "2.0")),
-    )
-    ap.add_argument(
-        "--supervised",
-        action="store_true",
-        help="Suppress direct-run warning (set by supervisor)",
-    )
+    ap.add_argument("--http-port", type=int, default=int(os.environ.get("APP_BRIDGE_PORT", "8797")))
+    ap.add_argument("--telemetry-port", type=int, default=int(os.environ.get("APP_TELEMETRY_PORT", "8798")))
+    ap.add_argument("--instance", default=os.environ.get("APP_BRIDGE_INSTANCE", "upright-lean-v1"), help="Instance label")
+    ap.add_argument("--watchdog-timeout", type=float, default=float(os.environ.get("APP_WATCHDOG_TIMEOUT_S", "2.0")))
+    ap.add_argument("--supervised", action="store_true", help="Suppress direct-run warning")
     args = ap.parse_args()
 
     if not args.supervised:
