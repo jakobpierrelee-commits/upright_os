@@ -1118,17 +1118,7 @@ def _format_hardware_context_notice(hardware_context: Any, update_info: Any) -> 
     return f"Hardware context updated ({board_label}). I will adapt guidance to the new parts map."
 
 
-def _pin_range_for_family(family: str) -> tuple[int, int]:
-    fam = str(family or "").strip().lower()
-    if fam == "esp32":
-        return (0, 39)
-    if fam == "rp2040":
-        return (0, 29)
-    if fam == "teensy":
-        return (0, 54)
-    return (0, 21)  # arduino_avr default
-
-
+# _pin_range_for_family already imported from manifest_validation.py
 # _family_capabilities, _protocol_schema, _has_valid_pin, _validate_protocol_pins
 # all moved to manifest_validation.py (already imported)
 
