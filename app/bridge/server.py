@@ -594,6 +594,7 @@ try:
         handle_setup_compat_test,
         handle_setup_smoke_check,
         handle_setup_overwatch_check,
+        classify_imu_command_result,
     )
 except ImportError:
     from routes_probe import (  # type: ignore
@@ -602,6 +603,7 @@ except ImportError:
         handle_setup_compat_test,
         handle_setup_smoke_check,
         handle_setup_overwatch_check,
+        classify_imu_command_result,
     )
 try:
     from app.bridge.clean_ai import (
@@ -1387,51 +1389,7 @@ def _blocked_while_latched(cmd: str) -> bool:
     return not c.startswith(safe_prefixes)
 
 
-def _classify_imu_command_result(
-    res: Dict[str, Any], *, cmd_name: str
-) -> Dict[str, Any]:
-    lines = list(res.get("lines", [])) if isinstance(res, dict) else []
-    matched = str(res.get("matched", "")) if isinstance(res, dict) else ""
-    candidates: list[str] = []
-    if matched:
-        candidates.append(matched)
-    candidates.extend(reversed(lines))
-    imu_line = ""
-    for ln in candidates:
-        txt = str(ln or "").strip()
-        if "IMU" in txt.upper():
-            imu_line = txt
-            break
-    if not imu_line:
-        return {
-            "ok": False,
-            "error": f"imu_{cmd_name.lower()}_no_response",
-            "detail": "",
-        }
-
-    up = imu_line.upper()
-    if up.startswith("OK IMU_"):
-        return {"ok": True, "error": "", "detail": imu_line}
-    if "ERR UNKNOWN" in up and "IMU" in up:
-        return {
-            "ok": False,
-            "error": "imu_command_unsupported:flash_runtime_with_imu_calibration_support",
-            "detail": imu_line,
-        }
-    if "EEPROM_UNAVAILABLE" in up:
-        return {
-            "ok": False,
-            "error": "imu_eeprom_unavailable",
-            "detail": imu_line,
-        }
-    if "IMU_NOT_READY" in up:
-        return {"ok": False, "error": "imu_not_ready", "detail": imu_line}
-    return {
-        "ok": False,
-        "error": f"imu_{cmd_name.lower()}_failed",
-        "detail": imu_line,
-    }
-
+# _classify_imu_command_result moved to routes_probe.py as classify_imu_command_result
 
 
 def _run_prearm_hardware_check(
@@ -3075,7 +3033,7 @@ def build_handler(
                     code, payload = handle_imu_calibrate(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
                             res, cmd_name=cmd
                         ),
                     )
@@ -3085,7 +3043,7 @@ def build_handler(
                     code, payload = handle_imu_load(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
                             res, cmd_name=cmd
                         ),
                     )
@@ -3095,7 +3053,7 @@ def build_handler(
                     code, payload = handle_imu_save(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
                             res, cmd_name=cmd
                         ),
                     )
@@ -3105,7 +3063,7 @@ def build_handler(
                     code, payload = handle_imu_info(
                         gateway=gateway,
                         control=control,
-                        classify_imu_fn=lambda res, cmd: _classify_imu_command_result(
+                        classify_imu_fn=lambda res, cmd: classify_imu_command_result(
                             res, cmd_name=cmd
                         ),
                     )

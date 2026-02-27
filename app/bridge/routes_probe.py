@@ -245,3 +245,50 @@ def handle_setup_overwatch_check(
     return 200, build_setup_check_payload_fn(
         check_key="overwatch_check", check_result=out, attempt=attempt
     )
+
+
+def classify_imu_command_result(
+    res: Dict[str, Any], *, cmd_name: str
+) -> Dict[str, Any]:
+    """Classify an IMU command result into success/error categories."""
+    lines = list(res.get("lines", [])) if isinstance(res, dict) else []
+    matched = str(res.get("matched", "")) if isinstance(res, dict) else ""
+    candidates: list[str] = []
+    if matched:
+        candidates.append(matched)
+    candidates.extend(reversed(lines))
+    imu_line = ""
+    for ln in candidates:
+        txt = str(ln or "").strip()
+        if "IMU" in txt.upper():
+            imu_line = txt
+            break
+    if not imu_line:
+        return {
+            "ok": False,
+            "error": f"imu_{cmd_name.lower()}_no_response",
+            "detail": "",
+        }
+
+    up = imu_line.upper()
+    if up.startswith("OK IMU_"):
+        return {"ok": True, "error": "", "detail": imu_line}
+    if "ERR UNKNOWN" in up and "IMU" in up:
+        return {
+            "ok": False,
+            "error": "imu_command_unsupported:flash_runtime_with_imu_calibration_support",
+            "detail": imu_line,
+        }
+    if "EEPROM_UNAVAILABLE" in up:
+        return {
+            "ok": False,
+            "error": "imu_eeprom_unavailable",
+            "detail": imu_line,
+        }
+    if "IMU_NOT_READY" in up:
+        return {"ok": False, "error": "imu_not_ready", "detail": imu_line}
+    return {
+        "ok": False,
+        "error": f"imu_{cmd_name.lower()}_failed",
+        "detail": imu_line,
+    }
