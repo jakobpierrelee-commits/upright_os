@@ -1143,14 +1143,7 @@ def build_handler(
         status = dict(health.get("last_status", {}))
         prearm = prearm_safety.snapshot()
         recent_attempts = setup_attempt_history.list_recent(limit=8)
-        preflight_ok = any(
-            (
-                isinstance(row, dict)
-                and str(row.get("test_type", "")).strip().lower() == "preflight"
-                and str(row.get("status", "")).strip().lower() == "pass"
-            )
-            for row in recent_attempts
-        )
+        preflight_ok = any(isinstance(row, dict) and str(row.get("test_type", "")).strip().lower() == "preflight" and str(row.get("status", "")).strip().lower() == "pass" for row in recent_attempts)
         latest_overwatch_score_pct: Optional[float] = None
         for row in recent_attempts:
             if not isinstance(row, dict):
@@ -1170,20 +1163,7 @@ def build_handler(
                 break
         mode = str(status.get("mode", "") or "").strip().upper()
         fault = str(status.get("fault", "") or "").strip()
-        checks = {
-            "upload_ok": bool(
-                fw_rc == 0 or "upload_guarded_pass" in fw_state or "upload" in fw_phase
-            ),
-            "reconnect_ok": any(
-                "bridge reconnected" in str(line).lower() for line in fw_tail
-            )
-            or bool(health.get("connected", False)),
-            "preflight_ok": bool(preflight_ok),
-            "prearm_ok": bool(prearm.get("passed", False)),
-            "telemetry_feed_ok": bool(status),
-            "no_fault": fault in {"", "0"},
-            "safe_mode_ok": mode in {"SAFE_IDLE", "IDLE", "BALANCING", "BALANCE"},
-        }
+        checks = {"upload_ok": bool(fw_rc == 0 or "upload_guarded_pass" in fw_state or "upload" in fw_phase), "reconnect_ok": any("bridge reconnected" in str(line).lower() for line in fw_tail) or bool(health.get("connected", False)), "preflight_ok": bool(preflight_ok), "prearm_ok": bool(prearm.get("passed", False)), "telemetry_feed_ok": bool(status), "no_fault": fault in {"", "0"}, "safe_mode_ok": mode in {"SAFE_IDLE", "IDLE", "BALANCING", "BALANCE"}}
         return {
             "checks": checks,
             "sources": {
