@@ -529,6 +529,7 @@ try:
         assistant_capabilities_context,
         hardware_context_board_label,
         format_hardware_context_notice,
+        attachment_kind,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -558,6 +559,7 @@ except ImportError:
         assistant_capabilities_context,
         hardware_context_board_label,
         format_hardware_context_notice,
+        attachment_kind,
     )
 try:
     from app.bridge.routes_auth import (
@@ -953,24 +955,7 @@ def _safe_upload_filename(name: str) -> str:
     return cleaned[:120]
 
 
-def _attachment_kind(mime: str, name: str) -> str:
-    m = str(mime or "").strip().lower()
-    n = str(name or "").strip().lower()
-    if m.startswith("image/"):
-        return "image"
-    if "csv" in m or n.endswith(".csv"):
-        return "csv"
-    if (
-        m.startswith("text/")
-        or "json" in m
-        or "yaml" in m
-        or "toml" in m
-        or n.endswith((".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".log"))
-    ):
-        return "text"
-    return "binary"
-
-
+# _attachment_kind moved to routes_ai.py as attachment_kind
 # _agent_upload_from_body moved to routes_ai.py as agent_upload_from_body
 
 
@@ -978,7 +963,7 @@ def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
     return sanitize_agent_attachments(
         raw=raw,
         safe_upload_filename_fn=_safe_upload_filename,
-        attachment_kind_fn=_attachment_kind,
+        attachment_kind_fn=attachment_kind,
     )
 
 

@@ -1119,3 +1119,22 @@ def format_hardware_context_notice(
     if changed_txt:
         return f"Hardware context updated ({board_label}). Changed fields: {changed_txt}. I will adapt guidance to the new parts map."
     return f"Hardware context updated ({board_label}). I will adapt guidance to the new parts map."
+
+
+def attachment_kind(mime: str, name: str) -> str:
+    """Determine attachment kind from mime type and filename."""
+    m = str(mime or "").strip().lower()
+    n = str(name or "").strip().lower()
+    if m.startswith("image/"):
+        return "image"
+    if "csv" in m or n.endswith(".csv"):
+        return "csv"
+    if (
+        m.startswith("text/")
+        or "json" in m
+        or "yaml" in m
+        or "toml" in m
+        or n.endswith((".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".log"))
+    ):
+        return "text"
+    return "binary"
