@@ -532,6 +532,10 @@ except ImportError:
         handle_config_snapshots_get,
     )
 try:
+    from app.bridge.routes_overwatch import handle_overwatch_status_get
+except ImportError:
+    from routes_overwatch import handle_overwatch_status_get  # type: ignore
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -5981,54 +5985,17 @@ def build_handler(
                     return _json(self, code, payload)
                 if u.path == "/overwatch/status":
                     q = parse_qs(u.query)
-                    force_refresh = str(
-                        (q.get("refresh", ["0"]) or ["0"])[0]
-                    ).strip().lower() in {"1", "true", "yes"}
-                    if not force_refresh:
-                        cached = cached_probe("overwatch")
-                        if cached is not None:
-                            return _json(
-                                self, 200, build_overwatch_payload(overwatch=cached)
-                            )
-
-                    compat = cached_probe("compat")
-                    if compat is None:
-                        if int(gateway.health().get("queue_depth", 0) or 0) <= 2:
-                            try:
-                                compat = run_compat_probe(gateway)
-                                store_probe("compat", compat)
-                            except Exception:
-                                compat = {
-                                    "ok": False,
-                                    "missing_commands": [],
-                                    "missing_fields": [],
-                                }
-                        else:
-                            compat = {
-                                "ok": False,
-                                "missing_commands": [],
-                                "missing_fields": [],
-                            }
-
-                    connect = cached_probe("connect")
-                    if connect is None:
-                        if int(gateway.health().get("queue_depth", 0) or 0) <= 2:
-                            try:
-                                connect = run_connect_probe(gateway)
-                                store_probe("connect", connect)
-                            except Exception:
-                                connect = {"ok": False, "confidence_pct": 0}
-                        else:
-                            connect = {"ok": False, "confidence_pct": 0}
-
-                    report = build_overwatch_report(
+                    code, payload = handle_overwatch_status_get(
+                        query=q,
+                        cached_probe_fn=cached_probe,
+                        store_probe_fn=store_probe,
                         gateway=gateway,
                         firmware=firmware,
-                        compat=compat if isinstance(compat, dict) else None,
-                        connect=connect if isinstance(connect, dict) else None,
+                        run_compat_probe_fn=run_compat_probe,
+                        run_connect_probe_fn=run_connect_probe,
+                        build_overwatch_report_fn=build_overwatch_report,
                     )
-                    store_probe("overwatch", report)
-                    return _json(self, 200, build_overwatch_payload(overwatch=report))
+                    return _json(self, code, payload)
                 if u.path == "/v1/setup/attempt-history":
                     q = parse_qs(u.query)
                     code, payload = handle_setup_attempt_history_get(
