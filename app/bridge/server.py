@@ -522,6 +522,10 @@ except ImportError:
         handle_design_memory_rate,
     )
 try:
+    from app.bridge.routes_config import handle_config_snapshots_get
+except ImportError:
+    from routes_config import handle_config_snapshots_get  # type: ignore
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -6109,14 +6113,11 @@ def build_handler(
                         )
                 if u.path == "/config/snapshots":
                     q = parse_qs(u.query)
-                    limit = int((q.get("limit", ["30"]) or ["30"])[0] or 30)
-                    return _json(
-                        self,
-                        200,
-                        build_snapshots_payload(
-                            snapshots=config_history.list_snapshots(limit=limit)
-                        ),
+                    code, payload = handle_config_snapshots_get(
+                        query=q,
+                        config_history=config_history,
                     )
+                    return _json(self, code, payload)
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except Exception as exc:
                 return _json(self, 500, {"ok": False, "error": str(exc)})
