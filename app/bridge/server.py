@@ -1077,21 +1077,12 @@ def build_handler(
     prearm_safety = prearm_safety_gate or PreArmSafetyGate(required=True)
     tuning_preflight = TuningPreflightStore(ttl_s=900.0, max_entries=256)
     probe_cache_lock = threading.Lock()
-    probe_cache: Dict[str, Dict[str, Any]] = {
-        "compat": {"ts": 0.0, "report": None},
-        "connect": {"ts": 0.0, "report": None},
-        "overwatch": {"ts": 0.0, "report": None},
-    }
+    probe_cache: Dict[str, Dict[str, Any]] = {"compat": {"ts": 0.0, "report": None}, "connect": {"ts": 0.0, "report": None}, "overwatch": {"ts": 0.0, "report": None}}
 
     def cached_probe(kind: str) -> Optional[Dict[str, Any]]:
         with probe_cache_lock:
-            node = probe_cache.get(kind, {})
-            ts = float(node.get("ts", 0.0) or 0.0)
-            report = node.get("report")
-        ttl_s = 4.0 if kind == "compat" else 2.0
-        if report is not None and (time.monotonic() - ts) <= ttl_s:
-            return report
-        return None
+            node, ts, report = probe_cache.get(kind, {}), float(probe_cache.get(kind, {}).get("ts", 0.0) or 0.0), probe_cache.get(kind, {}).get("report")
+        return report if report is not None and (time.monotonic() - ts) <= (4.0 if kind == "compat" else 2.0) else None
 
     def store_probe(kind: str, report: Dict[str, Any]) -> None:
         with probe_cache_lock:
