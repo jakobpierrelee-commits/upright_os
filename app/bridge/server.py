@@ -1265,8 +1265,7 @@ def build_handler(
                     q, mode = parse_qs(u.query), str((parse_qs(u.query).get("mode", ["app_dev"]) or ["app_dev"])[0]).strip() or "app_dev"
                     return _json(self, 200, handle_clean_threads_get(mode=mode, ai=ai, codex_logged_in=bool(_codex_cli_login_status().get("logged_in", False)), model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex"))))
                 if u.path == "/agent/threads":
-                    guard = _legacy_execution_guard(u.path)
-                    if guard is not None:
+                    if (guard := _legacy_execution_guard(u.path)) is not None:
                         return _json(self, 403, guard)
                     tok, q = _extract_auth_token(self), parse_qs(u.query)
                     return _json(self, *handle_agent_threads_get(query=q, me=auth.me(tok) if tok else None, auth=auth, agent_mission=agent_mission, provider_router=provider_router, ai=ai, env_model=os.environ.get("OPENAI_MODEL", ""), codex_cli_login_status_fn=_codex_cli_login_status, agent_resolve_model_fn=_agent_resolve_model, build_agent_status_payload_fn=build_agent_status_payload))
