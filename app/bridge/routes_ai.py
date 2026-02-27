@@ -1041,3 +1041,36 @@ def agent_upload_from_body(
         "path": str(target),
         "text_excerpt": text_excerpt,
     }
+
+
+def assistant_capabilities_context(*, allow_apply: bool) -> Dict[str, Any]:
+    """Build assistant capabilities context for AI responses."""
+    return {
+        "can_read": [
+            "cached_status",
+            "control_state",
+            "serial_health",
+            "burst_status",
+            "host_capture_latest_csv_tail",
+            "commissioning_artifacts",
+            "assistant_knowledge_pack",
+            "config_snapshots",
+        ],
+        "can_apply_now": bool(allow_apply),
+        "can_write": [
+            "pid",
+            "motion",
+            "setpoint",
+            "limits",
+            "generate_unified_firmware_scaffold",
+            "write_sketch_with_backup",
+        ]
+        if allow_apply
+        else [],
+        "confirm_first_for": [
+            "arm/disarm",
+            "cal_zero",
+            "firmware_upload_or_flash",
+            "power_state_changes",
+        ],
+    }

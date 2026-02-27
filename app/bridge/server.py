@@ -510,6 +510,7 @@ try:
         handle_clean_chat_post,
         apply_assistant_plan,
         agent_upload_from_body,
+        assistant_capabilities_context,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -536,6 +537,7 @@ except ImportError:
         handle_clean_chat_post,
         apply_assistant_plan,
         agent_upload_from_body,
+        assistant_capabilities_context,
     )
 try:
     from app.bridge.routes_auth import (
@@ -1094,37 +1096,7 @@ def _host_capture_ai_context(host_capture: HostCaptureManager) -> Dict[str, Any]
     return out
 
 
-def _assistant_capabilities_context(*, allow_apply: bool) -> Dict[str, Any]:
-    return {
-        "can_read": [
-            "cached_status",
-            "control_state",
-            "serial_health",
-            "burst_status",
-            "host_capture_latest_csv_tail",
-            "commissioning_artifacts",
-            "assistant_knowledge_pack",
-            "config_snapshots",
-        ],
-        "can_apply_now": bool(allow_apply),
-        "can_write": [
-            "pid",
-            "motion",
-            "setpoint",
-            "limits",
-            "generate_unified_firmware_scaffold",
-            "write_sketch_with_backup",
-        ]
-        if allow_apply
-        else [],
-        "confirm_first_for": [
-            "arm/disarm",
-            "cal_zero",
-            "firmware_upload_or_flash",
-            "power_state_changes",
-        ],
-    }
-
+# assistant_capabilities_context moved to routes_ai.py
 
 # AIProfileManager moved to domain module
 # AssistantKnowledgeManager moved to domain module
@@ -1763,7 +1735,7 @@ def build_handler(
             knowledge=knowledge,
             config_history=config_history,
             control=control,
-            assistant_capabilities_context_fn=_assistant_capabilities_context,
+            assistant_capabilities_context_fn=assistant_capabilities_context,
             best_known_design=design_memory.best(session_key=session_key),
         )
 
@@ -2589,7 +2561,7 @@ def build_handler(
                         sanitize_agent_attachments_fn=_sanitize_agent_attachments,
                         commissioning_ai_context_fn=_commissioning_ai_context,
                         host_capture_ai_context_fn=_host_capture_ai_context,
-                        assistant_capabilities_context_fn=_assistant_capabilities_context,
+                        assistant_capabilities_context_fn=assistant_capabilities_context,
                         normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
                         build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload,
                         handler_self=self,
@@ -2691,7 +2663,7 @@ def build_handler(
                         "burst": burst_status(),
                         "config_snapshots": config_history.list_snapshots(limit=8),
                         "assistant_knowledge": knowledge.context(),
-                        "assistant_capabilities": _assistant_capabilities_context(
+                        "assistant_capabilities": assistant_capabilities_context(
                             allow_apply=False
                         ),
                     }
