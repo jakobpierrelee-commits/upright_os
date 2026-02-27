@@ -1554,8 +1554,7 @@ def build_handler(
                     "/limits": lambda: handle_limits_post(**_tuning_deps, guard_limits_apply_fn=_guard_limits_apply),
                 }
                 if u.path in _tuning_routes:
-                    code, payload = _tuning_routes[u.path]()
-                    return _json(self, code, payload)
+                    return _json(self, *_tuning_routes[u.path]())
 
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except KeyError as exc:
