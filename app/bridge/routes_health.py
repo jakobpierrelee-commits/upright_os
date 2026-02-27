@@ -131,6 +131,71 @@ def handle_commissioning_status_get(
     return 200, build_commissioning_status_payload_fn(commissioning=commissioning.status())
 
 
+def read_csv_tail(path: Any, max_tail: int = 80) -> Dict[str, Any]:
+    """Read the tail of a CSV file for AI context."""
+    import collections
+    total_lines = 0
+    header = ""
+    tail: "collections.deque[str]" = collections.deque(maxlen=max(1, max_tail))
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for idx, line in enumerate(f):
+            txt = line.rstrip("\n")
+            if idx == 0:
+                header = txt
+            else:
+                tail.append(txt)
+            total_lines = idx + 1
+    return {
+        "header": header,
+        "tail": list(tail),
+        "total_lines": total_lines,
+        "max_tail": max_tail,
+    }
+
+
+def commissioning_ai_context(commissioning: Any, *, read_csv_tail_fn: Any) -> Dict[str, Any]:
+    """Build commissioning context for AI."""
+    import json
+    import pathlib
+    out: Dict[str, Any] = {
+        "status": commissioning.status(),
+        "artifacts": commissioning.artifacts(),
+    }
+
+    latest_metrics = out["artifacts"].get("latest_metrics")
+    if isinstance(latest_metrics, str) and latest_metrics:
+        p = pathlib.Path(latest_metrics)
+        try:
+            out["latest_metrics_json"] = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            out["latest_metrics_error"] = str(exc)
+
+    latest_run = out["artifacts"].get("latest_run")
+    if isinstance(latest_run, str) and latest_run:
+        p = pathlib.Path(latest_run)
+        try:
+            out["latest_run_csv"] = read_csv_tail_fn(p, max_tail=80)
+        except Exception as exc:
+            out["latest_run_error"] = str(exc)
+
+    return out
+
+
+def host_capture_ai_context(host_capture: Any, *, read_csv_tail_fn: Any) -> Dict[str, Any]:
+    """Build host capture context for AI."""
+    import pathlib
+    out: Dict[str, Any] = {"status": host_capture.status()}
+    latest = out["status"].get("latest_run")
+    if isinstance(latest, str) and latest:
+        p = pathlib.Path(latest)
+        if p.exists():
+            try:
+                out["latest_run_csv"] = read_csv_tail_fn(p, max_tail=80)
+            except Exception as exc:
+                out["latest_run_error"] = str(exc)
+    return out
+
+
 def handle_commissioning_artifacts_get(
     *,
     commissioning: Any,

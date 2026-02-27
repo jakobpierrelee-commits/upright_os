@@ -478,6 +478,9 @@ try:
         handle_burst_status_get,
         handle_commissioning_status_get,
         handle_commissioning_artifacts_get,
+        read_csv_tail,
+        commissioning_ai_context,
+        host_capture_ai_context,
     )
 except ImportError:
     from routes_health import (  # type: ignore
@@ -489,6 +492,9 @@ except ImportError:
         handle_burst_status_get,
         handle_commissioning_status_get,
         handle_commissioning_artifacts_get,
+        read_csv_tail,
+        commissioning_ai_context,
+        host_capture_ai_context,
     )
 try:
     from app.bridge.routes_ai import (
@@ -1034,44 +1040,7 @@ def _read_csv_tail(path: pathlib.Path, max_tail: int = 80) -> Dict[str, Any]:
 # HostCaptureManager moved to domains/tuning_intelligence/host_capture_manager.py
 
 
-def _commissioning_ai_context(commissioning: CommissioningManager) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "status": commissioning.status(),
-        "artifacts": commissioning.artifacts(),
-    }
-
-    latest_metrics = out["artifacts"].get("latest_metrics")
-    if isinstance(latest_metrics, str) and latest_metrics:
-        p = pathlib.Path(latest_metrics)
-        try:
-            out["latest_metrics_json"] = json.loads(p.read_text(encoding="utf-8"))
-        except Exception as exc:
-            out["latest_metrics_error"] = str(exc)
-
-    latest_run = out["artifacts"].get("latest_run")
-    if isinstance(latest_run, str) and latest_run:
-        p = pathlib.Path(latest_run)
-        try:
-            out["latest_run_csv"] = _read_csv_tail(p, max_tail=80)
-        except Exception as exc:
-            out["latest_run_error"] = str(exc)
-
-    return out
-
-
-def _host_capture_ai_context(host_capture: HostCaptureManager) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"status": host_capture.status()}
-    latest = out["status"].get("latest_run")
-    if isinstance(latest, str) and latest:
-        p = pathlib.Path(latest)
-        if p.exists():
-            try:
-                out["latest_run_csv"] = _read_csv_tail(p, max_tail=80)
-            except Exception as exc:
-                out["latest_run_error"] = str(exc)
-    return out
-
-
+# _commissioning_ai_context, _host_capture_ai_context moved to routes_health.py
 # assistant_capabilities_context moved to routes_ai.py
 
 # AIProfileManager moved to domain module
@@ -2483,8 +2452,8 @@ def build_handler(
                         agent_model_allowed_fn=_agent_model_allowed,
                         agent_mode_system_prompt_fn=_agent_mode_system_prompt,
                         sanitize_agent_attachments_fn=_sanitize_agent_attachments,
-                        commissioning_ai_context_fn=_commissioning_ai_context,
-                        host_capture_ai_context_fn=_host_capture_ai_context,
+                        commissioning_ai_context_fn=lambda c: commissioning_ai_context(c, read_csv_tail_fn=read_csv_tail),
+                        host_capture_ai_context_fn=lambda h: host_capture_ai_context(h, read_csv_tail_fn=read_csv_tail),
                         assistant_capabilities_context_fn=assistant_capabilities_context,
                         normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
                         build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload,
@@ -2582,8 +2551,8 @@ def build_handler(
                         "serial_health": serial_h,
                         "control": control.snapshot(),
                         "firmware": firmware.status(),
-                        "commissioning": _commissioning_ai_context(commissioning),
-                        "host_capture": _host_capture_ai_context(host_capture),
+                        "commissioning": commissioning_ai_context(commissioning, read_csv_tail_fn=read_csv_tail),
+                        "host_capture": host_capture_ai_context(host_capture, read_csv_tail_fn=read_csv_tail),
                         "burst": burst_status(),
                         "config_snapshots": config_history.list_snapshots(limit=8),
                         "assistant_knowledge": knowledge.context(),
