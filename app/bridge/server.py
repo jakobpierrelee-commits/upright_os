@@ -460,6 +460,7 @@ try:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_ai_knowledge_get,
+        handle_ai_metrics_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
@@ -476,6 +477,7 @@ except ImportError:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_ai_knowledge_get,
+        handle_ai_metrics_get,
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
@@ -5986,29 +5988,14 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     q = parse_qs(u.query)
-                    since_hours = float(
-                        (q.get("since_hours", ["24"]) or ["24"])[0] or 24
-                    )
-                    since_ts = (
-                        time.time() - (since_hours * 3600) if since_hours > 0 else None
-                    )
-                    tool_filter = str((q.get("tool", [""]) or [""])[0]).strip() or None
-                    db = get_codex_db()
                     try:
-                        tool_metrics = db.get_tool_metrics(
-                            since_ts=since_ts, tool_filter=tool_filter
+                        code, payload = handle_ai_metrics_get(
+                            query=q,
+                            get_codex_db_fn=get_codex_db,
+                            build_tool_metrics_payload_fn=build_tool_metrics_payload,
+                            current_time=time.time(),
                         )
-                        db_stats = db.get_stats()
-                        return _json(
-                            self,
-                            200,
-                            build_tool_metrics_payload(
-                                since_hours=since_hours,
-                                tool_metrics=tool_metrics,
-                                db_stats=db_stats,
-                                ts=time.time(),
-                            ),
-                        )
+                        return _json(self, code, payload)
                     except Exception as exc:
                         logger.warning(f"Metrics fetch error: {exc}")
                         return _json(

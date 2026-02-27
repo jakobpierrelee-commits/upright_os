@@ -302,3 +302,33 @@ def handle_ai_rag_stats_get(
     rag = get_codex_rag_fn(openai_key)
     stats = rag.get_index_stats()
     return 200, build_stats_payload_fn(stats=stats, ts=current_time)
+
+
+def handle_ai_metrics_get(
+    *,
+    query: Dict[str, List[str]],
+    get_codex_db_fn: Callable[..., Any],
+    build_tool_metrics_payload_fn: Callable[..., Dict[str, Any]],
+    current_time: float,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /ai/metrics GET request.
+
+    Returns (status_code, payload).
+    """
+    since_hours = float(
+        (query.get("since_hours", ["24"]) or ["24"])[0] or 24
+    )
+    since_ts = (
+        current_time - (since_hours * 3600) if since_hours > 0 else None
+    )
+    tool_filter = str((query.get("tool", [""]) or [""])[0]).strip() or None
+    db = get_codex_db_fn()
+    tool_metrics = db.get_tool_metrics(since_ts=since_ts, tool_filter=tool_filter)
+    db_stats = db.get_stats()
+    return 200, build_tool_metrics_payload_fn(
+        since_hours=since_hours,
+        tool_metrics=tool_metrics,
+        db_stats=db_stats,
+        ts=current_time,
+    )
