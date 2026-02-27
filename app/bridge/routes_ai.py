@@ -908,3 +908,84 @@ def handle_clean_chat_post(
         normalize_reply_for_prompt=normalize_reply_for_prompt_fn,
     )
     return code, payload
+
+
+def apply_assistant_plan(
+    gateway: Any,
+    config_history: Any,
+    firmware: Any,
+    plan: Dict[str, Any],
+    *,
+    source: str,
+    apply_tuning_plan_fn: Any,
+) -> Dict[str, Any]:
+    """Apply an assistant plan including tuning, unified sketch, or sketch content."""
+    tuning_keys = {"pid", "motion", "setpoint", "limits"}
+    tuning_plan = {k: plan[k] for k in tuning_keys if k in plan}
+    applied: list[str] = []
+    changed: Dict[str, Any] = {}
+    artifacts: Dict[str, Any] = {}
+    snapshot_id: Optional[str] = None
+    status_after: Optional[Dict[str, Any]] = None
+
+    if tuning_plan:
+        t = apply_tuning_plan_fn(gateway, config_history, tuning_plan, source=source)
+        if not bool(t.get("ok", False)):
+            return t
+        applied.extend(
+            list(t.get("applied", [])) if isinstance(t.get("applied"), list) else []
+        )
+        if isinstance(t.get("changed"), dict):
+            changed.update(t["changed"])
+        sid = t.get("snapshot_id")
+        if isinstance(sid, str) and sid:
+            snapshot_id = sid
+        if isinstance(t.get("status"), dict):
+            status_after = t.get("status")
+
+    unified = plan.get("unified")
+    if isinstance(unified, dict):
+        profile = unified.get("profile")
+        if not isinstance(profile, dict):
+            raise RuntimeError("apply_unified_profile_missing")
+        sketch_name = unified.get("sketch_name")
+        out = firmware.generate_unified(
+            profile=profile,
+            sketch_name=str(sketch_name) if isinstance(sketch_name, str) else None,
+        )
+        applied.append("unified")
+        artifacts["unified_folder"] = out.get("sketch_folder")
+        artifacts["unified_archive"] = out.get("archive")
+        artifacts["unified_main_file"] = out.get("main_file")
+
+    sketch = plan.get("sketch")
+    if isinstance(sketch, dict):
+        content = sketch.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("apply_sketch_content_missing")
+        path = sketch.get("path")
+        profile = sketch.get("profile")
+        out = firmware.write_sketch_with_backup(
+            content=content,
+            path=str(path) if isinstance(path, str) and path.strip() else None,
+            source="assistant",
+            profile=profile if isinstance(profile, dict) else None,
+        )
+        applied.append("sketch")
+        artifacts["sketch_path"] = out.get("path")
+        artifacts["sketch_backup"] = out.get("backup_path")
+        artifacts["sketch_bytes"] = out.get("bytes")
+
+    if not status_after:
+        try:
+            status_after = gateway.get_status()
+        except Exception:
+            status_after = None
+    return {
+        "ok": True,
+        "snapshot_id": snapshot_id,
+        "applied": applied,
+        "changed": changed,
+        "artifacts": artifacts,
+        "status": status_after,
+    }
