@@ -489,6 +489,9 @@ try:
         read_csv_tail,
         commissioning_ai_context,
         host_capture_ai_context,
+        json_response,
+        read_json_body,
+        extract_auth_token,
     )
 except ImportError:
     from routes_health import (  # type: ignore
@@ -503,6 +506,9 @@ except ImportError:
         read_csv_tail,
         commissioning_ai_context,
         host_capture_ai_context,
+        json_response,
+        read_json_body,
+        extract_auth_token,
     )
 try:
     from app.bridge.routes_ai import (
@@ -993,46 +999,7 @@ except ImportError:
 
 # RobotProfilesManager moved to domain module
 # TelemetryHub moved to domain module
-def _json(handler: BaseHTTPRequestHandler, code: int, body: Dict[str, Any]) -> None:
-    payload = json.dumps(body).encode("utf-8")
-    handler.send_response(code)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("Content-Length", str(len(payload)))
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header(
-        "Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Token"
-    )
-    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-    handler.end_headers()
-    handler.wfile.write(payload)
-
-
-def _read_json(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
-    n = int(handler.headers.get("Content-Length", "0"))
-    if n <= 0:
-        return {}
-    raw = handler.rfile.read(n)
-    if not raw:
-        return {}
-    return json.loads(raw.decode("utf-8"))
-
-
-def _extract_auth_token(
-    handler: BaseHTTPRequestHandler, body: Optional[Dict[str, Any]] = None
-) -> Optional[str]:
-    auth_header = handler.headers.get("Authorization", "").strip()
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:].strip() or None
-    x_token = handler.headers.get("X-Session-Token", "").strip()
-    if x_token:
-        return x_token
-    if body:
-        tok = str(body.get("session_token", "")).strip()
-        if tok:
-            return tok
-    return None
-
-
+# _json, _read_json, _extract_auth_token moved to routes_health.py
 # AuthManager moved to domain module
 def _normalize_cmd(cmd: str) -> str:
     return " ".join(cmd.strip().split()).upper()

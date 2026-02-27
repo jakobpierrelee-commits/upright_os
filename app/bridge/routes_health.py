@@ -196,6 +196,51 @@ def host_capture_ai_context(host_capture: Any, *, read_csv_tail_fn: Any) -> Dict
     return out
 
 
+def json_response(handler: Any, code: int, body: Dict[str, Any]) -> None:
+    """Send a JSON response."""
+    import json
+    payload = json.dumps(body).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header(
+        "Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Token"
+    )
+    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+def read_json_body(handler: Any) -> Dict[str, Any]:
+    """Read JSON body from request."""
+    import json
+    n = int(handler.headers.get("Content-Length", "0"))
+    if n <= 0:
+        return {}
+    raw = handler.rfile.read(n)
+    if not raw:
+        return {}
+    return json.loads(raw.decode("utf-8"))
+
+
+def extract_auth_token(
+    handler: Any, body: Optional[Dict[str, Any]] = None
+) -> Optional[str]:
+    """Extract auth token from request headers or body."""
+    auth_header = handler.headers.get("Authorization", "").strip()
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip() or None
+    x_token = handler.headers.get("X-Session-Token", "").strip()
+    if x_token:
+        return x_token
+    if body:
+        tok = str(body.get("session_token", "")).strip()
+        if tok:
+            return tok
+    return None
+
+
 def handle_commissioning_artifacts_get(
     *,
     commissioning: Any,
