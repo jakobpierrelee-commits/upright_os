@@ -1604,24 +1604,10 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/firmware/runtime-manifest/validate":
-                    sketch = str(body.get("sketch", "")).strip() or None
-                    inline_manifest = body.get("manifest")
-                    manifest_obj = (
-                        inline_manifest if isinstance(inline_manifest, dict) else None
-                    )
-                    check = firmware.validate_runtime_manifest(
-                        sketch=sketch,
-                        manifest=manifest_obj,
-                        require_exists=manifest_obj is None,
-                    )
-                    return _json(
-                        self,
-                        200,
-                        {
-                            "ok": bool(check.get("ok", False)),
-                            "validation": check,
-                        },
-                    )
+                    sketch, inline_manifest = str(body.get("sketch", "")).strip() or None, body.get("manifest")
+                    manifest_obj = inline_manifest if isinstance(inline_manifest, dict) else None
+                    check = firmware.validate_runtime_manifest(sketch=sketch, manifest=manifest_obj, require_exists=manifest_obj is None)
+                    return _json(self, 200, {"ok": bool(check.get("ok", False)), "validation": check})
 
                 # Setup check routes dispatch
                 _setup_deps = dict(body=body, gateway=gateway, setup_attempt_history=setup_attempt_history, current_sketch_hash_fn=_current_sketch_hash, report_design_observation_fn=_report_design_observation, build_setup_check_payload_fn=build_setup_check_payload)
