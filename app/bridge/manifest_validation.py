@@ -804,3 +804,58 @@ def _runtime_manifest_profile_compatibility(
         "warnings": warnings,
         "checks": checks,
     }
+
+
+def _has_valid_pin(pins: Dict[str, Any], key: str) -> bool:
+    """Check if a pin key has a valid non-empty value."""
+    val = pins.get(key)
+    if val is None:
+        return False
+    if isinstance(val, str):
+        return bool(val.strip())
+    if isinstance(val, (int, float)):
+        return True
+    return False
+
+
+def validate_protocol_pins(
+    *,
+    node_name: str,
+    protocol: str,
+    pins: Dict[str, Any],
+    spec: Dict[str, Any],
+    errors: list[str],
+) -> None:
+    """Validate that required protocol pins are present."""
+    required = [
+        str(x).strip() for x in list(spec.get("required_pins") or []) if str(x).strip()
+    ]
+    for key in required:
+        if not _has_valid_pin(pins, key):
+            errors.append(
+                f"interfaces.{node_name}.protocol_pin_missing:{protocol}.{key}"
+            )
+    any_pins = [
+        str(x).strip()
+        for x in list(spec.get("required_any_pins") or [])
+        if str(x).strip()
+    ]
+    if any_pins and not any(_has_valid_pin(pins, k) for k in any_pins):
+        errors.append(
+            f"interfaces.{node_name}.protocol_pin_missing_any:{protocol}:{'|'.join(any_pins)}"
+        )
+    any_groups = list(spec.get("required_any_pin_groups") or [])
+    if any_groups:
+        group_ok = False
+        rendered: list[str] = []
+        for raw_group in any_groups:
+            group = [str(x).strip() for x in list(raw_group or []) if str(x).strip()]
+            if not group:
+                continue
+            rendered.append("&".join(group))
+            if all(_has_valid_pin(pins, k) for k in group):
+                group_ok = True
+        if not group_ok and rendered:
+            errors.append(
+                f"interfaces.{node_name}.protocol_pin_group_missing:{protocol}:{'|'.join(rendered)}"
+            )

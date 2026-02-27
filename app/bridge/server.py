@@ -733,7 +733,7 @@ try:
         _family_capabilities,
         _protocol_schema,
         _has_valid_pin,
-        _validate_protocol_pins,
+        validate_protocol_pins,
         _validate_runtime_manifest_v1,
         _manifest_required_field_present,
         _family_for_fqbn,
@@ -746,7 +746,7 @@ except ImportError:
         _family_capabilities,
         _protocol_schema,
         _has_valid_pin,
-        _validate_protocol_pins,
+        validate_protocol_pins,
         _validate_runtime_manifest_v1,
         _manifest_required_field_present,
         _family_for_fqbn,
@@ -1408,47 +1408,7 @@ def _has_valid_pin(pins: Dict[str, Any], key: str) -> bool:
         return False
 
 
-def _validate_protocol_pins(
-    *,
-    node_name: str,
-    protocol: str,
-    pins: Dict[str, Any],
-    spec: Dict[str, Any],
-    errors: list[str],
-) -> None:
-    required = [
-        str(x).strip() for x in list(spec.get("required_pins") or []) if str(x).strip()
-    ]
-    for key in required:
-        if not _has_valid_pin(pins, key):
-            errors.append(
-                f"interfaces.{node_name}.protocol_pin_missing:{protocol}.{key}"
-            )
-    any_pins = [
-        str(x).strip()
-        for x in list(spec.get("required_any_pins") or [])
-        if str(x).strip()
-    ]
-    if any_pins and not any(_has_valid_pin(pins, k) for k in any_pins):
-        errors.append(
-            f"interfaces.{node_name}.protocol_pin_missing_any:{protocol}:{'|'.join(any_pins)}"
-        )
-    any_groups = list(spec.get("required_any_pin_groups") or [])
-    if any_groups:
-        group_ok = False
-        rendered: list[str] = []
-        for raw_group in any_groups:
-            group = [str(x).strip() for x in list(raw_group or []) if str(x).strip()]
-            if not group:
-                continue
-            rendered.append("&".join(group))
-            if all(_has_valid_pin(pins, k) for k in group):
-                group_ok = True
-        if not group_ok and rendered:
-            errors.append(
-                f"interfaces.{node_name}.protocol_pin_group_missing:{protocol}:{'|'.join(rendered)}"
-            )
-
+# _validate_protocol_pins moved to manifest_validation.py as validate_protocol_pins
 
 # _validate_runtime_manifest_v1, _manifest_required_field_present,
 # _family_for_fqbn, _board_id_for_fqbn moved to manifest_validation.py
