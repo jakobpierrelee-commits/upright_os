@@ -547,11 +547,17 @@ try:
     from app.bridge.routes_probe import (
         handle_probe_compat_get,
         handle_probe_connect_get,
+        handle_setup_compat_test,
+        handle_setup_smoke_check,
+        handle_setup_overwatch_check,
     )
 except ImportError:
     from routes_probe import (  # type: ignore
         handle_probe_compat_get,
         handle_probe_connect_get,
+        handle_setup_compat_test,
+        handle_setup_smoke_check,
+        handle_setup_overwatch_check,
     )
 try:
     from app.bridge.clean_ai import (
@@ -3765,141 +3771,42 @@ def build_handler(
                     )
 
                 if u.path == "/v1/setup/compat-test":
-                    sketch_revision = str(body.get("sketch_revision", "")).strip()
-                    action_source = (
-                        str(body.get("action_source", "setup_page")).strip()
-                        or "setup_page"
+                    code, payload = handle_setup_compat_test(
+                        body=body,
+                        gateway=gateway,
+                        setup_attempt_history=setup_attempt_history,
+                        run_setup_compat_test_fn=run_setup_compat_test,
+                        current_sketch_hash_fn=_current_sketch_hash,
+                        report_design_observation_fn=_report_design_observation,
+                        build_setup_check_payload_fn=build_setup_check_payload,
                     )
-                    session_key = (
-                        str(body.get("session_key", "")).strip() or "local:setup"
-                    )
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    profile_label = str(body.get("profile_label", "")).strip()
-                    out = run_setup_compat_test(gateway)
-                    attempt = setup_attempt_history.append(
-                        test_type="compat",
-                        status=str(out.get("status", "unknown")),
-                        sketch_revision=sketch_revision,
-                        sketch_hash=_current_sketch_hash(),
-                        action_source=action_source,
-                        profile_id=profile_id,
-                        profile_label=profile_label,
-                        result=out,
-                    )
-                    try:
-                        _report_design_observation(
-                            session_key=session_key,
-                            success=str(out.get("status", "")).strip().lower()
-                            == "pass",
-                            source="setup_compat_test",
-                            note=str(out.get("failure_summary", "")).strip(),
-                            profile_id=profile_id,
-                            profile_label=profile_label,
-                            sketch_revision=sketch_revision,
-                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
-                            test_type="compat",
-                        )
-                    except Exception:
-                        pass
-                    return _json(
-                        self,
-                        200,
-                        build_setup_check_payload(
-                            check_key="compat_test", check_result=out, attempt=attempt
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/v1/setup/smoke-check":
-                    sketch_revision = str(body.get("sketch_revision", "")).strip()
-                    action_source = (
-                        str(body.get("action_source", "setup_page")).strip()
-                        or "setup_page"
+                    code, payload = handle_setup_smoke_check(
+                        body=body,
+                        gateway=gateway,
+                        control=control,
+                        setup_attempt_history=setup_attempt_history,
+                        run_setup_smoke_check_fn=run_setup_smoke_check,
+                        current_sketch_hash_fn=_current_sketch_hash,
+                        report_design_observation_fn=_report_design_observation,
+                        build_setup_check_payload_fn=build_setup_check_payload,
                     )
-                    session_key = (
-                        str(body.get("session_key", "")).strip() or "local:setup"
-                    )
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    profile_label = str(body.get("profile_label", "")).strip()
-                    out = run_setup_smoke_check(gateway, control)
-                    attempt = setup_attempt_history.append(
-                        test_type="smoke",
-                        status=str(out.get("status", "unknown")),
-                        sketch_revision=sketch_revision,
-                        sketch_hash=_current_sketch_hash(),
-                        action_source=action_source,
-                        profile_id=profile_id,
-                        profile_label=profile_label,
-                        result=out,
-                    )
-                    try:
-                        _report_design_observation(
-                            session_key=session_key,
-                            success=str(out.get("status", "")).strip().lower()
-                            == "pass",
-                            source="setup_smoke_check",
-                            note=str(out.get("failure_summary", "")).strip(),
-                            profile_id=profile_id,
-                            profile_label=profile_label,
-                            sketch_revision=sketch_revision,
-                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
-                            test_type="smoke",
-                        )
-                    except Exception:
-                        pass
-                    return _json(
-                        self,
-                        200,
-                        build_setup_check_payload(
-                            check_key="smoke_check", check_result=out, attempt=attempt
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/v1/setup/overwatch-check":
-                    sketch_revision = str(body.get("sketch_revision", "")).strip()
-                    action_source = (
-                        str(body.get("action_source", "setup_page")).strip()
-                        or "setup_page"
+                    code, payload = handle_setup_overwatch_check(
+                        body=body,
+                        gateway=gateway,
+                        firmware=firmware,
+                        setup_attempt_history=setup_attempt_history,
+                        run_setup_overwatch_check_fn=run_setup_overwatch_check,
+                        current_sketch_hash_fn=_current_sketch_hash,
+                        report_design_observation_fn=_report_design_observation,
+                        build_setup_check_payload_fn=build_setup_check_payload,
                     )
-                    session_key = (
-                        str(body.get("session_key", "")).strip() or "local:setup"
-                    )
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    profile_label = str(body.get("profile_label", "")).strip()
-                    out = run_setup_overwatch_check(gateway, firmware)
-                    attempt = setup_attempt_history.append(
-                        test_type="overwatch",
-                        status=str(out.get("status", "unknown")),
-                        sketch_revision=sketch_revision,
-                        sketch_hash=_current_sketch_hash(),
-                        action_source=action_source,
-                        profile_id=profile_id,
-                        profile_label=profile_label,
-                        result=out,
-                    )
-                    try:
-                        _report_design_observation(
-                            session_key=session_key,
-                            success=str(out.get("status", "")).strip().lower()
-                            == "pass",
-                            source="setup_overwatch_check",
-                            note=str(out.get("failure_summary", "")).strip(),
-                            profile_id=profile_id,
-                            profile_label=profile_label,
-                            sketch_revision=sketch_revision,
-                            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
-                            test_type="overwatch",
-                        )
-                    except Exception:
-                        pass
-                    return _json(
-                        self,
-                        200,
-                        build_setup_check_payload(
-                            check_key="overwatch_check",
-                            check_result=out,
-                            attempt=attempt,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 if u.path == "/profiles/save":
                     code, payload = handle_profiles_save(body=body, profiles=profiles)

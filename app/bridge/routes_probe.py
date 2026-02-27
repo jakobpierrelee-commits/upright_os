@@ -102,3 +102,146 @@ def handle_probe_connect_get(
     out = run_connect_probe_fn(gateway)
     store_probe_fn("connect", out)
     return 200, build_probe_payload(probe=out)
+
+
+def handle_setup_compat_test(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    setup_attempt_history: Any,
+    run_setup_compat_test_fn: Callable,
+    current_sketch_hash_fn: Callable[[], str],
+    report_design_observation_fn: Callable,
+    build_setup_check_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /v1/setup/compat-test POST request."""
+    sketch_revision = str(body.get("sketch_revision", "")).strip()
+    action_source = str(body.get("action_source", "setup_page")).strip() or "setup_page"
+    session_key = str(body.get("session_key", "")).strip() or "local:setup"
+    profile_id = str(body.get("profile_id", "")).strip()
+    profile_label = str(body.get("profile_label", "")).strip()
+    
+    out = run_setup_compat_test_fn(gateway)
+    attempt = setup_attempt_history.append(
+        test_type="compat",
+        status=str(out.get("status", "unknown")),
+        sketch_revision=sketch_revision,
+        sketch_hash=current_sketch_hash_fn(),
+        action_source=action_source,
+        profile_id=profile_id,
+        profile_label=profile_label,
+        result=out,
+    )
+    try:
+        report_design_observation_fn(
+            session_key=session_key,
+            success=str(out.get("status", "")).strip().lower() == "pass",
+            source="setup_compat_test",
+            note=str(out.get("failure_summary", "")).strip(),
+            profile_id=profile_id,
+            profile_label=profile_label,
+            sketch_revision=sketch_revision,
+            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+            test_type="compat",
+        )
+    except Exception:
+        pass
+    return 200, build_setup_check_payload_fn(
+        check_key="compat_test", check_result=out, attempt=attempt
+    )
+
+
+def handle_setup_smoke_check(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    setup_attempt_history: Any,
+    run_setup_smoke_check_fn: Callable,
+    current_sketch_hash_fn: Callable[[], str],
+    report_design_observation_fn: Callable,
+    build_setup_check_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /v1/setup/smoke-check POST request."""
+    sketch_revision = str(body.get("sketch_revision", "")).strip()
+    action_source = str(body.get("action_source", "setup_page")).strip() or "setup_page"
+    session_key = str(body.get("session_key", "")).strip() or "local:setup"
+    profile_id = str(body.get("profile_id", "")).strip()
+    profile_label = str(body.get("profile_label", "")).strip()
+    
+    out = run_setup_smoke_check_fn(gateway, control)
+    attempt = setup_attempt_history.append(
+        test_type="smoke",
+        status=str(out.get("status", "unknown")),
+        sketch_revision=sketch_revision,
+        sketch_hash=current_sketch_hash_fn(),
+        action_source=action_source,
+        profile_id=profile_id,
+        profile_label=profile_label,
+        result=out,
+    )
+    try:
+        report_design_observation_fn(
+            session_key=session_key,
+            success=str(out.get("status", "")).strip().lower() == "pass",
+            source="setup_smoke_check",
+            note=str(out.get("failure_summary", "")).strip(),
+            profile_id=profile_id,
+            profile_label=profile_label,
+            sketch_revision=sketch_revision,
+            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+            test_type="smoke",
+        )
+    except Exception:
+        pass
+    return 200, build_setup_check_payload_fn(
+        check_key="smoke_check", check_result=out, attempt=attempt
+    )
+
+
+def handle_setup_overwatch_check(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    firmware: Any,
+    setup_attempt_history: Any,
+    run_setup_overwatch_check_fn: Callable,
+    current_sketch_hash_fn: Callable[[], str],
+    report_design_observation_fn: Callable,
+    build_setup_check_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /v1/setup/overwatch-check POST request."""
+    sketch_revision = str(body.get("sketch_revision", "")).strip()
+    action_source = str(body.get("action_source", "setup_page")).strip() or "setup_page"
+    session_key = str(body.get("session_key", "")).strip() or "local:setup"
+    profile_id = str(body.get("profile_id", "")).strip()
+    profile_label = str(body.get("profile_label", "")).strip()
+    
+    out = run_setup_overwatch_check_fn(gateway, firmware)
+    attempt = setup_attempt_history.append(
+        test_type="overwatch",
+        status=str(out.get("status", "unknown")),
+        sketch_revision=sketch_revision,
+        sketch_hash=current_sketch_hash_fn(),
+        action_source=action_source,
+        profile_id=profile_id,
+        profile_label=profile_label,
+        result=out,
+    )
+    try:
+        report_design_observation_fn(
+            session_key=session_key,
+            success=str(out.get("status", "")).strip().lower() == "pass",
+            source="setup_overwatch_check",
+            note=str(out.get("failure_summary", "")).strip(),
+            profile_id=profile_id,
+            profile_label=profile_label,
+            sketch_revision=sketch_revision,
+            sketch_hash=str(attempt.get("sketch_hash", "")).strip(),
+            test_type="overwatch",
+        )
+    except Exception:
+        pass
+    return 200, build_setup_check_payload_fn(
+        check_key="overwatch_check", check_result=out, attempt=attempt
+    )
