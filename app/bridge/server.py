@@ -520,12 +520,14 @@ try:
         handle_design_memory_best_get,
         handle_design_memory_list_get,
         handle_design_memory_rate,
+        handle_design_memory_report_success,
     )
 except ImportError:
     from routes_design import (  # type: ignore
         handle_design_memory_best_get,
         handle_design_memory_list_get,
         handle_design_memory_rate,
+        handle_design_memory_report_success,
     )
 try:
     from app.bridge.routes_config import (
@@ -3654,56 +3656,15 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/design-memory/report-success":
-                    session_key = (
-                        str(body.get("session_key", "")).strip() or "local:app_dev"
+                    code, payload = handle_design_memory_report_success(
+                        body=body,
+                        firmware=firmware,
+                        design_memory=design_memory,
+                        current_runtime_identity_fn=_current_runtime_identity,
+                        current_sketch_hash_fn=_current_sketch_hash,
+                        design_evidence_snapshot_fn=_design_evidence_snapshot,
                     )
-                    source = (
-                        str(body.get("source", "user_report")).strip() or "user_report"
-                    )
-                    note = str(body.get("note", "")).strip()
-                    success = bool(body.get("success", True))
-                    profile_id = str(body.get("profile_id", "")).strip()
-                    profile_label = str(body.get("profile_label", "")).strip()
-                    sketch_revision = str(body.get("sketch_revision", "")).strip()
-                    sketch_hash = str(body.get("sketch_hash", "")).strip()
-                    test_type = str(body.get("test_type", "")).strip()
-                    observation = (
-                        body.get("observation")
-                        if isinstance(body.get("observation"), dict)
-                        else {}
-                    )
-                    if not observation:
-                        fw_status = firmware.status()
-                        fw_defaults = (
-                            fw_status.get("defaults", {})
-                            if isinstance(fw_status, dict)
-                            else {}
-                        )
-                        runtime = _current_runtime_identity()
-                        observation = {
-                            "runtime_version": runtime.get("runtime_version", ""),
-                            "tune_version": runtime.get("tune_version", ""),
-                            "ident": runtime.get("ident", ""),
-                            "hash": runtime.get("hash", ""),
-                            "profile_id": profile_id,
-                            "profile_label": profile_label,
-                            "sketch_revision": sketch_revision,
-                            "sketch_hash": sketch_hash or _current_sketch_hash(),
-                            "test_type": test_type,
-                            "fqbn": str(fw_defaults.get("fqbn", "") or "").strip(),
-                            "port": str(fw_defaults.get("port", "") or "").strip(),
-                            "evidence": _design_evidence_snapshot(),
-                        }
-                    elif not isinstance(observation.get("evidence"), dict):
-                        observation["evidence"] = _design_evidence_snapshot()
-                    row = design_memory.report(
-                        session_key=session_key,
-                        observation=observation,
-                        success=success,
-                        source=source,
-                        note=note,
-                    )
-                    return _json(self, 200, build_design_payload(design=row))
+                    return _json(self, code, payload)
 
                 if u.path == "/design-memory/rate":
                     code, payload = handle_design_memory_rate(
