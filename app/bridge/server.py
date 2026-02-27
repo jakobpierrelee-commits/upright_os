@@ -1545,14 +1545,8 @@ def build_handler(
                 if u.path in _cfg_routes:
                     return _json(self, *_cfg_routes[u.path]())
 
-                # Tuning routes dispatch - shared deps
                 _tuning_deps = dict(body=body, gateway=gateway, control=control, config_history=config_history, tuning_preflight=tuning_preflight, require_action_allowed_fn=_require_action_allowed, status_float_fn=_status_float, enforce_preflight_if_needed_fn=_enforce_preflight_if_needed, build_tuning_result_payload_fn=build_tuning_result_payload)
-                _tuning_routes = {
-                    "/pid": lambda: handle_pid_post(**_tuning_deps, guard_pid_apply_fn=_guard_pid_apply),
-                    "/motion": lambda: handle_motion_post(**_tuning_deps, guard_motion_apply_fn=_guard_motion_apply),
-                    "/setpoint": lambda: handle_setpoint_post(**_tuning_deps, guard_setpoint_apply_fn=_guard_setpoint_apply),
-                    "/limits": lambda: handle_limits_post(**_tuning_deps, guard_limits_apply_fn=_guard_limits_apply),
-                }
+                _tuning_routes = {"/pid": lambda: handle_pid_post(**_tuning_deps, guard_pid_apply_fn=_guard_pid_apply), "/motion": lambda: handle_motion_post(**_tuning_deps, guard_motion_apply_fn=_guard_motion_apply), "/setpoint": lambda: handle_setpoint_post(**_tuning_deps, guard_setpoint_apply_fn=_guard_setpoint_apply), "/limits": lambda: handle_limits_post(**_tuning_deps, guard_limits_apply_fn=_guard_limits_apply)}
                 if u.path in _tuning_routes:
                     return _json(self, *_tuning_routes[u.path]())
 
