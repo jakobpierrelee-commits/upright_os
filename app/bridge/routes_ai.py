@@ -1074,3 +1074,48 @@ def assistant_capabilities_context(*, allow_apply: bool) -> Dict[str, Any]:
             "power_state_changes",
         ],
     }
+
+
+def hardware_context_board_label(hardware_context: Any) -> str:
+    """Extract board label from hardware context."""
+    if not isinstance(hardware_context, dict):
+        return "unknown board"
+    board = hardware_context.get("board")
+    if not isinstance(board, dict):
+        return "unknown board"
+    resolved = board.get("resolved_profile")
+    if isinstance(resolved, dict):
+        label = str(resolved.get("label", "")).strip()
+        model = str(resolved.get("id", "")).strip()
+        if label:
+            return label
+        if model:
+            return model
+    selected = str(board.get("selected_fqbn", "")).strip()
+    return selected or "unknown board"
+
+
+def format_hardware_context_notice(
+    hardware_context: Any, update_info: Any, *, board_label_fn: Any = None
+) -> str:
+    """Format a notice about hardware context changes."""
+    if not isinstance(update_info, dict):
+        return ""
+    if not bool(update_info.get("accepted")):
+        return ""
+    if not bool(update_info.get("changed")):
+        return ""
+    if board_label_fn is None:
+        board_label_fn = hardware_context_board_label
+    board_label = board_label_fn(hardware_context)
+    changed_keys = update_info.get("changed_keys")
+    changed_txt = ""
+    if isinstance(changed_keys, list):
+        clean_keys = [str(k).strip() for k in changed_keys if str(k).strip()]
+        if clean_keys:
+            changed_txt = ", ".join(clean_keys[:5])
+    if bool(update_info.get("initial")):
+        return f"Hardware context synced: {board_label}. I will use this as the active build baseline."
+    if changed_txt:
+        return f"Hardware context updated ({board_label}). Changed fields: {changed_txt}. I will adapt guidance to the new parts map."
+    return f"Hardware context updated ({board_label}). I will adapt guidance to the new parts map."

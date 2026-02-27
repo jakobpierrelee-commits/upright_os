@@ -523,6 +523,8 @@ try:
         apply_assistant_plan,
         agent_upload_from_body,
         assistant_capabilities_context,
+        hardware_context_board_label,
+        format_hardware_context_notice,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -550,6 +552,8 @@ except ImportError:
         apply_assistant_plan,
         agent_upload_from_body,
         assistant_capabilities_context,
+        hardware_context_board_label,
+        format_hardware_context_notice,
     )
 try:
     from app.bridge.routes_auth import (
@@ -1079,45 +1083,7 @@ def _ide_disambiguation_reply() -> str:
     )
 
 
-def _hardware_context_board_label(hardware_context: Any) -> str:
-    if not isinstance(hardware_context, dict):
-        return "unknown board"
-    board = hardware_context.get("board")
-    if not isinstance(board, dict):
-        return "unknown board"
-    resolved = board.get("resolved_profile")
-    if isinstance(resolved, dict):
-        label = str(resolved.get("label", "")).strip()
-        model = str(resolved.get("id", "")).strip()
-        if label:
-            return label
-        if model:
-            return model
-    selected = str(board.get("selected_fqbn", "")).strip()
-    return selected or "unknown board"
-
-
-def _format_hardware_context_notice(hardware_context: Any, update_info: Any) -> str:
-    if not isinstance(update_info, dict):
-        return ""
-    if not bool(update_info.get("accepted")):
-        return ""
-    if not bool(update_info.get("changed")):
-        return ""
-    board_label = _hardware_context_board_label(hardware_context)
-    changed_keys = update_info.get("changed_keys")
-    changed_txt = ""
-    if isinstance(changed_keys, list):
-        clean_keys = [str(k).strip() for k in changed_keys if str(k).strip()]
-        if clean_keys:
-            changed_txt = ", ".join(clean_keys[:5])
-    if bool(update_info.get("initial")):
-        return f"Hardware context synced: {board_label}. I will use this as the active build baseline."
-    if changed_txt:
-        return f"Hardware context updated ({board_label}). Changed fields: {changed_txt}. I will adapt guidance to the new parts map."
-    return f"Hardware context updated ({board_label}). I will adapt guidance to the new parts map."
-
-
+# _hardware_context_board_label, _format_hardware_context_notice moved to routes_ai.py
 # _pin_range_for_family already imported from manifest_validation.py
 # _family_capabilities, _protocol_schema, _has_valid_pin, _validate_protocol_pins
 # all moved to manifest_validation.py (already imported)
