@@ -530,6 +530,7 @@ try:
         hardware_context_board_label,
         format_hardware_context_notice,
         attachment_kind,
+        startup_rag_indexing,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -560,6 +561,7 @@ except ImportError:
         hardware_context_board_label,
         format_hardware_context_notice,
         attachment_kind,
+        startup_rag_indexing,
     )
 try:
     from app.bridge.routes_auth import (
@@ -2997,31 +2999,7 @@ def serial_reconnect_loop(
             continue
 
 
-def _startup_rag_indexing(openai_key: Optional[str]) -> None:
-    """
-    Background RAG indexing on server startup.
-    Non-blocking - runs in daemon thread. Fails gracefully if RAG unavailable.
-    """
-    if not openai_key:
-        logger.info("Startup RAG indexing skipped: no OpenAI key available")
-        return
-    if not get_codex_rag:
-        logger.info("Startup RAG indexing skipped: RAG module not available")
-        return
-    try:
-        rag = get_codex_rag(openai_key)
-        logger.info("Starting background RAG indexing...")
-        start_ts = time.time()
-        doc_stats = rag.index_docs(force_reindex=False)
-        sketch_stats = rag.index_sketches(force_reindex=False)
-        elapsed_s = time.time() - start_ts
-        logger.info(
-            f"Background RAG indexing complete in {elapsed_s:.1f}s: "
-            f"docs={doc_stats['files_processed']} processed/{doc_stats['files_skipped']} skipped, "
-            f"sketches={sketch_stats['files_processed']} processed/{sketch_stats['files_skipped']} skipped"
-        )
-    except Exception as exc:
-        logger.warning(f"Background RAG indexing failed (non-fatal): {exc}")
+# _startup_rag_indexing moved to routes_ai.py as startup_rag_indexing
 
 
 def main() -> int:
