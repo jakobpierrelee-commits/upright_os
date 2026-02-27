@@ -276,3 +276,29 @@ def handle_ai_threads_get(
             session_key=skey,
         ),
     )
+
+
+def handle_ai_rag_stats_get(
+    *,
+    me: Dict[str, Any],
+    auth: Any,
+    env_api_key: str,
+    get_codex_rag_fn: Optional[Callable[..., Any]],
+    build_stats_payload_fn: Callable[..., Dict[str, Any]],
+    current_time: float,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /ai/rag/stats GET request.
+
+    Returns (status_code, payload).
+    """
+    if not get_codex_rag_fn:
+        return 503, {"ok": False, "error": "rag_not_available"}
+
+    user_creds = auth.get_openai_key(int(me["id"]))
+    openai_key = str(
+        (user_creds or {}).get("api_key") or env_api_key or ""
+    ).strip()
+    rag = get_codex_rag_fn(openai_key)
+    stats = rag.get_index_stats()
+    return 200, build_stats_payload_fn(stats=stats, ts=current_time)

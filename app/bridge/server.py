@@ -463,6 +463,7 @@ try:
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
+        handle_ai_rag_stats_get,
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
@@ -478,6 +479,7 @@ except ImportError:
         handle_ai_profile_activate,
         handle_ai_profile_save,
         handle_ai_profiles_get,
+        handle_ai_rag_stats_get,
         handle_ai_status_get,
         handle_ai_thread_new,
         handle_ai_thread_select,
@@ -6020,23 +6022,15 @@ def build_handler(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
                     try:
-                        if not get_codex_rag:
-                            return _json(
-                                self, 503, {"ok": False, "error": "rag_not_available"}
-                            )
-                        user_creds = auth.get_openai_key(int(me["id"]))
-                        openai_key = str(
-                            (user_creds or {}).get("api_key")
-                            or os.environ.get("OPENAI_API_KEY")
-                            or ""
-                        ).strip()
-                        rag = get_codex_rag(openai_key)
-                        stats = rag.get_index_stats()
-                        return _json(
-                            self,
-                            200,
-                            build_stats_payload(stats=stats, ts=time.time()),
+                        code, payload = handle_ai_rag_stats_get(
+                            me=me,
+                            auth=auth,
+                            env_api_key=os.environ.get("OPENAI_API_KEY", ""),
+                            get_codex_rag_fn=get_codex_rag,
+                            build_stats_payload_fn=build_stats_payload,
+                            current_time=time.time(),
                         )
+                        return _json(self, code, payload)
                     except Exception as exc:
                         logger.warning(f"RAG stats error: {exc}")
                         return _json(
