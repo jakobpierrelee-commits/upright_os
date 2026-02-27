@@ -479,6 +479,7 @@ try:
         handle_setup_attempt_history_get,
         handle_agent_chat_post,
         handle_clean_preflight_post,
+        handle_clean_chat_post,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -502,6 +503,7 @@ except ImportError:
         handle_setup_attempt_history_get,
         handle_agent_chat_post,
         handle_clean_preflight_post,
+        handle_clean_chat_post,
     )
 try:
     from app.bridge.routes_auth import (
@@ -3968,36 +3970,19 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/agent/clean/chat":
-                    codex_login = _codex_cli_login_status()
-                    err, req = parse_clean_chat_request(
+                    code, payload = handle_clean_chat_post(
                         body=body,
-                        codex_login=codex_login,
-                        env_model=str(
-                            os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")
-                        ),
-                        env_timeout=str(
-                            os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")
-                        ),
-                        sanitize_attachments_fn=_sanitize_agent_attachments,
-                    )
-                    if err is not None:
-                        code, payload = err
-                        return _json(self, code, payload)
-                    assert req is not None
-                    code, payload = run_clean_chat(
-                        msg=str(req["msg"]),
-                        mode=str(req["mode"]),
-                        model=str(req["model"]),
-                        clean_timeout_s=int(req["clean_timeout_s"]),
-                        session_key=str(req["session_key"]),
-                        thread_id=req.get("thread_id"),
-                        attachments=list(req.get("attachments") or []),
-                        auto_tools=bool(req.get("auto_tools", False)),
                         ai=ai,
-                        run_auto_tools=_run_clean_auto_tools,
-                        build_context=_build_clean_agent_context,
-                        system_prompt_for_mode=_clean_system_prompt,
-                        normalize_reply_for_prompt=_normalize_reply_for_prompt,
+                        codex_cli_login_status_fn=_codex_cli_login_status,
+                        parse_clean_chat_request_fn=parse_clean_chat_request,
+                        sanitize_agent_attachments_fn=_sanitize_agent_attachments,
+                        run_clean_chat_fn=run_clean_chat,
+                        run_clean_auto_tools_fn=_run_clean_auto_tools,
+                        build_clean_agent_context_fn=_build_clean_agent_context,
+                        clean_system_prompt_fn=_clean_system_prompt,
+                        normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
+                        env_clean_model=str(os.environ.get("UPRIGHT_CLEAN_MODEL", "gpt-5-codex")),
+                        env_clean_timeout=str(os.environ.get("UPRIGHT_CLEAN_CODEX_EXEC_TIMEOUT_S", "120")),
                     )
                     return _json(self, code, payload)
 

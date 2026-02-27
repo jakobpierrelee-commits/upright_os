@@ -862,3 +862,49 @@ def handle_clean_preflight_post(
         validate_preflight_payload=validate_clean_preflight_response_fn,
     )
     return 200, payload
+
+
+def handle_clean_chat_post(
+    *,
+    body: Dict[str, Any],
+    ai: Any,
+    codex_cli_login_status_fn: Callable,
+    parse_clean_chat_request_fn: Callable,
+    sanitize_agent_attachments_fn: Callable,
+    run_clean_chat_fn: Callable,
+    run_clean_auto_tools_fn: Callable,
+    build_clean_agent_context_fn: Callable,
+    clean_system_prompt_fn: Callable,
+    normalize_reply_for_prompt_fn: Callable,
+    env_clean_model: str,
+    env_clean_timeout: str,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /agent/clean/chat POST request."""
+    codex_login = codex_cli_login_status_fn()
+    err, req = parse_clean_chat_request_fn(
+        body=body,
+        codex_login=codex_login,
+        env_model=env_clean_model,
+        env_timeout=env_clean_timeout,
+        sanitize_attachments_fn=sanitize_agent_attachments_fn,
+    )
+    if err is not None:
+        code, payload = err
+        return code, payload
+    assert req is not None
+    code, payload = run_clean_chat_fn(
+        msg=str(req["msg"]),
+        mode=str(req["mode"]),
+        model=str(req["model"]),
+        clean_timeout_s=int(req["clean_timeout_s"]),
+        session_key=str(req["session_key"]),
+        thread_id=req.get("thread_id"),
+        attachments=list(req.get("attachments") or []),
+        auto_tools=bool(req.get("auto_tools", False)),
+        ai=ai,
+        run_auto_tools=run_clean_auto_tools_fn,
+        build_context=build_clean_agent_context_fn,
+        system_prompt_for_mode=clean_system_prompt_fn,
+        normalize_reply_for_prompt=normalize_reply_for_prompt_fn,
+    )
+    return code, payload
