@@ -175,7 +175,6 @@ try:
 except ImportError:
     from clean_contracts import (  # type: ignore
         validate_clean_preflight_response,
-        validate_prearm_precheck_response,
     )
 try:
     from app.bridge.clean_preflight import (
@@ -260,9 +259,7 @@ try:
         build_arm_precheck_payload,
     )
 except ImportError:
-    from clean_safety import (  # type: ignore
-        build_arm_precheck_payload,
-    )
+    pass
 try:
     from app.bridge.clean_tuning import (
         build_burst_status_payload,
@@ -288,13 +285,7 @@ try:
         build_tooling_traces_payload,
     )
 except ImportError:
-    from clean_probe import (  # type: ignore
-        build_compat_probe_payload,
-        build_design_memory_best_payload,
-        build_design_memory_payload,
-        build_probe_payload,
-        build_tooling_traces_payload,
-    )
+    pass
 try:
     from app.bridge.routes_tuning import (
         handle_tuning_capabilities_get,
@@ -484,7 +475,6 @@ except ImportError:
         handle_agent_mode_set,
         handle_agent_status_get,
         handle_agent_thread_new,
-        handle_agent_thread_select,
         handle_agent_threads_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
@@ -585,14 +575,7 @@ except ImportError:
         build_agent_status_payload,
         build_agent_thread_state_payload,
         build_ai_chat_response_payload,
-        build_ai_knowledge_payload,
-        build_ai_profiles_payload,
-        build_ai_status_payload,
-        build_ai_thread_payload,
         build_ai_threads_status_payload,
-        build_auth_openai_status_payload,
-        build_auth_session_payload,
-        build_auth_user_payload,
         build_chat_with_tools_payload,
         build_disambiguation_reply_payload,
         build_openai_config_payload,
@@ -634,15 +617,10 @@ except ImportError:
         build_agent_state_payload,
         build_attempt_history_payload,
         build_attachment_payload,
-        build_capabilities_payload,
         build_design_payload,
-        build_overwatch_payload,
         build_port_released_payload,
-        build_reset_payload,
-        build_result_payload,
         build_revert_control_payload,
         build_setup_check_payload,
-        build_snapshots_payload,
         build_stats_payload,
         build_tool_metrics_payload,
         build_upload_confirm_success_payload,
@@ -694,6 +672,171 @@ except ImportError:
         ParameterSweepRunner = None  # type: ignore
         simulate_from_logs = None  # type: ignore
         evaluate_tuning_plan = None  # type: ignore
+
+try:
+    from app.bridge.manifest_validation import (
+        _pin_range_for_family,
+        _family_capabilities,
+        _protocol_schema,
+        _has_valid_pin,
+        _validate_protocol_pins,
+        _validate_runtime_manifest_v1,
+        _manifest_required_field_present,
+        _family_for_fqbn,
+        _board_id_for_fqbn,
+        _runtime_manifest_profile_compatibility,
+    )
+except ImportError:
+    from manifest_validation import (  # type: ignore
+        _pin_range_for_family,
+        _family_capabilities,
+        _protocol_schema,
+        _has_valid_pin,
+        _validate_protocol_pins,
+        _validate_runtime_manifest_v1,
+        _manifest_required_field_present,
+        _family_for_fqbn,
+        _board_id_for_fqbn,
+        _runtime_manifest_profile_compatibility,
+    )
+
+try:
+    from app.bridge.contract_readiness import (
+        V1_REQUIRED_FIELDS,
+        V1_GYRO_ALIASES,
+        V2_READINESS_FIELDS,
+        V2_FACTORY_FIELDS,
+        V2_OPTIONAL_FIELDS,
+        detect_contract_readiness,
+        _compute_action_gates,
+        _default_compat_policy,
+        _load_compat_policy,
+        _status_has_required_fields,
+        _resolve_compat_profile,
+        _resolve_action_gates,
+        _require_action_allowed,
+    )
+except ImportError:
+    from contract_readiness import (  # type: ignore
+        V1_REQUIRED_FIELDS,
+        V1_GYRO_ALIASES,
+        V2_READINESS_FIELDS,
+        V2_FACTORY_FIELDS,
+        V2_OPTIONAL_FIELDS,
+        detect_contract_readiness,
+        _compute_action_gates,
+        _default_compat_policy,
+        _load_compat_policy,
+        _status_has_required_fields,
+        _resolve_compat_profile,
+        _resolve_action_gates,
+        _require_action_allowed,
+    )
+
+try:
+    from app.bridge.probe_runners import (
+        run_compat_probe,
+        _get_port_meta,
+        _guess_mcu,
+        run_connect_probe,
+        run_setup_compat_test,
+        run_setup_smoke_check,
+        run_setup_overwatch_check,
+        _latest_docs_folder,
+        _validate_docs_artifacts,
+        build_overwatch_report,
+    )
+except ImportError:
+    from probe_runners import (  # type: ignore
+        run_compat_probe,
+        _get_port_meta,
+        _guess_mcu,
+        run_connect_probe,
+        run_setup_compat_test,
+        run_setup_smoke_check,
+        run_setup_overwatch_check,
+        _latest_docs_folder,
+        _validate_docs_artifacts,
+        build_overwatch_report,
+    )
+
+try:
+    from app.bridge.tuning_guards import (
+        TUNING_BAL_BOUNDS,
+        TUNING_PREFLIGHT_DELTA,
+        _status_float,
+        _require_tuning_range,
+        _guard_pid_apply,
+        _guard_motion_apply,
+        _guard_setpoint_apply,
+        _guard_limits_apply,
+        _detect_tuning_capabilities,
+        _validate_tuning_recommendation_contract,
+        _evaluate_tuning_recommendation_quality,
+        _build_tuning_apply_signature,
+        _requires_preflight,
+        _enforce_preflight_if_needed,
+    )
+except ImportError:
+    from tuning_guards import (  # type: ignore
+        TUNING_BAL_BOUNDS,
+        TUNING_PREFLIGHT_DELTA,
+        _status_float,
+        _require_tuning_range,
+        _guard_pid_apply,
+        _guard_motion_apply,
+        _guard_setpoint_apply,
+        _guard_limits_apply,
+        _detect_tuning_capabilities,
+        _validate_tuning_recommendation_contract,
+        _evaluate_tuning_recommendation_quality,
+        _build_tuning_apply_signature,
+        _requires_preflight,
+        _enforce_preflight_if_needed,
+    )
+
+try:
+    from app.bridge.agent_helpers import (
+        _codexrules_cache,
+        _load_codexrules,
+        _resolve_system_prompt,
+        _agent_mode_system_prompt,
+        _agent_model_allowed,
+        _agent_mode_default_model,
+        _agent_resolve_model,
+        _agent_choose_executor,
+        _install_runtime_diagnostics,
+        _codex_cli_login_status,
+        _legacy_execution_guard,
+        _extract_mission_facts,
+        _first_sentence,
+        _truncate_words,
+        _is_high_risk_user_request,
+        _strip_repetitive_caution_lines,
+        _soften_forced_reply_exact,
+        _normalize_reply_for_prompt,
+    )
+except ImportError:
+    from agent_helpers import (  # type: ignore
+        _codexrules_cache,
+        _load_codexrules,
+        _resolve_system_prompt,
+        _agent_mode_system_prompt,
+        _agent_model_allowed,
+        _agent_mode_default_model,
+        _agent_resolve_model,
+        _agent_choose_executor,
+        _install_runtime_diagnostics,
+        _codex_cli_login_status,
+        _legacy_execution_guard,
+        _extract_mission_facts,
+        _first_sentence,
+        _truncate_words,
+        _is_high_risk_user_request,
+        _strip_repetitive_caution_lines,
+        _soften_forced_reply_exact,
+        _normalize_reply_for_prompt,
+    )
 
 
 # BridgeControlState moved to domain module
@@ -5979,11 +6122,15 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/auth/password-reset/request":
-                    code, payload = handle_auth_password_reset_request(body=body, auth=auth)
+                    code, payload = handle_auth_password_reset_request(
+                        body=body, auth=auth
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/auth/password-reset/confirm":
-                    code, payload = handle_auth_password_reset_confirm(body=body, auth=auth)
+                    code, payload = handle_auth_password_reset_confirm(
+                        body=body, auth=auth
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/auth/logout":
@@ -6038,7 +6185,9 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    code, payload = handle_auth_openai_key_set(body=body, me=me, auth=auth)
+                    code, payload = handle_auth_openai_key_set(
+                        body=body, me=me, auth=auth
+                    )
                     return _json(self, code, payload)
 
                 if u.path == "/auth/openai-key/delete":
