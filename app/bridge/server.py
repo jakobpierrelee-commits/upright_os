@@ -1089,24 +1089,16 @@ def build_handler(
             probe_cache[kind] = {"ts": time.monotonic(), "report": report}
 
     def _current_sketch_hash() -> str:
-        sketch_path = pathlib.Path(
-            str((firmware.status().get("defaults", {}) or {}).get("sketch", ""))
-        )
+        sketch_path = pathlib.Path(str((firmware.status().get("defaults", {}) or {}).get("sketch", "")))
         if sketch_path.exists() and sketch_path.is_dir():
             preferred = sketch_path / f"{sketch_path.name}.ino"
-            if preferred.exists() and preferred.is_file():
-                sketch_path = preferred
-            else:
-                fallback = sorted(sketch_path.glob("*.ino"))
-                if fallback:
-                    sketch_path = fallback[0]
+            sketch_path = preferred if preferred.exists() and preferred.is_file() else (sorted(sketch_path.glob("*.ino")) or [sketch_path])[0]
         if not sketch_path.exists() or not sketch_path.is_file():
             return ""
         try:
-            raw = sketch_path.read_bytes()
+            return hashlib.sha256(sketch_path.read_bytes()).hexdigest()[:16]
         except Exception:
             return ""
-        return hashlib.sha256(raw).hexdigest()[:16]
 
     def _current_runtime_identity() -> Dict[str, str]:
         st = dict(gateway.health().get("last_status", {}))
