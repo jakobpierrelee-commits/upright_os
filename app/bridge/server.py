@@ -450,11 +450,17 @@ try:
     from app.bridge.routes_health import (
         handle_health,
         handle_status,
+        handle_telemetry_adapter_map_get,
+        handle_diag_serial_get,
+        handle_lines_get,
     )
 except ImportError:
     from routes_health import (  # type: ignore
         handle_health,
         handle_status,
+        handle_telemetry_adapter_map_get,
+        handle_diag_serial_get,
+        handle_lines_get,
     )
 try:
     from app.bridge.routes_ai import (
@@ -3376,34 +3382,30 @@ def build_handler(
                     )
                     return _json(self, code, payload)
                 if u.path == "/telemetry/adapter-map":
-                    st_raw = dict(gateway.health().get("last_status", {}))
-                    normalized = _normalize_status_for_hud(st_raw)
-                    return _json(
-                        self,
-                        200,
-                        build_telemetry_adapters_payload(
-                            adapter=normalized.get("adapter", {}),
-                            adapters=RUNTIME_TELEMETRY_ADAPTERS,
-                            canonical_fields=list(HUD_CANONICAL_FIELDS),
-                        ),
+                    code, payload = handle_telemetry_adapter_map_get(
+                        gateway=gateway,
+                        normalize_status_fn=_normalize_status_for_hud,
+                        build_telemetry_adapters_payload_fn=build_telemetry_adapters_payload,
+                        runtime_telemetry_adapters=RUNTIME_TELEMETRY_ADAPTERS,
+                        hud_canonical_fields=list(HUD_CANONICAL_FIELDS),
                     )
+                    return _json(self, code, payload)
                 if u.path == "/diag/serial":
-                    return _json(
-                        self,
-                        200,
-                        build_diag_serial_payload(
-                            serial=gateway.health(),
-                            control=control.snapshot(),
-                        ),
+                    code, payload = handle_diag_serial_get(
+                        gateway=gateway,
+                        control=control,
+                        build_diag_serial_payload_fn=build_diag_serial_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/lines":
                     q = parse_qs(u.query)
                     n = int(q.get("n", ["100"])[0])
-                    return _json(
-                        self,
-                        200,
-                        build_lines_payload(lines=gateway.recent_lines(n)),
+                    code, payload = handle_lines_get(
+                        gateway=gateway,
+                        n=n,
+                        build_lines_payload_fn=build_lines_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/burst/status":
                     return _json(
                         self,

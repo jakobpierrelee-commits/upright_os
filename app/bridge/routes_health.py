@@ -70,3 +70,44 @@ def handle_status(
             status_override=st,
         ),
     )
+
+
+def handle_telemetry_adapter_map_get(
+    *,
+    gateway: Any,
+    normalize_status_fn: Any,
+    build_telemetry_adapters_payload_fn: Any,
+    runtime_telemetry_adapters: Any,
+    hud_canonical_fields: list,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /telemetry/adapter-map GET request."""
+    st_raw = dict(gateway.health().get("last_status", {}))
+    normalized = normalize_status_fn(st_raw)
+    return 200, build_telemetry_adapters_payload_fn(
+        adapter=normalized.get("adapter", {}),
+        adapters=runtime_telemetry_adapters,
+        canonical_fields=hud_canonical_fields,
+    )
+
+
+def handle_diag_serial_get(
+    *,
+    gateway: Any,
+    control: Any,
+    build_diag_serial_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /diag/serial GET request."""
+    return 200, build_diag_serial_payload_fn(
+        serial=gateway.health(),
+        control=control.snapshot(),
+    )
+
+
+def handle_lines_get(
+    *,
+    gateway: Any,
+    n: int,
+    build_lines_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /lines GET request."""
+    return 200, build_lines_payload_fn(lines=gateway.recent_lines(n))
