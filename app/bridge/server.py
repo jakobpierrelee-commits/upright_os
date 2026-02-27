@@ -1838,38 +1838,13 @@ def build_handler(
                     _upload_fn = lambda repo, body: agent_upload_from_body(repo, body, safe_filename_fn=_safe_upload_filename, attachment_kind_fn=_attachment_kind)
                     return _json(self, *handle_agent_file_upload(body=body, repo_root=repo_root, agent_upload_from_body_fn=_upload_fn, build_attachment_payload_fn=build_attachment_payload))
 
-                if u.path == "/agent/clean/firmware/compile":
-                    inputs = resolve_clean_upload_inputs(
-                        body=body,
-                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
-                        default_fqbn=_clean_default_fqbn(),
-                    )
-                    code, payload = handle_clean_firmware_compile(
-                        firmware=firmware,
-                        sketch=str(inputs.get("sketch") or ""),
-                        fqbn=str(inputs.get("fqbn") or ""),
-                        idempotency_key=inputs.get("idempotency_key"),
-                        tool_call_builder=_clean_tool_call,
-                    )
-                    return _json(self, code, payload)
-
-                if u.path == "/agent/clean/firmware/upload":
-                    inputs = resolve_clean_upload_inputs(
-                        body=body,
-                        default_sketch=_clean_default_sketch_path(repo_root, firmware),
-                        default_fqbn=_clean_default_fqbn(),
-                    )
-                    code, payload = handle_clean_firmware_upload(
-                        firmware=firmware,
-                        gateway=gateway,
-                        prearm_safety=prearm_safety,
-                        sketch=str(inputs.get("sketch") or ""),
-                        fqbn=str(inputs.get("fqbn") or ""),
-                        port=inputs.get("port"),
-                        idempotency_key=inputs.get("idempotency_key"),
-                        tool_call_builder=_clean_tool_call,
-                    )
-                    return _json(self, code, payload)
+                # Clean firmware compile/upload routes
+                if u.path in {"/agent/clean/firmware/compile", "/agent/clean/firmware/upload"}:
+                    inputs = resolve_clean_upload_inputs(body=body, default_sketch=_clean_default_sketch_path(repo_root, firmware), default_fqbn=_clean_default_fqbn())
+                    _sketch, _fqbn, _idem = str(inputs.get("sketch") or ""), str(inputs.get("fqbn") or ""), inputs.get("idempotency_key")
+                    if u.path == "/agent/clean/firmware/compile":
+                        return _json(self, *handle_clean_firmware_compile(firmware=firmware, sketch=_sketch, fqbn=_fqbn, idempotency_key=_idem, tool_call_builder=_clean_tool_call))
+                    return _json(self, *handle_clean_firmware_upload(firmware=firmware, gateway=gateway, prearm_safety=prearm_safety, sketch=_sketch, fqbn=_fqbn, port=inputs.get("port"), idempotency_key=_idem, tool_call_builder=_clean_tool_call))
 
                 if u.path == "/agent/clean/firmware/upload/precheck":
                     requested_port = str(body.get("port", "")).strip()
@@ -1922,25 +1897,12 @@ def build_handler(
                     )
                     return _json(self, code, payload)
 
-                if u.path == "/agent/clean/thread/new":
+                # Clean thread routes
+                if u.path in {"/agent/clean/thread/new", "/agent/clean/thread/select"}:
                     mode = str(body.get("mode", "")).strip() or "app_dev"
-                    title = str(body.get("title", "")).strip() or None
-                    payload = handle_clean_thread_new(
-                        mode=mode,
-                        title=title,
-                        ai=ai,
-                    )
-                    return _json(self, 200, payload)
-
-                if u.path == "/agent/clean/thread/select":
-                    mode = str(body.get("mode", "")).strip() or "app_dev"
-                    thread_id = str(body.get("thread_id", "")).strip()
-                    code, payload = handle_clean_thread_select(
-                        mode=mode,
-                        thread_id=thread_id,
-                        ai=ai,
-                    )
-                    return _json(self, code, payload)
+                    if u.path == "/agent/clean/thread/new":
+                        return _json(self, 200, handle_clean_thread_new(mode=mode, title=str(body.get("title", "")).strip() or None, ai=ai))
+                    return _json(self, *handle_clean_thread_select(mode=mode, thread_id=str(body.get("thread_id", "")).strip(), ai=ai))
 
                 if u.path == "/agent/clean/chat":
                     code, payload = handle_clean_chat_post(
