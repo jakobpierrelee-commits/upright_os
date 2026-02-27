@@ -1627,15 +1627,12 @@ def build_handler(
     return Handler
 
 
-def watchdog_loop(
-    gateway: NanoSerialGateway, control: BridgeControlState, stop_evt: threading.Event
-) -> None:
+def watchdog_loop(gateway: NanoSerialGateway, control: BridgeControlState, stop_evt: threading.Event) -> None:
     while not stop_evt.wait(0.1):
         try:
             if not control.check_and_trip_watchdog():
                 continue
-            status = gateway.get_status()
-            mode = str(status.get("mode", "UNKNOWN"))
+            mode = str(gateway.get_status().get("mode", "UNKNOWN"))
             if mode in {"BALANCING", "ARMED"}:
                 gateway.command("DISARM", timeout=1.0)
                 control.record_watchdog_disarm(f"heartbeat_timeout:{mode}")
@@ -1643,19 +1640,13 @@ def watchdog_loop(
             continue
 
 
-def serial_reconnect_loop(
-    gateway: NanoSerialGateway, firmware: FirmwareManager, stop_evt: threading.Event
-) -> None:
+def serial_reconnect_loop(gateway: NanoSerialGateway, firmware: FirmwareManager, stop_evt: threading.Event) -> None:
     while not stop_evt.wait(2.0):
         try:
-            # Avoid racing avrdude by reconnecting the bridge while a flash is active.
-            if bool(firmware.status().get("running", False)):
-                continue
-            if gateway.health().get("connected", False):
+            if bool(firmware.status().get("running", False)) or gateway.health().get("connected", False):
                 continue
             gateway.connect()
-            ready = gateway.wait_ready(timeout=5.0)
-            print(f"serial reconnected: mode={ready.get('mode', 'UNKNOWN')}")
+            print(f"serial reconnected: mode={gateway.wait_ready(timeout=5.0).get('mode', 'UNKNOWN')}")
         except Exception:
             try:
                 gateway.close()
