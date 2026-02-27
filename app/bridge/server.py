@@ -1227,58 +1227,21 @@ def build_handler(
                 break
         return out
 
-    def sync_hardware_context(
-        session_key: str, body: Dict[str, Any], ctx: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        update_info: Dict[str, Any] = {
-            "accepted": False,
-            "changed": False,
-            "initial": False,
-        }
+    def sync_hardware_context(session_key: str, body: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+        update_info: Dict[str, Any] = {"accepted": False, "changed": False, "initial": False}
         if "hardware_context" in body:
-            update_info = hw_context_store.upsert(
-                session_key, body.get("hardware_context")
-            )
+            update_info = hw_context_store.upsert(session_key, body.get("hardware_context"))
         stored_ctx = hw_context_store.get(session_key)
         if isinstance(stored_ctx, dict):
             ctx["hardware_context"] = stored_ctx
-        notice = _format_hardware_context_notice(stored_ctx, update_info)
-        return {"update": update_info, "notice": notice}
+        return {"update": update_info, "notice": _format_hardware_context_notice(stored_ctx, update_info)}
 
-    def _clean_tool_call(
-        *,
-        name: str,
-        arguments: Dict[str, Any],
-        ok: bool,
-        data: Optional[Dict[str, Any]] = None,
-        error: str = "",
-        started_ms: int = 0,
-    ) -> Dict[str, Any]:
-        return clean_tool_call(
-            name=name,
-            arguments=arguments,
-            ok=ok,
-            data=data,
-            error=error,
-            started_ms=started_ms,
-        )
+    def _clean_tool_call(*, name: str, arguments: Dict[str, Any], ok: bool, data: Optional[Dict[str, Any]] = None, error: str = "", started_ms: int = 0) -> Dict[str, Any]:
+        return clean_tool_call(name=name, arguments=arguments, ok=ok, data=data, error=error, started_ms=started_ms)
 
-    def _run_clean_auto_tools(
-        *,
-        message: str,
-        model: str,
-    ) -> list[Dict[str, Any]]:
+    def _run_clean_auto_tools(*, message: str, model: str) -> list[Dict[str, Any]]:
         _ = model
-        return run_clean_auto_tools(
-            message=message,
-            gateway=gateway,
-            firmware=firmware,
-            repo_root=repo_root,
-            default_sketch_path_fn=_clean_default_sketch_path,
-            default_fqbn_fn=_clean_default_fqbn,
-            run_connect_probe_fn=run_connect_probe,
-            run_compat_probe_fn=run_compat_probe,
-        )
+        return run_clean_auto_tools(message=message, gateway=gateway, firmware=firmware, repo_root=repo_root, default_sketch_path_fn=_clean_default_sketch_path, default_fqbn_fn=_clean_default_fqbn, run_connect_probe_fn=run_connect_probe, run_compat_probe_fn=run_compat_probe)
 
     def _build_clean_agent_context(
         *,
