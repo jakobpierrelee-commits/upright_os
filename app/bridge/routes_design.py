@@ -80,3 +80,23 @@ def handle_design_memory_list_get(
             if str(r.get("profile_id", "")).strip() == profile_id
         ]
     return 200, build_design_memory_payload(design_memory=rows)
+
+
+def handle_design_memory_best_get(
+    *,
+    query: Dict[str, Any],
+    design_memory: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /design-memory/best GET request.
+
+    Returns (status_code, payload).
+    """
+    session_key = str((query.get("session_key") or [""])[0]).strip()
+    profile_id = str((query.get("profile_id") or [""])[0]).strip()
+    return 200, build_design_memory_best_payload(
+        best_design=design_memory.best(
+            session_key=session_key,
+            profile_id=profile_id,
+        )
+    )

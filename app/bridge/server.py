@@ -511,11 +511,13 @@ except ImportError:
     )
 try:
     from app.bridge.routes_design import (
+        handle_design_memory_best_get,
         handle_design_memory_list_get,
         handle_design_memory_rate,
     )
 except ImportError:
     from routes_design import (  # type: ignore
+        handle_design_memory_best_get,
         handle_design_memory_list_get,
         handle_design_memory_rate,
     )
@@ -5641,18 +5643,11 @@ def build_handler(
                     return _json(self, code, payload)
                 if u.path == "/design-memory/best":
                     q = parse_qs(u.query)
-                    session_key = str((q.get("session_key") or [""])[0]).strip()
-                    profile_id = str((q.get("profile_id") or [""])[0]).strip()
-                    return _json(
-                        self,
-                        200,
-                        build_design_memory_best_payload(
-                            best_design=design_memory.best(
-                                session_key=session_key,
-                                profile_id=profile_id,
-                            )
-                        ),
+                    code, payload = handle_design_memory_best_get(
+                        query=q,
+                        design_memory=design_memory,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/unified-schema":
                     code, payload = handle_firmware_unified_schema_get(
                         firmware=firmware
