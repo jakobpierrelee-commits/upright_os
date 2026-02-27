@@ -536,6 +536,16 @@ try:
 except ImportError:
     from routes_overwatch import handle_overwatch_status_get  # type: ignore
 try:
+    from app.bridge.routes_probe import (
+        handle_probe_compat_get,
+        handle_probe_connect_get,
+    )
+except ImportError:
+    from routes_probe import (  # type: ignore
+        handle_probe_compat_get,
+        handle_probe_connect_get,
+    )
+try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
         build_agent_status_payload,
@@ -5906,76 +5916,24 @@ def build_handler(
                     return _json(self, code, payload)
                 if u.path == "/probe/compat":
                     q = parse_qs(u.query)
-                    requested_profile = str(
-                        (q.get("profile", [""]) or [""])[0] or ""
-                    ).strip()
-                    cache_key = (
-                        f"compat:{requested_profile}" if requested_profile else "compat"
+                    code, payload = handle_probe_compat_get(
+                        query=q,
+                        gateway=gateway,
+                        cached_probe_fn=cached_probe,
+                        store_probe_fn=store_probe,
+                        run_compat_probe_fn=run_compat_probe,
                     )
-                    cached = cached_probe(cache_key)
-                    if cached is not None:
-                        return _json(
-                            self, 200, build_compat_probe_payload(compat=cached)
-                        )
-                    # Throttle probe pressure when queue is already busy.
-                    if int(gateway.health().get("queue_depth", 0) or 0) > 2:
-                        fallback = {
-                            "ok": False,
-                            "profile": "unknown",
-                            "firmware_id": None,
-                            "required_fields": [],
-                            "missing_fields": [],
-                            "supported_commands": [],
-                            "missing_commands": [],
-                            "warnings": ["compat_probe_throttled_queue_busy"],
-                        }
-                        return _json(
-                            self, 200, build_compat_probe_payload(compat=fallback)
-                        )
-                    out = run_compat_probe(
-                        gateway, profile_override=requested_profile or None
-                    )
-                    store_probe(cache_key, out)
-                    return _json(self, 200, build_compat_probe_payload(compat=out))
+                    return _json(self, code, payload)
                 if u.path == "/probe/connect":
-                    cached = cached_probe("connect")
-                    if cached is not None:
-                        return _json(self, 200, build_probe_payload(probe=cached))
-                    if int(gateway.health().get("queue_depth", 0) or 0) > 2:
-                        fallback = {
-                            "ok": False,
-                            "connected": bool(gateway.health().get("connected", False)),
-                            "port": str(gateway.health().get("port", "")),
-                            "baud": int(gateway.health().get("baud", 0) or 0),
-                            "port_meta": _get_port_meta(
-                                str(gateway.health().get("port", ""))
-                            ),
-                            "mcu_guess": "unknown",
-                            "firmware_profile": "unknown",
-                            "confidence_pct": 0,
-                            "status_schema_ok": False,
-                            "status_error": None,
-                            "components": {
-                                "imu": False,
-                                "motor_driver": False,
-                                "encoder_feedback": False,
-                                "voltage_telemetry": False,
-                                "wheel_model": False,
-                                "persistent_calibration": False,
-                            },
-                            "commands": [],
-                            "missing_commands": [],
-                            "warnings": ["connect_probe_throttled_queue_busy"],
-                            "next_questions": [],
-                            "compat": None,
-                            "tuning_capabilities": _detect_tuning_capabilities(
-                                {}, [], []
-                            ),
-                        }
-                        return _json(self, 200, build_probe_payload(probe=fallback))
-                    out = run_connect_probe(gateway)
-                    store_probe("connect", out)
-                    return _json(self, 200, build_probe_payload(probe=out))
+                    code, payload = handle_probe_connect_get(
+                        gateway=gateway,
+                        cached_probe_fn=cached_probe,
+                        store_probe_fn=store_probe,
+                        run_connect_probe_fn=run_connect_probe,
+                        get_port_meta_fn=_get_port_meta,
+                        detect_tuning_capabilities_fn=_detect_tuning_capabilities,
+                    )
+                    return _json(self, code, payload)
                 if u.path == "/tooling/tuning/capabilities":
                     code, payload = handle_tuning_capabilities_get(
                         gateway=gateway,
