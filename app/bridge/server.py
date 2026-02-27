@@ -1757,40 +1757,17 @@ def build_handler(
                             mode = str(mode_state.get("mode", "robot_dev"))
                     tok = _extract_auth_token(self, body)
                     me = auth.me(tok) if tok else None
-                    # Resolve runtime using extracted helper
-                    err_resp, runtime = resolve_agent_stream_runtime(
-                        body=body, mode=mode, auth=auth, me=me, ai=ai, provider_router=provider_router,
-                        codex_agent=codex_agent, codex_cli_login_status_fn=_codex_cli_login_status,
-                        agent_choose_executor_fn=_agent_choose_executor, agent_resolve_model_fn=_agent_resolve_model,
-                        agent_model_allowed_fn=_agent_model_allowed, env_model=os.environ.get("OPENAI_MODEL", ""),
-                    )
+                    err_resp, runtime = resolve_agent_stream_runtime(body=body, mode=mode, auth=auth, me=me, ai=ai, provider_router=provider_router, codex_agent=codex_agent, codex_cli_login_status_fn=_codex_cli_login_status, agent_choose_executor_fn=_agent_choose_executor, agent_resolve_model_fn=_agent_resolve_model, agent_model_allowed_fn=_agent_model_allowed, env_model=os.environ.get("OPENAI_MODEL", ""))
                     if err_resp is not None:
                         return _json(self, err_resp[0], err_resp[1])
                     api_key, model, executor = runtime["api_key"], runtime["model"], runtime["executor"]
-                    # Build context using extracted helper
-                    ctx = build_agent_chat_stream_context(
-                        body=body, mode=mode, gateway=gateway, control=control, firmware=firmware,
-                        commissioning=commissioning, host_capture=host_capture, config_history=config_history,
-                        knowledge=knowledge, burst_status_fn=burst_status,
-                        commissioning_ai_context_fn=lambda c: commissioning_ai_context(c, read_csv_tail_fn=read_csv_tail),
-                        host_capture_ai_context_fn=lambda h: host_capture_ai_context(h, read_csv_tail_fn=read_csv_tail),
-                        assistant_capabilities_context_fn=assistant_capabilities_context,
-                        sanitize_attachments_fn=_sanitize_agent_attachments,
-                    )
-                    thread_id = str(body.get("thread_id", "")).strip() or None
-                    session_key = f"user:{me['id']}:agent:{mode}" if me and isinstance(me.get("id"), int) else f"local:{mode}"
-                    # Apply SSE headers and create emitter
+                    ctx = build_agent_chat_stream_context(body=body, mode=mode, gateway=gateway, control=control, firmware=firmware, commissioning=commissioning, host_capture=host_capture, config_history=config_history, knowledge=knowledge, burst_status_fn=burst_status, commissioning_ai_context_fn=lambda c: commissioning_ai_context(c, read_csv_tail_fn=read_csv_tail), host_capture_ai_context_fn=lambda h: host_capture_ai_context(h, read_csv_tail_fn=read_csv_tail), assistant_capabilities_context_fn=assistant_capabilities_context, sanitize_attachments_fn=_sanitize_agent_attachments)
+                    thread_id, session_key = str(body.get("thread_id", "")).strip() or None, f"user:{me['id']}:agent:{mode}" if me and isinstance(me.get("id"), int) else f"local:{mode}"
                     apply_sse_response_headers(self)
                     send_evt = make_inline_sse_emitter(self.wfile)
                     send_evt("start", {"ok": True})
                     try:
-                        run_agent_chat_stream_executor(
-                            executor=executor, msg=msg, mode=mode, model=model, api_key=api_key, ctx=ctx,
-                            session_key=session_key, thread_id=thread_id, body=body, ai=ai, codex_agent=codex_agent,
-                            firmware=firmware, mode_state=mode_state, agent_mode_system_prompt_fn=_agent_mode_system_prompt,
-                            normalize_reply_for_prompt_fn=_normalize_reply_for_prompt,
-                            build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload, send_evt=send_evt,
-                        )
+                        run_agent_chat_stream_executor(executor=executor, msg=msg, mode=mode, model=model, api_key=api_key, ctx=ctx, session_key=session_key, thread_id=thread_id, body=body, ai=ai, codex_agent=codex_agent, firmware=firmware, mode_state=mode_state, agent_mode_system_prompt_fn=_agent_mode_system_prompt, normalize_reply_for_prompt_fn=_normalize_reply_for_prompt, build_agent_chat_reply_payload_fn=build_agent_chat_reply_payload, send_evt=send_evt)
                     except Exception as exc:
                         send_evt("error", {"ok": False, "error": str(exc)})
                     return
