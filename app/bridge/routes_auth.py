@@ -120,3 +120,28 @@ def handle_auth_me_get(
 ) -> Tuple[int, Dict[str, Any]]:
     """Handle /auth/me GET request."""
     return 200, build_auth_user_payload(user=me)
+
+
+def handle_auth_openai_key_status_get(
+    *,
+    me: Dict[str, Any],
+    auth: Any,
+    env_api_key: str,
+    build_openai_config_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /auth/openai-key/status GET request."""
+    user_creds = auth.get_openai_key(int(me["id"]))
+    runtime_key = str(
+        (user_creds or {}).get("api_key") or env_api_key or ""
+    ).strip()
+    runtime_source = (
+        "user"
+        if user_creds and user_creds.get("api_key")
+        else ("env" if env_api_key else None)
+    )
+    return 200, build_openai_config_payload_fn(
+        configured=bool(me.get("openai_configured")),
+        model=me.get("openai_model"),
+        runtime_has_key=bool(runtime_key),
+        runtime_key_source=runtime_source,
+    )

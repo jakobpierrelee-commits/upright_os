@@ -492,6 +492,7 @@ try:
         handle_auth_me_get,
         handle_auth_openai_key_delete,
         handle_auth_openai_key_set,
+        handle_auth_openai_key_status_get,
         handle_auth_password_reset_confirm,
         handle_auth_password_reset_request,
         handle_auth_register,
@@ -503,6 +504,7 @@ except ImportError:
         handle_auth_me_get,
         handle_auth_openai_key_delete,
         handle_auth_openai_key_set,
+        handle_auth_openai_key_status_get,
         handle_auth_password_reset_confirm,
         handle_auth_password_reset_request,
         handle_auth_register,
@@ -5868,27 +5870,13 @@ def build_handler(
                         return _json(
                             self, 401, {"ok": False, "error": "unauthenticated"}
                         )
-                    user_creds = auth.get_openai_key(int(me["id"]))
-                    runtime_key = str(
-                        (user_creds or {}).get("api_key")
-                        or os.environ.get("OPENAI_API_KEY")
-                        or ""
-                    ).strip()
-                    runtime_source = (
-                        "user"
-                        if user_creds and user_creds.get("api_key")
-                        else ("env" if os.environ.get("OPENAI_API_KEY") else None)
+                    code, payload = handle_auth_openai_key_status_get(
+                        me=me,
+                        auth=auth,
+                        env_api_key=os.environ.get("OPENAI_API_KEY", ""),
+                        build_openai_config_payload_fn=build_openai_config_payload,
                     )
-                    return _json(
-                        self,
-                        200,
-                        build_openai_config_payload(
-                            configured=bool(me.get("openai_configured")),
-                            model=me.get("openai_model"),
-                            runtime_has_key=bool(runtime_key),
-                            runtime_key_source=runtime_source,
-                        ),
-                    )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/sketch":
                     q = parse_qs(u.query)
                     code, payload = handle_firmware_sketch_get(
