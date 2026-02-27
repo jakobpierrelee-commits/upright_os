@@ -111,3 +111,30 @@ def handle_lines_get(
 ) -> Tuple[int, Dict[str, Any]]:
     """Handle /lines GET request."""
     return 200, build_lines_payload_fn(lines=gateway.recent_lines(n))
+
+
+def handle_burst_status_get(
+    *,
+    burst_status_fn: Any,
+    build_burst_status_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /burst/status GET request."""
+    return 200, build_burst_status_payload_fn(burst=burst_status_fn())
+
+
+def handle_commissioning_status_get(
+    *,
+    commissioning: Any,
+    build_commissioning_status_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /commissioning/status GET request."""
+    return 200, build_commissioning_status_payload_fn(commissioning=commissioning.status())
+
+
+def handle_commissioning_artifacts_get(
+    *,
+    commissioning: Any,
+    build_commissioning_artifacts_payload_fn: Any,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /commissioning/artifacts GET request."""
+    return 200, build_commissioning_artifacts_payload_fn(commissioning=commissioning.artifacts())

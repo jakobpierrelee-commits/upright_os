@@ -453,6 +453,9 @@ try:
         handle_telemetry_adapter_map_get,
         handle_diag_serial_get,
         handle_lines_get,
+        handle_burst_status_get,
+        handle_commissioning_status_get,
+        handle_commissioning_artifacts_get,
     )
 except ImportError:
     from routes_health import (  # type: ignore
@@ -461,6 +464,9 @@ except ImportError:
         handle_telemetry_adapter_map_get,
         handle_diag_serial_get,
         handle_lines_get,
+        handle_burst_status_get,
+        handle_commissioning_status_get,
+        handle_commissioning_artifacts_get,
     )
 try:
     from app.bridge.routes_ai import (
@@ -3407,27 +3413,23 @@ def build_handler(
                     )
                     return _json(self, code, payload)
                 if u.path == "/burst/status":
-                    return _json(
-                        self,
-                        200,
-                        build_burst_status_payload(burst=burst_status()),
+                    code, payload = handle_burst_status_get(
+                        burst_status_fn=burst_status,
+                        build_burst_status_payload_fn=build_burst_status_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/commissioning/status":
-                    return _json(
-                        self,
-                        200,
-                        build_commissioning_status_payload(
-                            commissioning=commissioning.status()
-                        ),
+                    code, payload = handle_commissioning_status_get(
+                        commissioning=commissioning,
+                        build_commissioning_status_payload_fn=build_commissioning_status_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/commissioning/artifacts":
-                    return _json(
-                        self,
-                        200,
-                        build_commissioning_artifacts_payload(
-                            artifacts=commissioning.artifacts()
-                        ),
+                    code, payload = handle_commissioning_artifacts_get(
+                        commissioning=commissioning,
+                        build_commissioning_artifacts_payload_fn=build_commissioning_artifacts_payload,
                     )
+                    return _json(self, code, payload)
                 if u.path == "/firmware/status":
                     code, payload = handle_firmware_status_get(firmware=firmware)
                     return _json(self, code, payload)
