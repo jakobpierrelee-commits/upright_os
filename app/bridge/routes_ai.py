@@ -367,6 +367,65 @@ def handle_agent_clean_status_get(
     return 200, payload
 
 
+def handle_agent_threads_get(
+    *,
+    query: Dict[str, List[str]],
+    me: Optional[Dict[str, Any]],
+    auth: Any,
+    agent_mission: Any,
+    provider_router: Any,
+    ai: Any,
+    env_model: str,
+    codex_cli_login_status_fn: Callable[[], Dict[str, Any]],
+    agent_resolve_model_fn: Callable[..., str],
+    build_agent_status_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/threads GET request.
+
+    Returns (status_code, payload).
+    """
+    mode_state = agent_mission.status()
+    mode = str((query.get("mode", [""]) or [""])[0] or "").strip() or str(
+        mode_state.get("mode", "robot_dev")
+    )
+    user_creds = (
+        auth.get_openai_key(int(me["id"]))
+        if me and isinstance(me.get("id"), int)
+        else None
+    )
+    session_key = (
+        f"user:{me['id']}:agent:{mode}"
+        if me and isinstance(me.get("id"), int)
+        else f"local:{mode}"
+    )
+    resolved = provider_router.resolve_agent_runtime(
+        mode=mode,
+        requested_api_key=None,
+        requested_model=None,
+        user_creds=user_creds,
+        env_api_key=ai.default_api_key,
+        env_model=env_model,
+    )
+    codex_login = codex_cli_login_status_fn()
+    use_codex_cli = bool(codex_login.get("logged_in", False))
+    runtime_model = agent_resolve_model_fn(
+        mode,
+        str(resolved.get("model", "")),
+        prefer_codex=use_codex_cli,
+    )
+    runtime_configured = bool(resolved.get("api_key")) or bool(use_codex_cli)
+    return 200, build_agent_status_payload_fn(
+        agent=mode_state,
+        threads=ai.list_threads(session_key),
+        ai=ai.status(
+            configured=runtime_configured,
+            model=runtime_model or "(unset)",
+            session_key=session_key,
+        ),
+    )
+
+
 def handle_agent_status_get(
     *,
     me: Optional[Dict[str, Any]],

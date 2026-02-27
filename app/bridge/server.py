@@ -461,6 +461,7 @@ try:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_agent_status_get,
+        handle_agent_threads_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
         handle_ai_profile_activate,
@@ -480,6 +481,7 @@ except ImportError:
         handle_agent_file_upload,
         handle_agent_mode_set,
         handle_agent_status_get,
+        handle_agent_threads_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
         handle_ai_profile_activate,
@@ -5742,53 +5744,21 @@ def build_handler(
                     if guard is not None:
                         return _json(self, 403, guard)
                     q = parse_qs(u.query)
-                    mode_state = agent_mission.status()
-                    mode = str((q.get("mode", [""]) or [""])[0] or "").strip() or str(
-                        mode_state.get("mode", "robot_dev")
-                    )
                     tok = _extract_auth_token(self)
                     me = auth.me(tok) if tok else None
-                    user_creds = (
-                        auth.get_openai_key(int(me["id"]))
-                        if me and isinstance(me.get("id"), int)
-                        else None
-                    )
-                    session_key = (
-                        f"user:{me['id']}:agent:{mode}"
-                        if me and isinstance(me.get("id"), int)
-                        else f"local:{mode}"
-                    )
-                    resolved = provider_router.resolve_agent_runtime(
-                        mode=mode,
-                        requested_api_key=None,
-                        requested_model=None,
-                        user_creds=user_creds,
-                        env_api_key=ai.default_api_key,
+                    code, payload = handle_agent_threads_get(
+                        query=q,
+                        me=me,
+                        auth=auth,
+                        agent_mission=agent_mission,
+                        provider_router=provider_router,
+                        ai=ai,
                         env_model=os.environ.get("OPENAI_MODEL", ""),
+                        codex_cli_login_status_fn=_codex_cli_login_status,
+                        agent_resolve_model_fn=_agent_resolve_model,
+                        build_agent_status_payload_fn=build_agent_status_payload,
                     )
-                    codex_login = _codex_cli_login_status()
-                    use_codex_cli = bool(codex_login.get("logged_in", False))
-                    runtime_model = _agent_resolve_model(
-                        mode,
-                        str(resolved.get("model", "")),
-                        prefer_codex=use_codex_cli,
-                    )
-                    runtime_configured = bool(resolved.get("api_key")) or bool(
-                        use_codex_cli
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_agent_status_payload(
-                            agent=mode_state,
-                            threads=ai.list_threads(session_key),
-                            ai=ai.status(
-                                configured=runtime_configured,
-                                model=runtime_model or "(unset)",
-                                session_key=session_key,
-                            ),
-                        ),
-                    )
+                    return _json(self, code, payload)
                 if u.path == "/ai/threads":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok)
