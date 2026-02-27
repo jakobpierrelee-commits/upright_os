@@ -128,63 +128,27 @@ except ImportError:
 try:
     from app.bridge.clean_contracts import validate_clean_preflight_response, validate_prearm_precheck_response
 except ImportError:
-    from clean_contracts import (  # type: ignore
-        validate_clean_preflight_response,
-    )
+    from clean_contracts import validate_clean_preflight_response, validate_prearm_precheck_response  # type: ignore
 try:
-    from app.bridge.clean_preflight import (
-        resolve_manifest_gates,
-        run_clean_preflight,
-    )
+    from app.bridge.clean_preflight import resolve_manifest_gates, run_clean_preflight
 except ImportError:
-    from clean_preflight import (  # type: ignore
-        resolve_manifest_gates,
-        run_clean_preflight,
-    )
+    from clean_preflight import resolve_manifest_gates, run_clean_preflight  # type: ignore
 try:
-    from app.bridge.clean_codex_chat import (
-        run_clean_chat,
-        run_clean_chat_stream,
-    )
+    from app.bridge.clean_codex_chat import run_clean_chat, run_clean_chat_stream
 except ImportError:
-    from clean_codex_chat import (  # type: ignore
-        run_clean_chat,
-        run_clean_chat_stream,
-    )
+    from clean_codex_chat import run_clean_chat, run_clean_chat_stream  # type: ignore
 try:
-    from app.bridge.clean_route_helpers import (
-        build_clean_agent_context,
-        build_clean_system_prompt,
-        clean_tool_call,
-        run_clean_auto_tools,
-    )
+    from app.bridge.clean_route_helpers import build_clean_agent_context, build_clean_system_prompt, clean_tool_call, run_clean_auto_tools
 except ImportError:
-    from clean_route_helpers import (  # type: ignore
-        build_clean_agent_context,
-        build_clean_system_prompt,
-        clean_tool_call,
-        run_clean_auto_tools,
-    )
+    from clean_route_helpers import build_clean_agent_context, build_clean_system_prompt, clean_tool_call, run_clean_auto_tools  # type: ignore
 try:
-    from app.bridge.clean_auth_helpers import (
-        codex_cli_login_status,
-        sanitize_agent_attachments,
-    )
+    from app.bridge.clean_auth_helpers import codex_cli_login_status, sanitize_agent_attachments
 except ImportError:
-    from clean_auth_helpers import (  # type: ignore
-        codex_cli_login_status,
-        sanitize_agent_attachments,
-    )
+    from clean_auth_helpers import codex_cli_login_status, sanitize_agent_attachments  # type: ignore
 try:
-    from app.bridge.clean_legacy_gate import (
-        legacy_execution_block_payload,
-        legacy_execution_enabled,
-    )
+    from app.bridge.clean_legacy_gate import legacy_execution_block_payload, legacy_execution_enabled
 except ImportError:
-    from clean_legacy_gate import (  # type: ignore
-        legacy_execution_block_payload,
-        legacy_execution_enabled,
-    )
+    from clean_legacy_gate import legacy_execution_block_payload, legacy_execution_enabled  # type: ignore
 try:
     from app.bridge.clean_threads import (
         handle_clean_thread_new,
