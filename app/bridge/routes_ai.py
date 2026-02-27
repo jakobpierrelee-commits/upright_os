@@ -365,3 +365,76 @@ def handle_agent_clean_status_get(
         lines=gateway.recent_lines(80),
     )
     return 200, payload
+
+
+def handle_agent_status_get(
+    *,
+    me: Optional[Dict[str, Any]],
+    auth: Any,
+    agent_mission: Any,
+    provider_router: Any,
+    ai: Any,
+    gateway: Any,
+    control: Any,
+    knowledge: Any,
+    codex_agent_available: bool,
+    env_model: str,
+    codex_cli_login_status_fn: Callable[[], Dict[str, Any]],
+    agent_choose_executor_fn: Callable[..., str],
+    agent_resolve_model_fn: Callable[..., str],
+    agent_model_allowed_fn: Callable[[str], bool],
+    build_agent_status_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /agent/status GET request.
+
+    Returns (status_code, payload).
+    """
+    user_creds = (
+        auth.get_openai_key(int(me["id"]))
+        if me and isinstance(me.get("id"), int)
+        else None
+    )
+    mode_state = agent_mission.status()
+    resolved = provider_router.resolve_agent_runtime(
+        mode=str(mode_state.get("mode", "robot_dev")),
+        requested_api_key=None,
+        requested_model=None,
+        user_creds=user_creds,
+        env_api_key=ai.default_api_key,
+        env_model=env_model,
+    )
+    codex_login = codex_cli_login_status_fn()
+    use_codex_cli = bool(codex_login.get("logged_in", False))
+    has_api_key = bool(str(resolved.get("api_key", "")).strip())
+    runtime_exec = agent_choose_executor_fn(
+        mode=str(mode_state.get("mode", "robot_dev")),
+        enable_tools=True,
+        has_api_key=has_api_key,
+        codex_logged_in=use_codex_cli,
+        codex_agent_available=codex_agent_available,
+    )
+    runtime_model = agent_resolve_model_fn(
+        str(mode_state.get("mode", "robot_dev")),
+        str(resolved.get("model", "")),
+        prefer_codex=use_codex_cli,
+    )
+    runtime_model_allowed = (
+        True if use_codex_cli else agent_model_allowed_fn(runtime_model)
+    )
+    runtime_configured = has_api_key or bool(use_codex_cli)
+    serial_h = gateway.health()
+    payload = build_agent_status_payload_fn(
+        mode_state=mode_state,
+        resolved=resolved,
+        codex_login=codex_login,
+        runtime_exec=runtime_exec,
+        runtime_model=runtime_model,
+        runtime_model_allowed=runtime_model_allowed,
+        runtime_configured=runtime_configured,
+        serial_health=serial_h,
+        control_snapshot=control.snapshot(),
+        knowledge_context=knowledge.context(),
+        lines=gateway.recent_lines(80),
+    )
+    return 200, payload

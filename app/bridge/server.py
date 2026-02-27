@@ -460,6 +460,7 @@ try:
         handle_agent_clean_status_get,
         handle_agent_file_upload,
         handle_agent_mode_set,
+        handle_agent_status_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
         handle_ai_profile_activate,
@@ -478,6 +479,7 @@ except ImportError:
         handle_agent_clean_status_get,
         handle_agent_file_upload,
         handle_agent_mode_set,
+        handle_agent_status_get,
         handle_ai_knowledge_get,
         handle_ai_metrics_get,
         handle_ai_profile_activate,
@@ -5691,54 +5693,24 @@ def build_handler(
                 if u.path == "/agent/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok) if tok else None
-                    user_creds = (
-                        auth.get_openai_key(int(me["id"]))
-                        if me and isinstance(me.get("id"), int)
-                        else None
-                    )
-                    mode_state = agent_mission.status()
-                    resolved = provider_router.resolve_agent_runtime(
-                        mode=str(mode_state.get("mode", "robot_dev")),
-                        requested_api_key=None,
-                        requested_model=None,
-                        user_creds=user_creds,
-                        env_api_key=ai.default_api_key,
-                        env_model=os.environ.get("OPENAI_MODEL", ""),
-                    )
-                    codex_login = _codex_cli_login_status()
-                    use_codex_cli = bool(codex_login.get("logged_in", False))
-                    has_api_key = bool(str(resolved.get("api_key", "")).strip())
-                    runtime_exec = _agent_choose_executor(
-                        mode=str(mode_state.get("mode", "robot_dev")),
-                        enable_tools=True,
-                        has_api_key=has_api_key,
-                        codex_logged_in=use_codex_cli,
+                    code, payload = handle_agent_status_get(
+                        me=me,
+                        auth=auth,
+                        agent_mission=agent_mission,
+                        provider_router=provider_router,
+                        ai=ai,
+                        gateway=gateway,
+                        control=control,
+                        knowledge=knowledge,
                         codex_agent_available=bool(codex_agent is not None),
+                        env_model=os.environ.get("OPENAI_MODEL", ""),
+                        codex_cli_login_status_fn=_codex_cli_login_status,
+                        agent_choose_executor_fn=_agent_choose_executor,
+                        agent_resolve_model_fn=_agent_resolve_model,
+                        agent_model_allowed_fn=_agent_model_allowed,
+                        build_agent_status_payload_fn=build_agent_status_payload,
                     )
-                    runtime_model = _agent_resolve_model(
-                        str(mode_state.get("mode", "robot_dev")),
-                        str(resolved.get("model", "")),
-                        prefer_codex=use_codex_cli,
-                    )
-                    runtime_model_allowed = (
-                        True if use_codex_cli else _agent_model_allowed(runtime_model)
-                    )
-                    runtime_configured = has_api_key or bool(use_codex_cli)
-                    serial_h = gateway.health()
-                    payload = build_agent_status_payload(
-                        mode_state=mode_state,
-                        resolved=resolved,
-                        codex_login=codex_login,
-                        runtime_exec=runtime_exec,
-                        runtime_model=runtime_model,
-                        runtime_model_allowed=runtime_model_allowed,
-                        runtime_configured=runtime_configured,
-                        serial_health=serial_h,
-                        control_snapshot=control.snapshot(),
-                        knowledge_context=knowledge.context(),
-                        lines=gateway.recent_lines(80),
-                    )
-                    return _json(self, 200, payload)
+                    return _json(self, code, payload)
                 if u.path == "/agent/clean/status":
                     q = parse_qs(u.query)
                     code, payload = handle_agent_clean_status_get(
