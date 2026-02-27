@@ -893,3 +893,43 @@ def format_apply_note(apply_result: Dict[str, Any]) -> str:
     if sid:
         return f"Applied now: {sections}.{kd_note}{extra_note} Revert point saved ({sid}).".strip()
     return f"Applied now: {sections}.{kd_note}{extra_note}".strip()
+
+
+def extract_apply_json(answer: str) -> Optional[Dict[str, Any]]:
+    """Extract UPRIGHT_APPLY_JSON block from assistant answer."""
+    import json
+    marker = "UPRIGHT_APPLY_JSON:"
+    idx = answer.find(marker)
+    if idx < 0:
+        return None
+    tail = answer[idx + len(marker) :].lstrip()
+    if not tail.startswith("{"):
+        return None
+    dec = json.JSONDecoder()
+    try:
+        obj, _ = dec.raw_decode(tail)
+    except Exception:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    return None
+
+
+def strip_apply_json_block(answer: str) -> str:
+    """Strip UPRIGHT_APPLY_JSON block from assistant answer."""
+    import json
+    marker = "UPRIGHT_APPLY_JSON:"
+    idx = answer.find(marker)
+    if idx < 0:
+        return answer.strip()
+    head = answer[:idx].rstrip()
+    tail = answer[idx + len(marker) :].lstrip()
+    if tail.startswith("{"):
+        dec = json.JSONDecoder()
+        try:
+            _, end_idx = dec.raw_decode(tail)
+            tail = tail[end_idx:].lstrip()
+        except Exception:
+            pass
+    merged = f"{head}\n{tail}".strip() if head and tail else (head or tail).strip()
+    return merged

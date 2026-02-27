@@ -309,6 +309,8 @@ try:
         sanitize_apply_plan,
         revert_snapshot,
         format_apply_note,
+        extract_apply_json,
+        strip_apply_json_block,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
@@ -323,6 +325,8 @@ except ImportError:
         sanitize_apply_plan,
         revert_snapshot,
         format_apply_note,
+        extract_apply_json,
+        strip_apply_json_block,
     )
 try:
     from app.bridge.routes_burst import (
@@ -934,45 +938,8 @@ def _first_float(status: Dict[str, Any], *keys: str) -> Optional[float]:
     return None
 
 
-def _extract_apply_json(answer: str) -> Optional[Dict[str, Any]]:
-    marker = "UPRIGHT_APPLY_JSON:"
-    idx = answer.find(marker)
-    if idx < 0:
-        return None
-    tail = answer[idx + len(marker) :].lstrip()
-    if not tail.startswith("{"):
-        return None
-    dec = json.JSONDecoder()
-    try:
-        obj, _ = dec.raw_decode(tail)
-    except Exception:
-        return None
-    if isinstance(obj, dict):
-        return obj
-    return None
-
-
+# _extract_apply_json, _strip_apply_json_block moved to routes_tuning.py
 # _sanitize_apply_plan moved to routes_tuning.py as sanitize_apply_plan
-
-
-def _strip_apply_json_block(answer: str) -> str:
-    marker = "UPRIGHT_APPLY_JSON:"
-    idx = answer.find(marker)
-    if idx < 0:
-        return answer.strip()
-    head = answer[:idx].rstrip()
-    tail = answer[idx + len(marker) :].lstrip()
-    if tail.startswith("{"):
-        dec = json.JSONDecoder()
-        try:
-            _, end_idx = dec.raw_decode(tail)
-            tail = tail[end_idx:].lstrip()
-        except Exception:
-            pass
-    merged = f"{head}\n{tail}".strip() if head and tail else (head or tail).strip()
-    return merged
-
-
 # _format_apply_note moved to routes_tuning.py as format_apply_note
 
 
