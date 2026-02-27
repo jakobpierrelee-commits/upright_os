@@ -174,61 +174,17 @@ try:
 except ImportError:
     pass
 try:
-    from app.bridge.routes_tuning import (
-        handle_tuning_capabilities_get,
-        handle_tuning_preflight,
-        handle_tuning_recommend,
-        handle_pid_post,
-        handle_motion_post,
-        handle_setpoint_post,
-        handle_limits_post,
-        apply_tuning_plan,
-        sanitize_apply_plan,
-        revert_snapshot,
-        format_apply_note,
-        extract_apply_json,
-        strip_apply_json_block,
-    )
+    from app.bridge.routes_tuning import handle_tuning_capabilities_get, handle_tuning_preflight, handle_tuning_recommend, handle_pid_post, handle_motion_post, handle_setpoint_post, handle_limits_post, apply_tuning_plan, sanitize_apply_plan, revert_snapshot, format_apply_note, extract_apply_json, strip_apply_json_block
 except ImportError:
-    from routes_tuning import (  # type: ignore
-        handle_tuning_capabilities_get,
-        handle_tuning_preflight,
-        handle_tuning_recommend,
-        handle_pid_post,
-        handle_motion_post,
-        handle_setpoint_post,
-        handle_limits_post,
-        apply_tuning_plan,
-        sanitize_apply_plan,
-        revert_snapshot,
-        format_apply_note,
-        extract_apply_json,
-        strip_apply_json_block,
-    )
+    from routes_tuning import handle_tuning_capabilities_get, handle_tuning_preflight, handle_tuning_recommend, handle_pid_post, handle_motion_post, handle_setpoint_post, handle_limits_post, apply_tuning_plan, sanitize_apply_plan, revert_snapshot, format_apply_note, extract_apply_json, strip_apply_json_block  # type: ignore
 try:
-    from app.bridge.routes_burst import (
-        handle_burst_arm,
-        handle_burst_label,
-    )
+    from app.bridge.routes_burst import handle_burst_arm, handle_burst_label
 except ImportError:
-    from routes_burst import (  # type: ignore
-        handle_burst_arm,
-        handle_burst_label,
-    )
+    from routes_burst import handle_burst_arm, handle_burst_label  # type: ignore
 try:
-    from app.bridge.routes_tooling import (
-        handle_param_sweep,
-        handle_surrogate_simulate,
-        handle_tooling_traces_get,
-        handle_trace_replay,
-    )
+    from app.bridge.routes_tooling import handle_param_sweep, handle_surrogate_simulate, handle_tooling_traces_get, handle_trace_replay
 except ImportError:
-    from routes_tooling import (  # type: ignore
-        handle_param_sweep,
-        handle_surrogate_simulate,
-        handle_tooling_traces_get,
-        handle_trace_replay,
-    )
+    from routes_tooling import handle_param_sweep, handle_surrogate_simulate, handle_tooling_traces_get, handle_trace_replay  # type: ignore
 try:
     from app.bridge.routes_commissioning import (
         handle_commissioning_run,
