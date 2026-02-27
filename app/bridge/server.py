@@ -1786,37 +1786,13 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/command":
-                    code, payload = handle_command(
-                        body=body,
-                        gateway=gateway,
-                        control=control,
-                        blocked_while_latched_fn=_blocked_while_latched,
-                    )
-                    return _json(self, code, payload)
-
+                    return _json(self, *handle_command(body=body, gateway=gateway, control=control, blocked_while_latched_fn=_blocked_while_latched))
                 if u.path == "/burst/arm":
-                    _require_action_allowed(
-                        "burst_arm", gateway, control, prearm_gate=prearm_safety
-                    )
-                    active_profile = _active_robot_profile()
-                    defaults = _burst_threshold_defaults(active_profile)
-                    code, payload = handle_burst_arm(
-                        body=body,
-                        gateway=gateway,
-                        host_capture=host_capture,
-                        burst_status_fn=burst_status,
-                        active_profile=active_profile,
-                        defaults=defaults,
-                    )
-                    return _json(self, code, payload)
-
+                    _require_action_allowed("burst_arm", gateway, control, prearm_gate=prearm_safety)
+                    active_profile, defaults = _active_robot_profile(), _burst_threshold_defaults(_active_robot_profile())
+                    return _json(self, *handle_burst_arm(body=body, gateway=gateway, host_capture=host_capture, burst_status_fn=burst_status, active_profile=active_profile, defaults=defaults))
                 if u.path == "/burst/label":
-                    code, payload = handle_burst_label(
-                        body=body,
-                        host_capture=host_capture,
-                        burst_status_fn=burst_status,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_burst_label(body=body, host_capture=host_capture, burst_status_fn=burst_status))
 
                 # Arm/disarm routes dispatch
                 _arm_routes = {
