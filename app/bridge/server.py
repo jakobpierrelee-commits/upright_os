@@ -638,6 +638,18 @@ try:
 except ImportError:
     from routes_overwatch import handle_overwatch_status_get  # type: ignore
 try:
+    from app.bridge.routes_dispatch import (
+        dispatch_simple_post,
+        build_simple_post_routes,
+        build_control_post_routes,
+    )
+except ImportError:
+    from routes_dispatch import (  # type: ignore
+        dispatch_simple_post,
+        build_simple_post_routes,
+        build_control_post_routes,
+    )
+try:
     from app.bridge.routes_probe import (
         handle_probe_compat_get,
         handle_probe_connect_get,
