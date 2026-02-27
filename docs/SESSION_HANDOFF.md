@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `9c2a1fe`
+**SHA:** `41252fd`
 
 ### Strategic Pivot
 
@@ -58,20 +58,20 @@ python3 -m py_compile app/bridge/agent_helpers.py  → PASS
 ### Current Metrics
 | Metric | Before Session | After Session | Change |
 |--------|----------------|---------------|--------|
-| **server.py** | 6,380 | **4,067** | **-2,313 lines (36.3%)** |
+| **server.py** | 6,380 | **3,694** | **-2,686 lines (42.1%)** |
 | Routes | 124 | 102 | -22 routes |
 | Agent modes | 4+ | 1 | Consolidated |
-| routes_ai.py | 571 | 911 | +340 lines |
-| routes_tuning.py | 424 | 600 | +176 lines |
+| routes_ai.py | 571 | 992 | +421 lines |
+| routes_tuning.py | 424 | 862 | +438 lines |
 | routes_probe.py | 105 | 248 | +143 lines |
 | routes_health.py | 73 | 141 | +68 lines |
 | hardware_registry.py | 0 | 176 | NEW |
-| clean_firmware_ops.py | 340 | 491 | +151 lines |
+| clean_firmware_ops.py | 340 | 566 | +226 lines |
 
 ### Next Recommended Tasks (Priority Order)
-1. **Extract _apply_tuning_plan** — 115 lines to `routes_tuning.py`
-2. **Extract _clean_upload_precheck_payload** — 74 lines to `clean_firmware_ops.py`
-3. **Extract _apply_assistant_plan** — 79 lines to agent module
+1. **Extract _summarize_sketch_artifact_issues** — 65 lines to firmware module
+2. **Extract _validate_protocol_pins** — 52 lines to manifest_validation.py
+3. **Extract _family_capabilities** — 49 lines (if duplicate exists)
 4. **Consolidate `/agent/clean/*` into `/agent/*`** — 14 routes can be simplified
 
 ### Open Risks/Blockers
