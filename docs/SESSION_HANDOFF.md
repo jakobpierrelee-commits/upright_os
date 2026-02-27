@@ -5,7 +5,7 @@
 **Date:** 2026-02-26
 **Agent:** Cascade
 **Branch:** `recover/uiux-restore-2026-02-19`
-**SHA:** `1dccc42`
+**SHA:** `9c2a1fe`
 
 ### Strategic Pivot
 
@@ -58,20 +58,21 @@ python3 -m py_compile app/bridge/agent_helpers.py  → PASS
 ### Current Metrics
 | Metric | Before Session | After Session | Change |
 |--------|----------------|---------------|--------|
-| **server.py** | 6,380 | **5,023** | **-1,357 lines (21%)** |
+| **server.py** | 6,380 | **4,067** | **-2,313 lines (36.3%)** |
 | Routes | 124 | 102 | -22 routes |
 | Agent modes | 4+ | 1 | Consolidated |
-| routes_ai.py | 571 | 865 | +294 lines |
+| routes_ai.py | 571 | 911 | +340 lines |
 | routes_tuning.py | 424 | 600 | +176 lines |
 | routes_probe.py | 105 | 248 | +143 lines |
-| routes_design.py | 103 | 155 | +52 lines |
-| routes_firmware.py | 332 | 375 | +43 lines |
+| routes_health.py | 73 | 141 | +68 lines |
+| hardware_registry.py | 0 | 176 | NEW |
+| clean_firmware_ops.py | 340 | 491 | +151 lines |
 
 ### Next Recommended Tasks (Priority Order)
-1. **Continue route deletions** — Remove `/commissioning/*` (4 routes), `/v1/setup/*` (4 routes) if not needed
-2. **Consolidate `/agent/clean/*` into `/agent/*`** — 14 routes can be simplified
-3. **Extract manifest validation functions** — ~340 lines to `firmware_lifecycle/` domain
-4. **Extract `_build_hardware_registry`** — 160 lines to `hardware_profile/` domain
+1. **Extract _apply_tuning_plan** — 115 lines to `routes_tuning.py`
+2. **Extract _clean_upload_precheck_payload** — 74 lines to `clean_firmware_ops.py`
+3. **Extract _apply_assistant_plan** — 79 lines to agent module
+4. **Consolidate `/agent/clean/*` into `/agent/*`** — 14 routes can be simplified
 
 ### Open Risks/Blockers
 - Phase 2-6 require deeper refactoring than Phase 1 deletions
