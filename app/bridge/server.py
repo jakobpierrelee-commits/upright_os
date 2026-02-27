@@ -294,6 +294,7 @@ try:
         handle_pid_post,
         handle_motion_post,
         handle_setpoint_post,
+        handle_limits_post,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
@@ -303,6 +304,7 @@ except ImportError:
         handle_pid_post,
         handle_motion_post,
         handle_setpoint_post,
+        handle_limits_post,
     )
 try:
     from app.bridge.routes_burst import (
@@ -4741,53 +4743,19 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/limits":
-                    out_max = float(body["out_max"])
-                    tip_deg = float(body["tip_deg"])
-                    i_max = float(body["i_max"])
-                    status_before = gateway.get_status()
-                    _require_action_allowed(
-                        "limits", gateway, control, status_override=status_before
-                    )
-                    current = {
-                        "out_max": _status_float(
-                            status_before, "outMax", "out_max", default=180.0
-                        ),
-                        "tip_deg": _status_float(
-                            status_before, "tipDeg", "tip_deg", default=35.0
-                        ),
-                        "i_max": _status_float(
-                            status_before, "iMax", "i_max", default=70.0
-                        ),
-                    }
-                    target = {"out_max": out_max, "tip_deg": tip_deg, "i_max": i_max}
-                    _guard_limits_apply(status_before, out_max, tip_deg, i_max)
-                    preflight_used = _enforce_preflight_if_needed(
-                        preflight_store=tuning_preflight,
+                    code, payload = handle_limits_post(
                         body=body,
-                        family="limits",
-                        status_before=status_before,
-                        current=current,
-                        target=target,
+                        gateway=gateway,
+                        control=control,
+                        config_history=config_history,
+                        tuning_preflight=tuning_preflight,
+                        require_action_allowed_fn=_require_action_allowed,
+                        status_float_fn=_status_float,
+                        guard_limits_apply_fn=_guard_limits_apply,
+                        enforce_preflight_if_needed_fn=_enforce_preflight_if_needed,
+                        build_tuning_result_payload_fn=build_tuning_result_payload,
                     )
-                    snap = config_history.save_snapshot(
-                        source="/limits", status_before=status_before
-                    )
-                    res = gateway.command(
-                        f"LIMITS {out_max} {tip_deg} {i_max}",
-                        expect_contains="OK LIMITS",
-                        timeout=2.0,
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_tuning_result_payload(
-                            result=res,
-                            snapshot=snap,
-                            status=gateway.get_status(),
-                            control=control.snapshot(),
-                            preflight_id=preflight_used,
-                        ),
-                    )
+                    return _json(self, code, payload)
 
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except KeyError as exc:

@@ -548,3 +548,52 @@ def handle_setpoint_post(
         control=control.snapshot(),
         preflight_id=preflight_used,
     )
+
+
+def handle_limits_post(
+    *,
+    body: Dict[str, Any],
+    gateway: Any,
+    control: Any,
+    config_history: Any,
+    tuning_preflight: Any,
+    require_action_allowed_fn: Callable,
+    status_float_fn: Callable,
+    guard_limits_apply_fn: Callable,
+    enforce_preflight_if_needed_fn: Callable,
+    build_tuning_result_payload_fn: Callable,
+) -> Tuple[int, Dict[str, Any]]:
+    """Handle /limits POST request."""
+    out_max = float(body["out_max"])
+    tip_deg = float(body["tip_deg"])
+    i_max = float(body["i_max"])
+    status_before = gateway.get_status()
+    require_action_allowed_fn("limits", gateway, control, status_override=status_before)
+    current = {
+        "out_max": status_float_fn(status_before, "outMax", "out_max", default=180.0),
+        "tip_deg": status_float_fn(status_before, "tipDeg", "tip_deg", default=35.0),
+        "i_max": status_float_fn(status_before, "iMax", "i_max", default=70.0),
+    }
+    target = {"out_max": out_max, "tip_deg": tip_deg, "i_max": i_max}
+    guard_limits_apply_fn(status_before, out_max, tip_deg, i_max)
+    preflight_used = enforce_preflight_if_needed_fn(
+        preflight_store=tuning_preflight,
+        body=body,
+        family="limits",
+        status_before=status_before,
+        current=current,
+        target=target,
+    )
+    snap = config_history.save_snapshot(source="/limits", status_before=status_before)
+    res = gateway.command(
+        f"LIMITS {out_max} {tip_deg} {i_max}",
+        expect_contains="OK LIMITS",
+        timeout=2.0,
+    )
+    return 200, build_tuning_result_payload_fn(
+        result=res,
+        snapshot=snap,
+        status=gateway.get_status(),
+        control=control.snapshot(),
+        preflight_id=preflight_used,
+    )
