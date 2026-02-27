@@ -1593,75 +1593,26 @@ def build_handler(
                     return _json(self, *handle_firmware_runtime_manifest_compat_get(firmware=firmware, profiles=profiles, query=parse_qs(u.query), compatibility_fn=_runtime_manifest_profile_compatibility))
                 if u.path == "/firmware/sketch-folders":
                     return _json(self, *handle_firmware_sketch_folders_get(firmware=firmware))
+                # Probe and diagnostics routes
+                _probe_deps = dict(gateway=gateway, cached_probe_fn=cached_probe, store_probe_fn=store_probe)
                 if u.path == "/probe/compat":
-                    q = parse_qs(u.query)
-                    code, payload = handle_probe_compat_get(
-                        query=q,
-                        gateway=gateway,
-                        cached_probe_fn=cached_probe,
-                        store_probe_fn=store_probe,
-                        run_compat_probe_fn=run_compat_probe,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_probe_compat_get(query=parse_qs(u.query), run_compat_probe_fn=run_compat_probe, **_probe_deps))
                 if u.path == "/probe/connect":
-                    code, payload = handle_probe_connect_get(
-                        gateway=gateway,
-                        cached_probe_fn=cached_probe,
-                        store_probe_fn=store_probe,
-                        run_connect_probe_fn=run_connect_probe,
-                        get_port_meta_fn=_get_port_meta,
-                        detect_tuning_capabilities_fn=_detect_tuning_capabilities,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_probe_connect_get(run_connect_probe_fn=run_connect_probe, get_port_meta_fn=_get_port_meta, detect_tuning_capabilities_fn=_detect_tuning_capabilities, **_probe_deps))
                 if u.path == "/tooling/tuning/capabilities":
-                    code, payload = handle_tuning_capabilities_get(
-                        gateway=gateway,
-                        cached_probe_fn=cached_probe,
-                        detect_tuning_capabilities_fn=_detect_tuning_capabilities,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_tuning_capabilities_get(gateway=gateway, cached_probe_fn=cached_probe, detect_tuning_capabilities_fn=_detect_tuning_capabilities))
                 if u.path == "/overwatch/status":
-                    q = parse_qs(u.query)
-                    code, payload = handle_overwatch_status_get(
-                        query=q,
-                        cached_probe_fn=cached_probe,
-                        store_probe_fn=store_probe,
-                        gateway=gateway,
-                        firmware=firmware,
-                        run_compat_probe_fn=run_compat_probe,
-                        run_connect_probe_fn=run_connect_probe,
-                        build_overwatch_report_fn=build_overwatch_report,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/v1/setup/attempt-history":
-                    q = parse_qs(u.query)
-                    code, payload = handle_setup_attempt_history_get(
-                        query=q,
-                        setup_attempt_history=setup_attempt_history,
-                        build_attempt_history_payload_fn=build_attempt_history_payload,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/profiles":
-                    code, payload = handle_profiles_list(profiles=profiles)
-                    return _json(self, code, payload)
-                if u.path == "/profiles/hardware":
-                    code, payload = handle_profiles_hardware(
-                        firmware=firmware,
-                        build_hardware_registry_fn=build_hardware_registry,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/tooling/traces":
-                    code, payload = handle_tooling_traces_get(
-                        tooling_trace_candidates_fn=tooling_trace_candidates,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/config/snapshots":
-                    q = parse_qs(u.query)
-                    code, payload = handle_config_snapshots_get(
-                        query=q,
-                        config_history=config_history,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_overwatch_status_get(query=parse_qs(u.query), firmware=firmware, run_compat_probe_fn=run_compat_probe, run_connect_probe_fn=run_connect_probe, build_overwatch_report_fn=build_overwatch_report, **_probe_deps))
+                # Simple list routes
+                _list_routes = {
+                    "/v1/setup/attempt-history": lambda q: handle_setup_attempt_history_get(query=q, setup_attempt_history=setup_attempt_history, build_attempt_history_payload_fn=build_attempt_history_payload),
+                    "/profiles": lambda q: handle_profiles_list(profiles=profiles),
+                    "/profiles/hardware": lambda q: handle_profiles_hardware(firmware=firmware, build_hardware_registry_fn=build_hardware_registry),
+                    "/tooling/traces": lambda q: handle_tooling_traces_get(tooling_trace_candidates_fn=tooling_trace_candidates),
+                    "/config/snapshots": lambda q: handle_config_snapshots_get(query=q, config_history=config_history),
+                }
+                if u.path in _list_routes:
+                    return _json(self, *_list_routes[u.path](parse_qs(u.query)))
                 return _json(self, 404, {"ok": False, "error": "not_found"})
             except Exception as exc:
                 return _json(self, 500, {"ok": False, "error": str(exc)})
