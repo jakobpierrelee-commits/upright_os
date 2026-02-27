@@ -190,49 +190,9 @@ try:
 except ImportError:
     from routes_commissioning import handle_commissioning_run, handle_commissioning_step  # type: ignore
 try:
-    from app.bridge.routes_firmware import (
-        handle_firmware_artifacts_get,
-        handle_firmware_boards_get,
-        handle_firmware_check_post,
-        handle_firmware_compile,
-        handle_firmware_generate_docs_pack,
-        handle_firmware_generate_unified,
-        handle_firmware_install_cli,
-        handle_firmware_runtime_manifest_compat_get,
-        handle_firmware_runtime_manifest_validate_get,
-        handle_firmware_sketch_folders_get,
-        handle_firmware_sketch_folder_pick,
-        handle_firmware_sketch_get,
-        handle_firmware_sketch_write,
-        handle_firmware_status_get,
-        handle_firmware_targets_get,
-        handle_firmware_unified_schema_get,
-        handle_firmware_upload,
-        handle_firmware_upload_guarded,
-        handle_release_serial_post,
-    )
+    from app.bridge.routes_firmware import handle_firmware_artifacts_get, handle_firmware_boards_get, handle_firmware_check_post, handle_firmware_compile, handle_firmware_generate_docs_pack, handle_firmware_generate_unified, handle_firmware_install_cli, handle_firmware_runtime_manifest_compat_get, handle_firmware_runtime_manifest_validate_get, handle_firmware_sketch_folders_get, handle_firmware_sketch_folder_pick, handle_firmware_sketch_get, handle_firmware_sketch_write, handle_firmware_status_get, handle_firmware_targets_get, handle_firmware_unified_schema_get, handle_firmware_upload, handle_firmware_upload_guarded, handle_release_serial_post
 except ImportError:
-    from routes_firmware import (  # type: ignore
-        handle_firmware_artifacts_get,
-        handle_firmware_boards_get,
-        handle_firmware_check_post,
-        handle_firmware_compile,
-        handle_firmware_generate_docs_pack,
-        handle_firmware_generate_unified,
-        handle_firmware_install_cli,
-        handle_firmware_runtime_manifest_compat_get,
-        handle_firmware_runtime_manifest_validate_get,
-        handle_firmware_sketch_folders_get,
-        handle_firmware_sketch_folder_pick,
-        handle_firmware_sketch_get,
-        handle_firmware_sketch_write,
-        handle_firmware_status_get,
-        handle_firmware_targets_get,
-        handle_firmware_unified_schema_get,
-        handle_firmware_upload,
-        handle_firmware_upload_guarded,
-        handle_release_serial_post,
-    )
+    from routes_firmware import handle_firmware_artifacts_get, handle_firmware_boards_get, handle_firmware_check_post, handle_firmware_compile, handle_firmware_generate_docs_pack, handle_firmware_generate_unified, handle_firmware_install_cli, handle_firmware_runtime_manifest_compat_get, handle_firmware_runtime_manifest_validate_get, handle_firmware_sketch_folders_get, handle_firmware_sketch_folder_pick, handle_firmware_sketch_get, handle_firmware_sketch_write, handle_firmware_status_get, handle_firmware_targets_get, handle_firmware_unified_schema_get, handle_firmware_upload, handle_firmware_upload_guarded, handle_release_serial_post  # type: ignore
 try:
     from app.bridge.routes_profiles import (
         handle_profiles_activate,
