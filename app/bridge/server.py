@@ -1243,38 +1243,11 @@ def build_handler(
         _ = model
         return run_clean_auto_tools(message=message, gateway=gateway, firmware=firmware, repo_root=repo_root, default_sketch_path_fn=_clean_default_sketch_path, default_fqbn_fn=_clean_default_fqbn, run_connect_probe_fn=run_connect_probe, run_compat_probe_fn=run_compat_probe)
 
-    def _build_clean_agent_context(
-        *,
-        mode: str,
-        session_key: str,
-        thread_id: Optional[str],
-        attachments: Optional[list[Dict[str, Any]]] = None,
-        clean_tool_calls: Optional[list[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        return build_clean_agent_context(
-            mode=mode,
-            session_key=session_key,
-            thread_id=thread_id,
-            attachments=attachments,
-            clean_tool_calls=clean_tool_calls,
-            gateway=gateway,
-            firmware=firmware,
-            setup_attempt_history=setup_attempt_history,
-            ai=ai,
-            extract_mission_facts_fn=_extract_mission_facts,
-            mission_memory=mission_memory,
-            knowledge=knowledge,
-            config_history=config_history,
-            control=control,
-            assistant_capabilities_context_fn=assistant_capabilities_context,
-            best_known_design=design_memory.best(session_key=session_key),
-        )
+    def _build_clean_agent_context(*, mode: str, session_key: str, thread_id: Optional[str], attachments: Optional[list[Dict[str, Any]]] = None, clean_tool_calls: Optional[list[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        return build_clean_agent_context(mode=mode, session_key=session_key, thread_id=thread_id, attachments=attachments, clean_tool_calls=clean_tool_calls, gateway=gateway, firmware=firmware, setup_attempt_history=setup_attempt_history, ai=ai, extract_mission_facts_fn=_extract_mission_facts, mission_memory=mission_memory, knowledge=knowledge, config_history=config_history, control=control, assistant_capabilities_context_fn=assistant_capabilities_context, best_known_design=design_memory.best(session_key=session_key))
 
     def _clean_system_prompt(mode: str) -> str:
-        return build_clean_system_prompt(
-            mode=mode,
-            agent_mode_system_prompt_fn=_agent_mode_system_prompt,
-        )
+        return build_clean_system_prompt(mode=mode, agent_mode_system_prompt_fn=_agent_mode_system_prompt)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
