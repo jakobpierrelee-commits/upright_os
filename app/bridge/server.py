@@ -2053,28 +2053,16 @@ def build_handler(
                     )
                     return
 
+                # Agent mode/thread routes
                 if u.path == "/agent/mode":
-                    code, payload = handle_agent_mode_set(
-                        body=body,
-                        agent_mission=agent_mission,
-                        build_agent_state_payload_fn=build_agent_state_payload,
-                    )
-                    return _json(self, code, payload)
-
+                    return _json(self, *handle_agent_mode_set(body=body, agent_mission=agent_mission, build_agent_state_payload_fn=build_agent_state_payload))
                 if u.path == "/agent/thread/new":
                     guard = _legacy_execution_guard(u.path)
                     if guard is not None:
                         return _json(self, 403, guard)
                     tok = _extract_auth_token(self, body)
                     me = auth.me(tok) if tok else None
-                    code, payload = handle_agent_thread_new(
-                        body=body,
-                        me=me,
-                        agent_mission=agent_mission,
-                        ai=ai,
-                        build_agent_thread_state_payload_fn=build_agent_thread_state_payload,
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_agent_thread_new(body=body, me=me, agent_mission=agent_mission, ai=ai, build_agent_thread_state_payload_fn=build_agent_thread_state_payload))
 
                 if u.path == "/agent/chat":
                     code, payload = handle_agent_chat_post(
