@@ -297,6 +297,7 @@ try:
         handle_motion_post,
         handle_setpoint_post,
         handle_limits_post,
+        apply_tuning_plan,
     )
 except ImportError:
     from routes_tuning import (  # type: ignore
@@ -307,6 +308,7 @@ except ImportError:
         handle_motion_post,
         handle_setpoint_post,
         handle_limits_post,
+        apply_tuning_plan,
     )
 try:
     from app.bridge.routes_burst import (
@@ -1124,119 +1126,7 @@ def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
 
 
 # ConfigHistoryManager moved to domain module
-def _apply_tuning_plan(
-    gateway: NanoSerialGateway,
-    config_history: ConfigHistoryManager,
-    plan: Dict[str, Any],
-    *,
-    source: str,
-) -> Dict[str, Any]:
-    status_before = gateway.get_status()
-    curr_kp = _first_float(status_before, "kp")
-    curr_ki = _first_float(status_before, "ki")
-    curr_kd = _first_float(status_before, "kd")
-    curr_kv = _first_float(status_before, "kv")
-    curr_kx = _first_float(status_before, "kx")
-    curr_set = _first_float(status_before, "set")
-    curr_out_max = _first_float(status_before, "outMax", "out_max")
-    curr_tip_deg = _first_float(status_before, "tipDeg", "tip_deg")
-    curr_i_max = _first_float(status_before, "iMax", "i_max")
-    snap = config_history.save_snapshot(
-        source=source, status_before=status_before, note="auto-pre-apply"
-    )
-    actions: list[str] = []
-    changed: Dict[str, Any] = {}
-    if "pid" in plan:
-        p = plan["pid"]
-        kp = _safe_float(p.get("kp")) if isinstance(p, dict) else None
-        ki = _safe_float(p.get("ki")) if isinstance(p, dict) else None
-        kd = _safe_float(p.get("kd")) if isinstance(p, dict) else None
-        if kp is None:
-            kp = curr_kp
-        if ki is None:
-            ki = curr_ki
-        if kd is None:
-            kd = curr_kd
-        if kp is None or ki is None or kd is None:
-            raise RuntimeError("apply_pid_missing_current_values")
-        gateway.command(f"PID {kp} {ki} {kd}", expect_contains="OK PID", timeout=2.0)
-        actions.append("pid")
-        changed["pid"] = {
-            "before": {"kp": curr_kp, "ki": curr_ki, "kd": curr_kd},
-            "target": {"kp": kp, "ki": ki, "kd": kd},
-        }
-    if "motion" in plan:
-        m = plan["motion"]
-        kv = _safe_float(m.get("kv")) if isinstance(m, dict) else None
-        kx = _safe_float(m.get("kx")) if isinstance(m, dict) else None
-        if kv is None:
-            kv = curr_kv
-        if kx is None:
-            kx = curr_kx
-        if kv is None or kx is None:
-            raise RuntimeError("apply_motion_missing_current_values")
-        gateway.command(f"MOTION {kv} {kx}", expect_contains="OK MOTION", timeout=2.0)
-        actions.append("motion")
-        changed["motion"] = {
-            "before": {"kv": curr_kv, "kx": curr_kx},
-            "target": {"kv": kv, "kx": kx},
-        }
-    if "setpoint" in plan:
-        s = plan["setpoint"]
-        deg = _safe_float(s.get("deg")) if isinstance(s, dict) else None
-        if deg is None:
-            deg = curr_set
-        if deg is None:
-            raise RuntimeError("apply_setpoint_missing_current_value")
-        gateway.command(f"SETPOINT {deg}", expect_contains="OK SETPOINT", timeout=2.0)
-        actions.append("setpoint")
-        changed["setpoint"] = {"before": {"deg": curr_set}, "target": {"deg": deg}}
-    if "limits" in plan:
-        limits_cfg = plan["limits"]
-        out_max = (
-            _safe_float(limits_cfg.get("out_max"))
-            if isinstance(limits_cfg, dict)
-            else None
-        )
-        tip_deg = (
-            _safe_float(limits_cfg.get("tip_deg"))
-            if isinstance(limits_cfg, dict)
-            else None
-        )
-        i_max = (
-            _safe_float(limits_cfg.get("i_max"))
-            if isinstance(limits_cfg, dict)
-            else None
-        )
-        if out_max is None:
-            out_max = curr_out_max
-        if tip_deg is None:
-            tip_deg = curr_tip_deg
-        if i_max is None:
-            i_max = curr_i_max
-        if out_max is None or tip_deg is None or i_max is None:
-            raise RuntimeError("apply_limits_missing_current_values")
-        gateway.command(
-            f"LIMITS {out_max} {tip_deg} {i_max}",
-            expect_contains="OK LIMITS",
-            timeout=2.0,
-        )
-        actions.append("limits")
-        changed["limits"] = {
-            "before": {
-                "out_max": curr_out_max,
-                "tip_deg": curr_tip_deg,
-                "i_max": curr_i_max,
-            },
-            "target": {"out_max": out_max, "tip_deg": tip_deg, "i_max": i_max},
-        }
-    return {
-        "ok": True,
-        "snapshot_id": snap["snapshot_id"],
-        "applied": actions,
-        "changed": changed,
-        "status": gateway.get_status(),
-    }
+# _apply_tuning_plan moved to routes_tuning.py as apply_tuning_plan
 
 
 def _apply_assistant_plan(
@@ -1256,7 +1146,7 @@ def _apply_assistant_plan(
     status_after: Optional[Dict[str, Any]] = None
 
     if tuning_plan:
-        t = _apply_tuning_plan(gateway, config_history, tuning_plan, source=source)
+        t = apply_tuning_plan(gateway, config_history, tuning_plan, source=source)
         if not bool(t.get("ok", False)):
             return t
         applied.extend(
