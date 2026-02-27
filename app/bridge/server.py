@@ -1530,36 +1530,14 @@ def build_handler(
                     guard = _legacy_execution_guard(u.path)
                     if guard is not None:
                         return _json(self, 403, guard)
-                    q = parse_qs(u.query)
-                    tok = _extract_auth_token(self)
-                    me = auth.me(tok) if tok else None
-                    code, payload = handle_agent_threads_get(
-                        query=q,
-                        me=me,
-                        auth=auth,
-                        agent_mission=agent_mission,
-                        provider_router=provider_router,
-                        ai=ai,
-                        env_model=os.environ.get("OPENAI_MODEL", ""),
-                        codex_cli_login_status_fn=_codex_cli_login_status,
-                        agent_resolve_model_fn=_agent_resolve_model,
-                        build_agent_status_payload_fn=build_agent_status_payload,
-                    )
-                    return _json(self, code, payload)
+                    tok, q = _extract_auth_token(self), parse_qs(u.query)
+                    return _json(self, *handle_agent_threads_get(query=q, me=auth.me(tok) if tok else None, auth=auth, agent_mission=agent_mission, provider_router=provider_router, ai=ai, env_model=os.environ.get("OPENAI_MODEL", ""), codex_cli_login_status_fn=_codex_cli_login_status, agent_resolve_model_fn=_agent_resolve_model, build_agent_status_payload_fn=build_agent_status_payload))
                 if u.path == "/auth/openai-key/status":
-                    tok = _extract_auth_token(self)
+                    tok, me = _extract_auth_token(self), None
                     me = auth.me(tok)
                     if not me:
-                        return _json(
-                            self, 401, {"ok": False, "error": "unauthenticated"}
-                        )
-                    code, payload = handle_auth_openai_key_status_get(
-                        me=me,
-                        auth=auth,
-                        env_api_key=os.environ.get("OPENAI_API_KEY", ""),
-                        build_openai_config_payload_fn=build_openai_config_payload,
-                    )
-                    return _json(self, code, payload)
+                        return _json(self, 401, {"ok": False, "error": "unauthenticated"})
+                    return _json(self, *handle_auth_openai_key_status_get(me=me, auth=auth, env_api_key=os.environ.get("OPENAI_API_KEY", ""), build_openai_config_payload_fn=build_openai_config_payload))
                 # More firmware GET routes
                 if u.path == "/firmware/sketch":
                     return _json(self, *handle_firmware_sketch_get(firmware=firmware, query=parse_qs(u.query)))
