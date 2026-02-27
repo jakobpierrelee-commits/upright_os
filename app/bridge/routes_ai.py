@@ -1192,3 +1192,35 @@ def ide_disambiguation_reply() -> str:
         "Quick clarifier before I proceed: when you say IDE, do you mean "
         "the external Arduino IDE, or the in-app CLI workbench in UpRight.os?"
     )
+
+
+def safe_float(v: Any) -> Optional[float]:
+    """Safely convert a value to float."""
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def first_float(status: Dict[str, Any], *keys: str) -> Optional[float]:
+    """Get the first valid float value from status dict for given keys."""
+    for k in keys:
+        if k in status:
+            out = safe_float(status.get(k))
+            if out is not None:
+                return out
+    return None
+
+
+def safe_upload_filename(name: str) -> str:
+    """Sanitize an upload filename."""
+    import pathlib
+    import re
+    import time
+    raw = str(name or "").strip()
+    if not raw:
+        return f"upload_{int(time.time())}.bin"
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", pathlib.Path(raw).name).strip("._")
+    if not cleaned:
+        cleaned = f"upload_{int(time.time())}.bin"
+    return cleaned[:120]

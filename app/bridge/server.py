@@ -533,6 +533,9 @@ try:
         startup_rag_indexing,
         needs_ide_disambiguation,
         ide_disambiguation_reply,
+        safe_float,
+        first_float,
+        safe_upload_filename,
     )
 except ImportError:
     from routes_ai import (  # type: ignore
@@ -566,6 +569,9 @@ except ImportError:
         startup_rag_indexing,
         needs_ide_disambiguation,
         ide_disambiguation_reply,
+        safe_float,
+        first_float,
+        safe_upload_filename,
     )
 try:
     from app.bridge.routes_auth import (
@@ -930,37 +936,10 @@ except ImportError:
 # BridgeControlState moved to domain module
 # CommissioningManager moved to domain module
 # SetupAttemptHistoryStore moved to domain module
-def _safe_float(v: Any) -> Optional[float]:
-    try:
-        return float(v)
-    except Exception:
-        return None
-
-
-def _first_float(status: Dict[str, Any], *keys: str) -> Optional[float]:
-    for k in keys:
-        if k in status:
-            out = _safe_float(status.get(k))
-            if out is not None:
-                return out
-    return None
-
-
+# _safe_float, _first_float, _safe_upload_filename moved to routes_ai.py
 # _extract_apply_json, _strip_apply_json_block moved to routes_tuning.py
 # _sanitize_apply_plan moved to routes_tuning.py as sanitize_apply_plan
 # _format_apply_note moved to routes_tuning.py as format_apply_note
-
-
-def _safe_upload_filename(name: str) -> str:
-    raw = str(name or "").strip()
-    if not raw:
-        return f"upload_{int(time.time())}.bin"
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", pathlib.Path(raw).name).strip("._")
-    if not cleaned:
-        cleaned = f"upload_{int(time.time())}.bin"
-    return cleaned[:120]
-
-
 # _attachment_kind moved to routes_ai.py as attachment_kind
 # _agent_upload_from_body moved to routes_ai.py as agent_upload_from_body
 
@@ -968,7 +947,7 @@ def _safe_upload_filename(name: str) -> str:
 def _sanitize_agent_attachments(raw: Any) -> list[Dict[str, Any]]:
     return sanitize_agent_attachments(
         raw=raw,
-        safe_upload_filename_fn=_safe_upload_filename,
+        safe_upload_filename_fn=safe_upload_filename,
         attachment_kind_fn=attachment_kind,
     )
 
