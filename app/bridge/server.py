@@ -1697,14 +1697,10 @@ def main() -> int:
         except Exception:
             pass
     control = BridgeControlState(watchdog_timeout_s=max(0.5, args.watchdog_timeout))
-    commissioning = CommissioningManager(repo_root, args.port, args.baud)
-    host_capture = HostCaptureManager(repo_root)
-    firmware = FirmwareManager(repo_root, args.port)
-    ai = AIManager(repo_root)
-    ai_profiles = AIProfileManager(repo_root)
-    knowledge = AssistantKnowledgeManager(repo_root)
-    agent_mission = AgentMissionManager(repo_root)
-    provider_router = ProviderRouter(repo_root)
+    commissioning, host_capture = CommissioningManager(repo_root, args.port, args.baud), HostCaptureManager(repo_root)
+    firmware, ai = FirmwareManager(repo_root, args.port), AIManager(repo_root)
+    ai_profiles, knowledge = AIProfileManager(repo_root), AssistantKnowledgeManager(repo_root)
+    agent_mission, provider_router = AgentMissionManager(repo_root), ProviderRouter(repo_root)
 
     codex_agent: Optional[Any] = None
     if create_codex_agent is not None:
@@ -1717,14 +1713,10 @@ def main() -> int:
                 print("background RAG indexing started")
         except Exception as exc:
             print(f"codex agent init failed (tool support disabled): {exc}")
-    auth = AuthManager(repo_root)
-    mission_memory = MissionMemoryStore(repo_root)
-    hardware_context = HardwareContextStore(repo_root)
-    setup_attempt_history = SetupAttemptHistoryStore(repo_root)
-    profiles = RobotProfilesManager(repo_root)
-    config_history = ConfigHistoryManager(repo_root)
-    prearm_safety = PreArmSafetyGate(required=True)
-    telemetry = TelemetryHub()
+    auth, mission_memory = AuthManager(repo_root), MissionMemoryStore(repo_root)
+    hardware_context, setup_attempt_history = HardwareContextStore(repo_root), SetupAttemptHistoryStore(repo_root)
+    profiles, config_history = RobotProfilesManager(repo_root), ConfigHistoryManager(repo_root)
+    prearm_safety, telemetry = PreArmSafetyGate(required=True), TelemetryHub()
 
     print(f"bridge started without serial target: {args.port} @ {args.baud} ({startup_serial_error})" if startup_serial_error else f"bridge serial opened: {args.port} @ {args.baud}")
     print(f"telemetry websocket: ws://{args.host}:{args.telemetry_port}/telemetry enabled={websockets is not None}")
