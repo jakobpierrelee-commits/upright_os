@@ -1490,25 +1490,14 @@ def build_handler(
                     return _json(self, *handle_firmware_status_get(firmware=firmware))
                 if u.path == "/firmware/artifacts":
                     return _json(self, *handle_firmware_artifacts_get(firmware=firmware, query=parse_qs(u.query)))
-                if u.path == "/design-memory":
+                # Design-memory and firmware schema routes
+                if u.path in {"/design-memory", "/design-memory/best"}:
                     q = parse_qs(u.query)
-                    code, payload = handle_design_memory_list_get(
-                        query=q,
-                        design_memory=design_memory,
-                    )
-                    return _json(self, code, payload)
-                if u.path == "/design-memory/best":
-                    q = parse_qs(u.query)
-                    code, payload = handle_design_memory_best_get(
-                        query=q,
-                        design_memory=design_memory,
-                    )
-                    return _json(self, code, payload)
+                    if u.path == "/design-memory":
+                        return _json(self, *handle_design_memory_list_get(query=q, design_memory=design_memory))
+                    return _json(self, *handle_design_memory_best_get(query=q, design_memory=design_memory))
                 if u.path == "/firmware/unified-schema":
-                    code, payload = handle_firmware_unified_schema_get(
-                        firmware=firmware
-                    )
-                    return _json(self, code, payload)
+                    return _json(self, *handle_firmware_unified_schema_get(firmware=firmware))
                 if u.path == "/agent/status":
                     tok = _extract_auth_token(self)
                     me = auth.me(tok) if tok else None
