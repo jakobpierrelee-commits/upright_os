@@ -662,3 +662,26 @@ def summarize_tool_failures(tool_calls: Any) -> str:
     if not lines:
         return ""
     return "\n".join(f"- {line}" for line in lines[:3])
+
+
+def clean_upload_target_meta(
+    *, fqbn: str, firmware: Any, board_id_fn: Any, family_fn: Any
+) -> Dict[str, Any]:
+    """Build upload target metadata for a given FQBN."""
+    targets = firmware.list_targets()
+    board_id = board_id_fn(fqbn, targets) or "unknown"
+    family = family_fn(fqbn, targets) or "unknown"
+    board_label = board_id
+    for row in list(targets.get("boards") or []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("id", "")).strip() != board_id:
+            continue
+        board_label = str(row.get("label", "")).strip() or board_id
+        break
+    return {
+        "fqbn": str(fqbn).strip(),
+        "board_id": board_id,
+        "board_family": family,
+        "board_label": board_label,
+    }

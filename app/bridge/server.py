@@ -162,6 +162,7 @@ try:
         build_upload_precheck_payload,
         summarize_sketch_artifact_issues,
         summarize_tool_failures,
+        clean_upload_target_meta,
     )
 except ImportError:
     from clean_firmware_ops import (  # type: ignore
@@ -174,6 +175,7 @@ except ImportError:
         build_upload_precheck_payload,
         summarize_sketch_artifact_issues,
         summarize_tool_failures,
+        clean_upload_target_meta,
     )
 try:
     from app.bridge.clean_contracts import (
@@ -1096,28 +1098,7 @@ def _clean_default_fqbn() -> str:
     )
 
 
-def _clean_upload_target_meta(
-    *, fqbn: str, firmware: "FirmwareManager"
-) -> Dict[str, Any]:
-    targets = firmware.list_targets()
-    board_id = _board_id_for_fqbn(fqbn, targets) or "unknown"
-    family = _family_for_fqbn(fqbn, targets) or "unknown"
-    board_label = board_id
-    for row in list(targets.get("boards") or []):
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("id", "")).strip() != board_id:
-            continue
-        board_label = str(row.get("label", "")).strip() or board_id
-        break
-    return {
-        "fqbn": str(fqbn).strip(),
-        "board_id": board_id,
-        "board_family": family,
-        "board_label": board_label,
-    }
-
-
+# _clean_upload_target_meta moved to clean_firmware_ops.py as clean_upload_target_meta
 # _clean_upload_target_runbook moved to clean_firmware_ops.py as build_upload_target_runbook
 # _clean_upload_precheck_payload moved to clean_firmware_ops.py as build_upload_precheck_payload
 
@@ -2245,7 +2226,7 @@ def build_handler(
                     ).strip() or _clean_default_sketch_path(repo_root, firmware)
                     code, payload = handle_clean_upload_precheck(
                         precheck_builder=lambda **kwargs: build_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, target_meta_fn=_clean_upload_target_meta, **kwargs
+                            gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs
                         ),
                         requested_port=requested_port,
                         requested_fqbn=requested_fqbn,
@@ -2278,7 +2259,7 @@ def build_handler(
                         requested_fqbn=requested_fqbn,
                         requested_sketch=requested_sketch,
                         precheck_builder=lambda **kwargs: build_upload_precheck_payload(
-                            gateway=gateway, firmware=firmware, target_meta_fn=_clean_upload_target_meta, **kwargs
+                            gateway=gateway, firmware=firmware, target_meta_fn=lambda fqbn, fw: clean_upload_target_meta(fqbn=fqbn, firmware=fw, board_id_fn=_board_id_for_fqbn, family_fn=_family_for_fqbn), **kwargs
                         ),
                         normalize_status=_normalize_status_for_hud,
                         resolve_action_gates=_resolve_action_gates,
