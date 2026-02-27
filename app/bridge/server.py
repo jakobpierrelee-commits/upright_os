@@ -2264,97 +2264,36 @@ def build_handler(
                 return _json(self, 400, {"ok": False, "error": f"missing field: {exc}"})
             except RuntimeError as exc:
                 msg = str(exc)
-                if msg in {
-                    "invalid_email",
-                    "weak_password",
-                    "email_exists",
-                    "invalid_credentials",
-                    "invalid_openai_key",
-                    "empty_message",
-                    "sketch_content_empty",
-                }:
+                # Error code lookup tables
+                _400_errs = {"invalid_email", "weak_password", "email_exists", "invalid_credentials", "invalid_openai_key", "empty_message", "sketch_content_empty", "profile_label_required", "profile_id_required", "ai_profile_label_required", "ai_profile_id_required"}
+                _404_errs = {"profile_not_found", "ai_profile_not_found", "snapshot_not_found"}
+                _401_errs = {"unauthenticated", "openai_api_key_missing"}
+                _409_ctrl = {"tuning_delta_too_large_while_balancing", "arm_not_prepared"}
+                _428_errs = {"preflight_required", "preflight_invalid", "preflight_mismatch"}
+                _423_errs = {"estop_latched", "session_stale"}
+                _409_fw = {"firmware_running", "operation_in_progress"}
+                if msg in _400_errs or msg.startswith("invalid_unified_profile:") or msg.startswith("invalid_tuning_value:"):
                     return _json(self, 400, {"ok": False, "error": msg})
                 if msg.startswith("openai_key_verification_failed:"):
                     return _json(self, 503, {"ok": False, "error": msg})
-                if msg in {"profile_label_required", "profile_id_required"}:
-                    return _json(self, 400, {"ok": False, "error": msg})
-                if msg.startswith("invalid_unified_profile:"):
-                    return _json(self, 400, {"ok": False, "error": msg})
-                if msg in {"ai_profile_label_required", "ai_profile_id_required"}:
-                    return _json(self, 400, {"ok": False, "error": msg})
-                if msg in {"profile_not_found"}:
+                if msg in _404_errs:
                     return _json(self, 404, {"ok": False, "error": msg})
-                if msg in {"ai_profile_not_found"}:
-                    return _json(self, 404, {"ok": False, "error": msg})
-                if msg in {"snapshot_not_found"}:
-                    return _json(self, 404, {"ok": False, "error": msg})
-                if msg in {"unauthenticated", "openai_api_key_missing"}:
+                if msg in _401_errs:
                     return _json(self, 401, {"ok": False, "error": msg})
-                if msg == "tuning_delta_too_large_while_balancing":
-                    return _json(
-                        self,
-                        409,
-                        {"ok": False, "error": msg, "control": control.snapshot()},
-                    )
-                if msg.startswith("invalid_tuning_value:"):
-                    return _json(self, 400, {"ok": False, "error": msg})
-                if msg in {
-                    "preflight_required",
-                    "preflight_invalid",
-                    "preflight_mismatch",
-                }:
-                    return _json(
-                        self,
-                        428,
-                        {"ok": False, "error": msg, "control": control.snapshot()},
-                    )
-                if msg in {"estop_latched", "session_stale"}:
-                    return _json(
-                        self,
-                        423,
-                        {"ok": False, "error": msg, "control": control.snapshot()},
-                    )
+                if msg in _409_ctrl:
+                    return _json(self, 409, {"ok": False, "error": msg, "control": control.snapshot()})
+                if msg in _428_errs:
+                    return _json(self, 428, {"ok": False, "error": msg, "control": control.snapshot()})
+                if msg in _423_errs:
+                    return _json(self, 423, {"ok": False, "error": msg, "control": control.snapshot()})
                 if msg.startswith("action_blocked:"):
                     parts = msg.split(":", 2)
-                    action = parts[1] if len(parts) > 1 else "unknown"
-                    reasons_raw = parts[2] if len(parts) > 2 else ""
-                    reasons = [r for r in reasons_raw.split(",") if r]
-                    return _json(
-                        self,
-                        423,
-                        {
-                            "ok": False,
-                            "error": "action_blocked",
-                            "action": action,
-                            "reasons": reasons,
-                            "action_gates": _resolve_action_gates(
-                                gateway, control, prearm_gate=prearm_safety
-                            ),
-                            "control": control.snapshot(),
-                        },
-                    )
-                if msg == "arm_not_prepared":
-                    return _json(
-                        self,
-                        409,
-                        {"ok": False, "error": msg, "control": control.snapshot()},
-                    )
+                    action, reasons_raw = (parts[1] if len(parts) > 1 else "unknown"), (parts[2] if len(parts) > 2 else "")
+                    return _json(self, 423, {"ok": False, "error": "action_blocked", "action": action, "reasons": [r for r in reasons_raw.split(",") if r], "action_gates": _resolve_action_gates(gateway, control, prearm_gate=prearm_safety), "control": control.snapshot()})
                 if msg == "commissioning_running":
-                    return _json(
-                        self,
-                        409,
-                        {
-                            "ok": False,
-                            "error": msg,
-                            "commissioning": commissioning.status(),
-                        },
-                    )
-                if msg in {"firmware_running", "operation_in_progress"}:
-                    return _json(
-                        self,
-                        409,
-                        {"ok": False, "error": msg, "firmware": firmware.status()},
-                    )
+                    return _json(self, 409, {"ok": False, "error": msg, "commissioning": commissioning.status()})
+                if msg in _409_fw:
+                    return _json(self, 409, {"ok": False, "error": msg, "firmware": firmware.status()})
                 return _json(self, 500, {"ok": False, "error": msg})
             except Exception as exc:
                 return _json(self, 500, {"ok": False, "error": str(exc)})
