@@ -84,19 +84,13 @@ except ImportError:
 try:
     from app.bridge.domains.session_traceability.assistant_knowledge import AssistantKnowledgeManager
 except ImportError:
-    from domains.session_traceability.assistant_knowledge import (
-        AssistantKnowledgeManager,
-    )  # type: ignore
+    from domains.session_traceability.assistant_knowledge import AssistantKnowledgeManager  # type: ignore
 try:
-    from app.bridge.domains.session_traceability.agent_mission_manager import (
-        AgentMissionManager,
-    )
+    from app.bridge.domains.session_traceability.agent_mission_manager import AgentMissionManager
 except ImportError:
     from domains.session_traceability.agent_mission_manager import AgentMissionManager  # type: ignore
 try:
-    from app.bridge.domains.control_runtime.bridge_control_state import (
-        BridgeControlState,
-    )
+    from app.bridge.domains.control_runtime.bridge_control_state import BridgeControlState
 except ImportError:
     from domains.control_runtime.bridge_control_state import BridgeControlState  # type: ignore
 try:
@@ -104,15 +98,11 @@ try:
 except ImportError:
     from domains.control_runtime.telemetry_hub import TelemetryHub  # type: ignore
 try:
-    from app.bridge.domains.tuning_intelligence.commissioning_manager import (
-        CommissioningManager,
-    )
+    from app.bridge.domains.tuning_intelligence.commissioning_manager import CommissioningManager
 except ImportError:
     from domains.tuning_intelligence.commissioning_manager import CommissioningManager  # type: ignore
 try:
-    from app.bridge.domains.hardware_profile.robot_profiles_manager import (
-        RobotProfilesManager,
-    )
+    from app.bridge.domains.hardware_profile.robot_profiles_manager import RobotProfilesManager
 except ImportError:
     from domains.hardware_profile.robot_profiles_manager import RobotProfilesManager  # type: ignore
 try:
