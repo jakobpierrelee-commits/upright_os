@@ -522,9 +522,15 @@ except ImportError:
         handle_design_memory_rate,
     )
 try:
-    from app.bridge.routes_config import handle_config_snapshots_get
+    from app.bridge.routes_config import (
+        handle_config_revert,
+        handle_config_snapshots_get,
+    )
 except ImportError:
-    from routes_config import handle_config_snapshots_get  # type: ignore
+    from routes_config import (  # type: ignore
+        handle_config_revert,
+        handle_config_snapshots_get,
+    )
 try:
     from app.bridge.clean_ai import (
         build_agent_chat_reply_payload,
@@ -6517,17 +6523,15 @@ def build_handler(
                     return _json(self, code, payload)
 
                 if u.path == "/config/revert":
-                    snapshot_id = str(body.get("snapshot_id", "")).strip() or None
-                    out = _revert_snapshot(
-                        gateway, config_history, snapshot_id=snapshot_id
-                    )
-                    return _json(
-                        self,
-                        200,
-                        build_revert_control_payload(
-                            revert=out, control=control.snapshot()
+                    code, payload = handle_config_revert(
+                        body=body,
+                        revert_snapshot_fn=lambda snapshot_id: _revert_snapshot(
+                            gateway, config_history, snapshot_id=snapshot_id
                         ),
+                        control_snapshot=control.snapshot(),
+                        build_revert_control_payload_fn=build_revert_control_payload,
                     )
+                    return _json(self, code, payload)
 
                 if u.path == "/agent/file/upload":
                     code, payload = handle_agent_file_upload(

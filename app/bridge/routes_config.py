@@ -25,3 +25,22 @@ def handle_config_snapshots_get(
     return 200, build_snapshots_payload(
         snapshots=config_history.list_snapshots(limit=limit)
     )
+
+
+def handle_config_revert(
+    *,
+    body: Dict[str, Any],
+    revert_snapshot_fn: Callable[..., Dict[str, Any]],
+    control_snapshot: Dict[str, Any],
+    build_revert_control_payload_fn: Callable[..., Dict[str, Any]],
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handle /config/revert POST request.
+
+    Returns (status_code, payload).
+    """
+    snapshot_id = str(body.get("snapshot_id", "")).strip() or None
+    out = revert_snapshot_fn(snapshot_id=snapshot_id)
+    return 200, build_revert_control_payload_fn(
+        revert=out, control=control_snapshot
+    )
